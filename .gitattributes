@@ -1,0 +1,2 @@
+# Frozen design exports are reference artifacts, not source diffs.
+docs/design/*.html binary

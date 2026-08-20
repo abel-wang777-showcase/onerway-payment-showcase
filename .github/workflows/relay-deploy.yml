@@ -1,0 +1,71 @@
+name: Deploy Webhook Relay
+
+on:
+  workflow_call:
+    inputs:
+      expected_sha:
+        description: Exact main revision approved by CI
+        required: true
+        type: string
+    secrets:
+      CLOUDFLARE_ACCOUNT_ID:
+        required: true
+      CLOUDFLARE_API_TOKEN:
+        required: true
+permissions:
+  contents: read
+
+concurrency:
+  group: relay-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Cloudflare Pages (exact main)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CI: true
+      EXPECTED_SHA: ${{ inputs.expected_sha }}
+    steps:
+      - name: Checkout exact revision
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ env.EXPECTED_SHA }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify checkout revision
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22.22.0
+          cache: pnpm
+
+      - name: Install frozen dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Resolve current main revision
+        id: main
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: echo "sha=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq '.object.sha')" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy exact main revision
+        run: pnpm deploy:relay:pages
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          RELAY_MAIN_SHA: ${{ steps.main.outputs.sha }}
+
+      - name: Verify public Relay route boundary
+        shell: bash
+        run: |
+          status="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
+            https://onerway-showcase-relay.pages.dev/onerway/payment)"
+          test "$status" = "404"

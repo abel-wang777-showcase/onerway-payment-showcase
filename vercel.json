@@ -1,0 +1,10 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "buildCommand": "pnpm build:vercel",
+  "crons": [
+    {
+      "path": "/api/internal/payments/cleanup",
+      "schedule": "17 3 * * *"
+    }
+  ]
+}

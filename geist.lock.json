@@ -1,0 +1,73 @@
+{
+  "lockVersion": 1,
+  "registry": {
+    "name": "geist-nuxt",
+    "repository": "https://github.com/abel-2333-org/geist-nuxt.git",
+    "lastSourceSha": "81464cbcf82813181a49043c5437a25eb8e12d45",
+    "compatibility": {
+      "nuxt": ">=4.4.0 <5",
+      "nuxtUi": ">=4.9.0 <5",
+      "tailwindcss": ">=4.3.0 <5"
+    },
+    "externalRequirements": {
+      "packages": {
+        "@iconify-json/lucide": "^1.2.116",
+        "@nuxt/ui": ">=4.9.0 <5",
+        "@vueuse/core": "^14.3.0",
+        "nuxt": ">=4.4.0 <5",
+        "tailwindcss": ">=4.3.0 <5",
+        "vue": "^3.5.39",
+        "vue-router": "^5.1.0"
+      },
+      "consumerSetup": [
+        "Wrap the application in UApp.",
+        "Merge the default export from app/config/foundation/app.ts into the consumer app/app.config.ts.",
+        "Merge the default export from app/config/foundation/nuxt.ts into the consumer nuxt.config.ts.",
+        "Use the copied app/assets/css/main.css as the Tailwind, Nuxt UI, and design foundation entry.",
+        "Keep consumer-specific CSS overrides after the foundation declarations in app/assets/css/main.css.",
+        "Keep Nuxt color mode enabled through @nuxt/ui."
+      ]
+    }
+  },
+  "requestedItems": [
+    "geist-foundation"
+  ],
+  "items": {
+    "geist-foundation": {
+      "sourceSha": "81464cbcf82813181a49043c5437a25eb8e12d45",
+      "registryDependencies": [],
+      "packageDependencies": {},
+      "files": [
+        "app/assets/css/main.css",
+        "app/config/foundation/nuxt.ts",
+        "app/config/foundation/app.ts"
+      ]
+    }
+  },
+  "files": {
+    "app/assets/css/main.css": {
+      "item": "geist-foundation",
+      "source": "foundation/assets/css/main.css",
+      "target": "app/assets/css/main.css",
+      "sourceSha": "81464cbcf82813181a49043c5437a25eb8e12d45",
+      "sourceHash": "f0e33cc70e4c0b23ee110d7d91930f37f0a05166f61fc9880fda34b76ea7bf7b",
+      "targetHash": "f0e33cc70e4c0b23ee110d7d91930f37f0a05166f61fc9880fda34b76ea7bf7b"
+    },
+    "app/config/foundation/nuxt.ts": {
+      "item": "geist-foundation",
+      "source": "foundation/config/nuxt.ts",
+      "target": "app/config/foundation/nuxt.ts",
+      "sourceSha": "81464cbcf82813181a49043c5437a25eb8e12d45",
+      "sourceHash": "906485117badc3b63b9e87fde562af690b44f7b9675aad80894476e07c5cb0b4",
+      "targetHash": "906485117badc3b63b9e87fde562af690b44f7b9675aad80894476e07c5cb0b4"
+    },
+    "app/config/foundation/app.ts": {
+      "item": "geist-foundation",
+      "source": "foundation/config/app.ts",
+      "target": "app/config/foundation/app.ts",
+      "sourceSha": "81464cbcf82813181a49043c5437a25eb8e12d45",
+      "sourceHash": "baca97fac9f6fd1b33d0469689c56e9b00d161774c500bdf4694f80a8abb2a5b",
+      "targetHash": "baca97fac9f6fd1b33d0469689c56e9b00d161774c500bdf4694f80a8abb2a5b"
+    }
+  }
+}

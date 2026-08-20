@@ -1,0 +1,30 @@
+@import "@fontsource/geist/latin-400.css";
+@import "@fontsource/geist/latin-500.css";
+@import "@fontsource/geist/latin-600.css";
+@import "@fontsource/geist/latin-700.css";
+@import "@fontsource/geist-mono/latin-400.css";
+@import "@fontsource/geist-mono/latin-500.css";
+@import "@fontsource/geist-mono/latin-600.css";
+@import "@fontsource/geist-mono/latin-700.css";
+
+/*
+ * Consumer-owned styles belong here.
+ * Keep registry-managed foundation styles in main.css unchanged.
+ */
+
+.demo-passport {
+  background:
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--ui-primary) 10%, var(--ui-bg)) 0%,
+      var(--ui-bg-elevated) 72%
+    );
+}
+
+.halden-shell {
+  --ui-primary: #a8324a;
+}
+
+.dark .halden-shell {
+  --ui-primary: #db7089;
+}

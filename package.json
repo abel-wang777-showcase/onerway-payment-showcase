@@ -1,0 +1,59 @@
+{
+  "name": "onerway-payment-showcase",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.34.5",
+  "engines": {
+    "node": ">=22.18.0 <23",
+    "pnpm": ">=10 <11"
+  },
+  "scripts": {
+    "dev": "nuxt dev --dotenv .env.local",
+    "build": "nuxt build",
+    "prebuild:vercel": "node scripts/migrate.mjs --vercel-gate",
+    "build:vercel": "nuxt build",
+    "preview": "nuxt preview --dotenv .env.local",
+    "db:migrate": "node --env-file-if-exists=.env.local scripts/migrate.mjs",
+    "postinstall": "nuxt prepare",
+    "lint": "eslint . --max-warnings=0",
+    "typecheck": "nuxt typecheck",
+    "test": "vitest run && pnpm test:vue",
+    "test:e2e": "playwright test",
+    "deploy:relay:pages": "node scripts/relay.mjs",
+    "test:vue": "vitest --config vitest.nuxt.config.ts run",
+    "test:db": "node --env-file-if-exists=.env.local scripts/test-db.mjs"
+  },
+  "dependencies": {
+    "@fontsource/geist": "5.3.0",
+    "@fontsource/geist-mono": "5.3.0",
+    "@iconify-json/lucide": "^1.2.116",
+    "@neondatabase/serverless": "^1.1.0",
+    "@nuxt/ui": "^4.9.0",
+    "@vueuse/core": "^14.3.0",
+    "h3": "^1.15.11",
+    "nuxt": "4.4.8",
+    "tailwindcss": "^4.3.2",
+    "vue": "^3.5.39",
+    "vue-router": "^5.1.0"
+  },
+  "devDependencies": {
+    "@nuxt/eslint": "^1.16.0",
+    "@nuxt/test-utils": "^4.1.0",
+    "@playwright/test": "^1.62.1",
+    "@types/node": "^22.20.0",
+    "@vue/test-utils": "^2.4.11",
+    "eslint": "^10.8.0",
+    "happy-dom": "^20.11.2",
+    "typescript": "~5.9.0",
+    "vitest": "^4.1.10",
+    "vue-tsc": "^3.3.6",
+    "wrangler": "4.92.0"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "@parcel/watcher",
+      "esbuild",
+      "vue-demi"
+    ]
+  }
+}

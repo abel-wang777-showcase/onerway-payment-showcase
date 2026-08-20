@@ -1,0 +1,21 @@
+# Dependencies and Nuxt output
+node_modules
+.nuxt
+.output
+.data
+.cache
+dist
+coverage
+.playwright-cli
+
+# Local and deployed environment files
+.env
+.env.*
+!.env.example
+.vercel
+
+# Logs and editor files
+*.log
+.DS_Store
+.idea
+.vscode
