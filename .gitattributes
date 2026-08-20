@@ -1,2 +1,3 @@
 # Frozen design exports are reference artifacts, not source diffs.
 docs/design/*.html binary
+public/.well-known/apple-developer-merchantid-domain-association.txt binary
