@@ -280,7 +280,7 @@ describe('subscription query route', () => {
       orderId: 'order-1',
       paymentId: 'payment-1',
       transactionId: queried.transactionId,
-      method: 'apple-pay',
+      method: 'google-pay',
       status: 'succeeded',
     }
     mocks.queryPayment.mockResolvedValue(queried)
@@ -290,7 +290,7 @@ describe('subscription query route', () => {
     })
     mocks.enrichDirectPaymentMethod.mockResolvedValue({
       ...recordedAttempt,
-      actualWallet: 'apple-pay',
+      actualWallet: 'google-pay',
       fundingNetwork: 'VISA',
     })
     mocks.getSubscriptionForAttempt.mockResolvedValue(null)
@@ -302,8 +302,8 @@ describe('subscription query route', () => {
 
     expect(mocks.recordQueryEvent).toHaveBeenCalledBefore(mocks.enrichDirectPaymentMethod)
     expect(result.attempt).toMatchObject({
-      method: 'apple-pay',
-      actualWallet: 'apple-pay',
+      method: 'google-pay',
+      actualWallet: 'google-pay',
       fundingNetwork: 'VISA',
     })
   })
