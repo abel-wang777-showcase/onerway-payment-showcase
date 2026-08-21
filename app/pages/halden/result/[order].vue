@@ -5,7 +5,10 @@ import {
   type DemoSession,
 } from '#shared/demo/session'
 import { findProjectionEvent } from '#shared/payment/merge'
-import { getRetryDecision } from '#shared/payment/attempt'
+import {
+  getRetryDecision,
+  hasCompletePaymentMethodAttribution,
+} from '#shared/payment/attempt'
 import {
   isPaymentRestorationAction,
   type PaymentAction,
@@ -328,7 +331,7 @@ onMounted(async () => {
       !isTerminalStatus(sdk.value.attempt.status)
       || (
         !contract.value
-        && !sdk.value.attempt.attributionTransactionId
+        && !hasCompletePaymentMethodAttribution(sdk.value.attempt)
       )
     ),
   )

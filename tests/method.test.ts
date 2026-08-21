@@ -91,6 +91,46 @@ describe('server payment method enrichment', () => {
     expect(mocks.queryPaymentMethod).not.toHaveBeenCalled()
   })
 
+  it.each([
+    {
+      label: 'wallet-only',
+      partial: { actualWallet: 'apple-pay' as const },
+    },
+    {
+      label: 'funding-only',
+      partial: { fundingNetwork: 'VISA' },
+    },
+  ])('queries again when Apple Pay attribution is $label', async ({ partial }) => {
+    const details = {
+      paymentId: attempt.paymentId,
+      transactionId: attempt.transactionId,
+      actualWallet: 'apple-pay' as const,
+      fundingNetwork: 'VISA',
+    }
+    const partialAttempt = {
+      ...attempt,
+      method: 'apple-pay' as const,
+      ...partial,
+      attributionTransactionId: attempt.transactionId,
+    }
+    const enriched = { ...partialAttempt, ...details }
+    mocks.queryPaymentMethod.mockResolvedValue(details)
+    mocks.recordPaymentMethodDetails.mockResolvedValue(enriched)
+
+    const { enrichDirectPaymentMethod } = await import('../server/utils/method')
+    await expect(enrichDirectPaymentMethod(
+      profile as never,
+      partialAttempt,
+      attempt.transactionId,
+      '2026-08-21T00:00:01.000Z',
+    )).resolves.toEqual(enriched)
+    expect(mocks.queryPaymentMethod).toHaveBeenCalledWith(
+      profile,
+      attempt.paymentId,
+      attempt.transactionId,
+    )
+  })
+
   it('queries again when a fresh payment query advances the transaction', async () => {
     const details = {
       paymentId: attempt.paymentId,

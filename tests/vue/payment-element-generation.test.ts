@@ -99,6 +99,35 @@ describe('payment Element generation', () => {
     expect(wrapper.get('output').text()).toBe('1')
   })
 
+  it('explains that Apple Pay eligibility and its button stay SDK-owned', async () => {
+    const element = {
+      mount: vi.fn(),
+      on: vi.fn(),
+      off: vi.fn(),
+    }
+    const checkout = {
+      createPaymentElement: vi.fn(() => element),
+      confirmPayment: vi.fn(),
+      on: vi.fn(),
+      off: vi.fn(),
+    }
+    sdk.load.mockResolvedValue({ createCheckout: vi.fn().mockResolvedValue(checkout) })
+
+    const wrapper = await mountSuspended(PaymentElement, {
+      props: {
+        paymentId: 'payment-apple',
+        url: 'https://sdk.test/v4.js',
+        generation: 0,
+        expectedMethod: 'apple-pay',
+      },
+    })
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('Onerway Sandbox SDK owns Apple Pay eligibility')
+    expect(wrapper.text()).toContain('does not replace it with a merchant-made button')
+    expect(checkout.on).toHaveBeenCalledWith('payment_result', expect.any(Function))
+  })
+
   it('ignores queued events from a previous paymentId with the same generation', async () => {
     const ready: Array<() => void> = []
     const error: Array<() => void> = []

@@ -215,6 +215,13 @@ const selectedCapability = computed(() => getCapability(
   selection.value.integration,
   selection.value.method,
 ))
+const selectedWalletLabel = computed(() => {
+  const method = selection.value.method
+
+  return method === 'google-pay' || method === 'apple-pay'
+    ? methodLabels[method]
+    : null
+})
 const canStartSimulation = computed(() =>
   billingMode.value === 'payment'
   && selection.value.method === journey.value.method
@@ -254,8 +261,8 @@ const sdkLabel = computed(() => {
     return 'Real Sandbox unavailable for this fixture'
   }
 
-  if (selection.value.method === 'google-pay') {
-    return 'Open Google Pay Sandbox acceptance'
+  if (selectedWalletLabel.value) {
+    return `Open ${selectedWalletLabel.value} Sandbox`
   }
 
   return journeyId.value === 'three-ds-success'
@@ -426,10 +433,10 @@ watch(() => selection.value.method, (method) => {
             @click="startSandbox"
           />
           <p
-            v-if="billingMode === 'payment' && selection.method === 'google-pay'"
+            v-if="billingMode === 'payment' && selectedWalletLabel"
             class="mt-3 text-xs leading-relaxed text-toned"
           >
-            Google Pay remains Conditional until the Onerway SDK renders its own eligible wallet button. Card stays available in the same aggregated checkout; the result records what was actually used.
+            {{ selectedWalletLabel }} remains Conditional until the Onerway SDK renders its own eligible wallet button. Card stays available in the same aggregated checkout; the result records what was actually used.
           </p>
           <SubscriptionLaunchActions
             v-if="billingMode === 'subscription'"

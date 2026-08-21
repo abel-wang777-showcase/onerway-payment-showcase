@@ -122,42 +122,48 @@ describe('payment intent route', () => {
     )
   })
 
-  it('records Google Pay as the expected method while reusing the standard DIRECT fixture', async () => {
-    vi.stubGlobal('readBody', vi.fn().mockResolvedValue({
-      journeyId: 'standard-success',
-      method: 'google-pay',
-      restart: true,
-    }))
+  it.each(['google-pay', 'apple-pay'] as const)(
+    'records %s as the expected method while reusing the standard DIRECT fixture',
+    async (method) => {
+      vi.stubGlobal('readBody', vi.fn().mockResolvedValue({
+        journeyId: 'standard-success',
+        method,
+        restart: true,
+      }))
 
-    const { default: handler } = await import('../server/api/payment/intent.post')
-    await (handler as (event: unknown) => Promise<unknown>)({})
+      const { default: handler } = await import('../server/api/payment/intent.post')
+      await (handler as (event: unknown) => Promise<unknown>)({})
 
-    expect(mocks.createPaymentRecord).toHaveBeenCalledWith(
-      expect.objectContaining({
-        amount: { minor: 500, currency: 'USD' },
-        item: expect.objectContaining({ sku: 'HL-SAMPLE-005' }),
-      }),
-      expect.objectContaining({
-        integration: 'web-js-sdk',
-        method: 'google-pay',
-      }),
-      expect.anything(),
-    )
-  })
+      expect(mocks.createPaymentRecord).toHaveBeenCalledWith(
+        expect.objectContaining({
+          amount: { minor: 500, currency: 'USD' },
+          item: expect.objectContaining({ sku: 'HL-SAMPLE-005' }),
+        }),
+        expect.objectContaining({
+          integration: 'web-js-sdk',
+          method,
+        }),
+        expect.anything(),
+      )
+    },
+  )
 
-  it('rejects Google Pay for journeys outside its server allowlist', async () => {
-    vi.stubGlobal('readBody', vi.fn().mockResolvedValue({
-      journeyId: 'three-ds-success',
-      method: 'google-pay',
-      restart: true,
-    }))
+  it.each(['google-pay', 'apple-pay'] as const)(
+    'rejects %s for journeys outside its server allowlist',
+    async (method) => {
+      vi.stubGlobal('readBody', vi.fn().mockResolvedValue({
+        journeyId: 'three-ds-success',
+        method,
+        restart: true,
+      }))
 
-    const { default: handler } = await import('../server/api/payment/intent.post')
+      const { default: handler } = await import('../server/api/payment/intent.post')
 
-    await expect((handler as (event: unknown) => Promise<unknown>)({}))
-      .rejects.toMatchObject({ statusCode: 400, statusMessage: 'PAYMENT_JOURNEY_UNAVAILABLE' })
-    expect(mocks.createPaymentRecord).not.toHaveBeenCalled()
-  })
+      await expect((handler as (event: unknown) => Promise<unknown>)({}))
+        .rejects.toMatchObject({ statusCode: 400, statusMessage: 'PAYMENT_JOURNEY_UNAVAILABLE' })
+      expect(mocks.createPaymentRecord).not.toHaveBeenCalled()
+    },
+  )
 
   it('atomically establishes a customer before restarting a legacy order', async () => {
     mocks.getPaymentRecovery.mockResolvedValueOnce({

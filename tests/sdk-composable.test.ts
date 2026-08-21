@@ -708,33 +708,36 @@ describe('SDK composable lifecycle', () => {
     expect(navigate).toHaveBeenCalledWith('/halden/sdk/order-1')
   })
 
-  it('sends the server-validated expected method for the shared Google Pay fixture', async () => {
-    const state = new Map<string, { value: unknown }>()
-    const response = created()
-    const fetch = vi.fn()
-      .mockResolvedValueOnce({ orderId: 'order-1', create: true })
-      .mockResolvedValueOnce({
-        ...response,
-        attempt: { ...response.attempt, method: 'google-pay' },
+  it.each(['google-pay', 'apple-pay'] as const)(
+    'sends the server-validated expected method for the shared %s fixture',
+    async (method) => {
+      const state = new Map<string, { value: unknown }>()
+      const response = created()
+      const fetch = vi.fn()
+        .mockResolvedValueOnce({ orderId: 'order-1', create: true })
+        .mockResolvedValueOnce({
+          ...response,
+          attempt: { ...response.attempt, method },
+        })
+
+      stubState(state)
+      vi.stubGlobal('onScopeDispose', vi.fn())
+      vi.stubGlobal('$fetch', fetch)
+      vi.stubGlobal('navigateTo', vi.fn())
+      vi.stubGlobal('navigator', browserNavigator())
+      vi.stubGlobal('screen', { colorDepth: 24, height: 900, width: 1440 })
+      vi.stubGlobal('document', { documentElement: { outerHTML: '<html></html>' } })
+
+      const { useSdk } = await import('../app/composables/useSdk')
+      await useSdk().start('standard-success', true, method)
+
+      expect(fetch).toHaveBeenNthCalledWith(1, '/api/payment/intent', {
+        method: 'POST',
+        body: { journeyId: 'standard-success', method, restart: true },
       })
-
-    stubState(state)
-    vi.stubGlobal('onScopeDispose', vi.fn())
-    vi.stubGlobal('$fetch', fetch)
-    vi.stubGlobal('navigateTo', vi.fn())
-    vi.stubGlobal('navigator', browserNavigator())
-    vi.stubGlobal('screen', { colorDepth: 24, height: 900, width: 1440 })
-    vi.stubGlobal('document', { documentElement: { outerHTML: '<html></html>' } })
-
-    const { useSdk } = await import('../app/composables/useSdk')
-    await useSdk().start('standard-success', true, 'google-pay')
-
-    expect(fetch).toHaveBeenNthCalledWith(1, '/api/payment/intent', {
-      method: 'POST',
-      body: { journeyId: 'standard-success', method: 'google-pay', restart: true },
-    })
-    expect((state.get('sdk-session')?.value as SdkSession).attempt.method).toBe('google-pay')
-  })
+      expect((state.get('sdk-session')?.value as SdkSession).attempt.method).toBe(method)
+    },
+  )
 
   it('fails closed before creating an intent when cross-tab locking is unavailable', async () => {
     const state = new Map<string, { value: unknown }>()
@@ -787,18 +790,21 @@ describe('SDK composable lifecycle', () => {
     expect(navigate).toHaveBeenCalledWith('/halden/result/order-1', { replace: true })
   })
 
-  it('retries missing terminal method attribution with a fresh payment query', async () => {
+  it('retries partial terminal Apple Pay attribution with a fresh payment query', async () => {
     const base = session()
     const terminalAttempt = {
       ...base.attempt,
       status: 'succeeded' as const,
       statusSource: 'query' as const,
+      method: 'apple-pay' as const,
       transactionId: '9000000000000000002',
+      actualWallet: 'apple-pay' as const,
+      attributionTransactionId: '9000000000000000002',
     }
     const current = { ...base, attempt: terminalAttempt, attempts: [terminalAttempt] }
     const attributedAttempt = {
       ...terminalAttempt,
-      actualWallet: 'google-pay' as const,
+      actualWallet: 'apple-pay' as const,
       fundingNetwork: 'VISA',
       attributionTransactionId: terminalAttempt.transactionId,
     }
@@ -825,7 +831,7 @@ describe('SDK composable lifecycle', () => {
       body: expect.objectContaining({ attemptId: 'attempt-1', paymentId: 'payment-1' }),
     }))
     expect((state.get('sdk-session')?.value as SdkSession).attempt).toMatchObject({
-      actualWallet: 'google-pay',
+      actualWallet: 'apple-pay',
       fundingNetwork: 'VISA',
       attributionTransactionId: '9000000000000000002',
     })
@@ -1529,9 +1535,11 @@ describe('SDK composable lifecycle', () => {
     expect(fetch).toHaveBeenCalledOnce()
   })
 
-  it('accepts payment_result directly for an SDK-owned payment button', async () => {
+  it('accepts payment_result directly for an SDK-owned Apple Pay button', async () => {
+    const current = session()
+    const attempt = { ...current.attempt, method: 'apple-pay' as const }
     const state = new Map<string, { value: unknown }>([
-      ['sdk-session', { value: session() }],
+      ['sdk-session', { value: { ...current, attempt, attempts: [attempt] } }],
       ['sdk-stage', { value: 'ready' }],
     ])
     const fetch = vi.fn().mockResolvedValueOnce(queried('succeeded', 'S'))
@@ -1547,7 +1555,7 @@ describe('SDK composable lifecycle', () => {
     const sdk = useSdk()
     await sdk.acceptResult({
       paymentId: 'payment-1',
-      paymentMethod: 'GooglePay',
+      paymentMethod: 'ApplePay',
       paymentStatus: 'S',
     })
 
@@ -1559,6 +1567,48 @@ describe('SDK composable lifecycle', () => {
     }))
     expect(state.get('sdk-stage')?.value).toBe('succeeded')
     expect(navigate).toHaveBeenCalledWith('/halden/result/order-1', { replace: true })
+  })
+
+  it('accepts a second SDK-owned result after cancellation on the same Checkout', async () => {
+    const current = session()
+    const attempt = { ...current.attempt, method: 'apple-pay' as const }
+    const state = new Map<string, { value: unknown }>([
+      ['sdk-session', { value: { ...current, attempt, attempts: [attempt] } }],
+      ['sdk-stage', { value: 'ready' }],
+    ])
+    const fetch = vi.fn().mockResolvedValueOnce(queried('succeeded', 'S'))
+
+    stubState(state)
+    vi.stubGlobal('onScopeDispose', vi.fn())
+    vi.stubGlobal('$fetch', fetch)
+    vi.stubGlobal('navigateTo', vi.fn())
+    vi.stubGlobal('crypto', { randomUUID: () => 'event-client-apple-retry' })
+
+    const { useSdk } = await import('../app/composables/useSdk')
+    const sdk = useSdk()
+
+    await sdk.acceptResult({
+      paymentId: 'payment-1',
+      paymentMethod: 'ApplePay',
+      reason: { type: 'canceled', code: 'presenter_closed' },
+    })
+
+    expect(state.get('sdk-stage')?.value).toBe('ready')
+    expect((state.get('sdk-session')?.value as SdkSession).events).toHaveLength(0)
+    expect(fetch).not.toHaveBeenCalled()
+
+    await sdk.acceptResult({
+      paymentId: 'payment-1',
+      paymentMethod: 'ApplePay',
+      paymentStatus: 'S',
+    })
+
+    expect(fetch).toHaveBeenCalledOnce()
+    expect((state.get('sdk-session')?.value as SdkSession).events).toEqual([
+      expect.objectContaining({ source: 'client', status: 'processing', rawStatus: 'S' }),
+      expect.objectContaining({ source: 'query', status: 'succeeded', rawStatus: 'S' }),
+    ])
+    expect(state.get('sdk-stage')?.value).toBe('succeeded')
   })
 
   it('shows a sanitized SDK diagnostic without inventing processing', async () => {

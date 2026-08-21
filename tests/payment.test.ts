@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   createAttempt,
   getRetryDecision,
+  hasCompletePaymentMethodAttribution,
   setAttemptStatus,
 } from '../shared/payment/attempt'
 import {
@@ -54,14 +55,14 @@ describe('capability matrix', () => {
     const wallet = getCapability('ecommerce', 'web-js-sdk', 'apple-pay')
 
     expect(wallet.status).toBe('conditional')
-    expect(wallet.runnable).toBe(false)
+    expect(wallet.runnable).toBe(true)
     expect(wallet.condition).toContain('supported Apple device')
     expect(getCapability('ecommerce', 'web-js-sdk', 'google-pay')).toMatchObject({
       status: 'conditional',
       runnable: true,
     })
     expect(isRunnable('ecommerce', 'web-js-sdk', 'google-pay')).toBe(true)
-    expect(isRunnable('ecommerce', 'web-js-sdk', 'apple-pay')).toBe(false)
+    expect(isRunnable('ecommerce', 'web-js-sdk', 'apple-pay')).toBe(true)
     expect(CAPABILITIES.some(item => item.status === 'unavailable')).toBe(false)
   })
 })
@@ -180,6 +181,39 @@ describe('payment model', () => {
     expect(merged.attempt.actualWallet).toBeUndefined()
     expect(merged.attempt.fundingNetwork).toBeUndefined()
     expect(merged.attempt.attributionTransactionId).toBeUndefined()
+  })
+
+  it('requires wallet and funding facts for complete wallet attribution', () => {
+    const base = {
+      ...createAttempt({
+        id: 'attempt-apple',
+        orderId: 'order-apple',
+        integration: 'web-js-sdk' as const,
+        method: 'apple-pay' as const,
+        createdAt: '2026-08-21T00:00:00.000Z',
+      }),
+      transactionId: '9000000000000000002',
+      attributionTransactionId: '9000000000000000002',
+    }
+
+    expect(hasCompletePaymentMethodAttribution({
+      ...base,
+      actualWallet: 'apple-pay',
+    })).toBe(false)
+    expect(hasCompletePaymentMethodAttribution({
+      ...base,
+      fundingNetwork: 'VISA',
+    })).toBe(false)
+    expect(hasCompletePaymentMethodAttribution({
+      ...base,
+      actualWallet: 'apple-pay',
+      fundingNetwork: 'VISA',
+    })).toBe(true)
+    expect(hasCompletePaymentMethodAttribution({
+      ...base,
+      method: 'card',
+      fundingNetwork: 'VISA',
+    })).toBe(true)
   })
 
   it('keeps SDK results non-final and discards raw provider data', () => {

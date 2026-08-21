@@ -4,6 +4,7 @@ import type { PaymentMethodId } from '#shared/payment/capability'
 import type { SubscriptionPlanId, SubscriptionSummary } from '#shared/payment/subscription'
 import {
   getRetryDecision,
+  hasCompletePaymentMethodAttribution,
   setAttemptStatus,
   type PaymentAttempt,
 } from '#shared/payment/attempt'
@@ -880,7 +881,7 @@ export function useSdk() {
       started
       && isTerminalStatus(started.attempt.status)
       && subscription.value === null
-      && !started.attempt.attributionTransactionId,
+      && !hasCompletePaymentMethodAttribution(started.attempt),
     )
 
     if (
@@ -1036,6 +1037,7 @@ export function useSdk() {
       try {
         if (result.cancelled) {
           resubmitAttempt = current.attempt.id
+          resultAttempt.value = null
           submittedAttempt.value = null
           stage.value = 'ready'
           setNotice('The payment step was closed. You can try again with this existing payment.')

@@ -484,7 +484,7 @@ describe('Neon payment persistence integration', () => {
       id: attemptId,
       orderId,
       integration: 'web-js-sdk',
-      method: 'google-pay',
+      method: 'apple-pay',
       merchantTxnId,
       createdAt: now,
     })
@@ -524,24 +524,34 @@ describe('Neon payment persistence integration', () => {
       }
       const first = await recordQueryEvent(attemptId, paymentId, query, now)
       const duplicate = await recordQueryEvent(attemptId, paymentId, query, now)
+      const partialAttribution = await recordPaymentMethodDetails(attemptId, paymentId, {
+        paymentId,
+        transactionId: webhookTransactionId,
+        actualWallet: 'apple-pay',
+      }, now)
       const attributed = await recordPaymentMethodDetails(attemptId, paymentId, {
         paymentId,
         transactionId: webhookTransactionId,
-        actualWallet: 'google-pay',
         fundingNetwork: 'VISA',
       }, now)
       const duplicateAttribution = await recordPaymentMethodDetails(attemptId, paymentId, {
         paymentId,
         transactionId: webhookTransactionId,
-        actualWallet: 'google-pay',
+        actualWallet: 'apple-pay',
         fundingNetwork: 'VISA',
       }, now)
 
       expect(first.duplicate).toBe(false)
       expect(duplicate.duplicate).toBe(true)
+      expect(partialAttribution).toMatchObject({
+        method: 'apple-pay',
+        actualWallet: 'apple-pay',
+        attributionTransactionId: webhookTransactionId,
+      })
+      expect(partialAttribution.fundingNetwork).toBeUndefined()
       expect(attributed).toMatchObject({
-        method: 'google-pay',
-        actualWallet: 'google-pay',
+        method: 'apple-pay',
+        actualWallet: 'apple-pay',
         fundingNetwork: 'VISA',
         attributionTransactionId: webhookTransactionId,
       })
@@ -549,7 +559,7 @@ describe('Neon payment persistence integration', () => {
       await expect(recordPaymentMethodDetails(attemptId, paymentId, {
         paymentId,
         transactionId: webhookTransactionId,
-        actualWallet: 'apple-pay',
+        actualWallet: 'google-pay',
         fundingNetwork: 'MASTERCARD',
       }, now)).rejects.toMatchObject({ code: 'PAYMENT_ATTEMPT_MISMATCH' })
 
@@ -586,7 +596,7 @@ describe('Neon payment persistence integration', () => {
       expect(timeline?.attempt.status).toBe('succeeded')
       expect(timeline?.attempt.statusSource).toBe('query')
       expect(timeline?.attempt).toMatchObject({
-        method: 'google-pay',
+        method: 'apple-pay',
         fundingNetwork: 'MASTERCARD',
         attributionTransactionId: nextTransactionId,
       })
