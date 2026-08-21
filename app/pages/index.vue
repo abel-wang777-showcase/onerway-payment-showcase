@@ -249,6 +249,7 @@ const canStartSeparateSandboxOrder = computed(() =>
   && supportsSandboxMethod(journey.value, selection.value.method),
 )
 const launching = computed(() => sdkStage.value === 'creating')
+const separateSandboxOrderPending = computed(() => launching.value || sdkRestoring.value)
 const sdkLabel = computed(() => {
   if (canonicalSandboxHref.value) {
     return 'Continue on canonical Production'
@@ -302,7 +303,7 @@ async function startSandbox(): Promise<void> {
 }
 
 async function startSeparateSandboxOrder(): Promise<void> {
-  if (canStartSeparateSandboxOrder.value && !launching.value) {
+  if (canStartSeparateSandboxOrder.value && !separateSandboxOrderPending.value) {
     await startSdk(journeyId.value, true, selection.value.method)
   }
 }
@@ -456,7 +457,7 @@ watch(() => selection.value.method, (method) => {
             size="lg"
             block
             class="mt-2 min-h-11"
-            :disabled="launching"
+            :disabled="separateSandboxOrderPending"
             @click="startSeparateSandboxOrder"
           />
           <p
