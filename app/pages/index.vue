@@ -239,7 +239,17 @@ const canStartSdk = computed(() =>
     )
   ),
 )
+const canStartSeparateSandboxOrder = computed(() =>
+  billingMode.value === 'payment'
+  && restoringSdk.value
+  && !canonicalSandboxHref.value
+  && profile.value?.profile === 'sandbox'
+  && profile.value.sdk?.release === 'v4/latest'
+  && selectedCapability.value.runnable
+  && supportsSandboxMethod(journey.value, selection.value.method),
+)
 const launching = computed(() => sdkStage.value === 'creating')
+const separateSandboxOrderPending = computed(() => launching.value || sdkRestoring.value)
 const sdkLabel = computed(() => {
   if (canonicalSandboxHref.value) {
     return 'Continue on canonical Production'
@@ -289,6 +299,12 @@ async function startSandbox(): Promise<void> {
     else {
       await startSdk(journeyId.value, true, selection.value.method)
     }
+  }
+}
+
+async function startSeparateSandboxOrder(): Promise<void> {
+  if (canStartSeparateSandboxOrder.value && !separateSandboxOrderPending.value) {
+    await startSdk(journeyId.value, true, selection.value.method)
   }
 }
 
@@ -432,6 +448,24 @@ watch(() => selection.value.method, (method) => {
             :loading="launching"
             @click="startSandbox"
           />
+          <UButton
+            v-if="canStartSeparateSandboxOrder"
+            label="Start a Separate Sandbox Order"
+            trailing-icon="i-lucide-arrow-right"
+            color="neutral"
+            variant="ghost"
+            size="lg"
+            block
+            class="mt-2 min-h-11"
+            :disabled="separateSandboxOrderPending"
+            @click="startSeparateSandboxOrder"
+          />
+          <p
+            v-if="canStartSeparateSandboxOrder"
+            class="mt-2 text-xs leading-relaxed text-toned"
+          >
+            This creates a new Sandbox Order. The existing PaymentAttempt is not cancelled or overwritten and may still settle through Query or Webhook.
+          </p>
           <p
             v-if="billingMode === 'payment' && selectedWalletLabel"
             class="mt-3 text-xs leading-relaxed text-toned"

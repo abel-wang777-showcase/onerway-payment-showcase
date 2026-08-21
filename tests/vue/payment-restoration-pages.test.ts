@@ -688,6 +688,41 @@ describe('payment restoration pages', () => {
     expect(wrapper.get('[role="alert"]').text()).toContain('Sandbox restoration is still unavailable')
   })
 
+  it('starts a separate Sandbox order without replacing the original restoration action', async () => {
+    const failure = shallowRef<ReturnType<typeof getPaymentFailure> | null>(null)
+    const restoring = shallowRef(true)
+    const start = vi.fn()
+    const restore = vi.fn()
+    nuxt.useSdk.mockReturnValue(sdkState({ failure, restore, restoring, start }))
+
+    const wrapper = await mountSuspended(HubPage)
+    await flushPromises()
+    let buttons = wrapper.findAll('button')
+    let separateOrder = buttons.find(button => button.text().includes('Start a Separate Sandbox Order'))!
+
+    expect((separateOrder.element as HTMLButtonElement).disabled).toBe(true)
+    separateOrder.element.click()
+    expect(start).not.toHaveBeenCalled()
+
+    failure.value = getPaymentFailure('recovery', { status: 503 })
+    restoring.value = false
+    await nextTick()
+    buttons = wrapper.findAll('button')
+    const restoration = buttons.find(button => button.text().includes('Retry restoration'))
+    separateOrder = buttons.find(button => button.text().includes('Start a Separate Sandbox Order'))!
+
+    expect(restoration?.exists()).toBe(true)
+    expect(separateOrder?.exists()).toBe(true)
+    expect((separateOrder.element as HTMLButtonElement).disabled).toBe(false)
+    expect(wrapper.text()).toContain('The existing PaymentAttempt is not cancelled or overwritten')
+
+    separateOrder?.element.click()
+    await flushPromises()
+
+    expect(start).toHaveBeenCalledWith('standard-success', true, 'card')
+    expect(restore).not.toHaveBeenCalled()
+  })
+
   it('moves a Preview Sandbox start to canonical Production before create', async () => {
     const start = vi.fn()
     nuxt.useFetch.mockResolvedValue({
