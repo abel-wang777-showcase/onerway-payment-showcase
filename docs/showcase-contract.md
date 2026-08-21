@@ -201,6 +201,7 @@ Payment result Webhook 的 M0 契约已通过 2026-08-04 当前 Sandbox secret �
 
 - 验签从解析后的顶层字段中剔除 `originTransactionId`、`originMerchantTxnId`、`customsDeclarationAmount`、`customsDeclarationCurrency`、`paymentMethod`、`walletTypeName`、`periodValue`、`tokenExpireTime` 和 `sign`；其余非 `null`、非空字符串字段按字段名 ASCII 升序，只拼接 value，末尾追加当前 profile 的服务端 `secret`，计算小写 SHA-256，并使用 timing-safe comparison。
 - `reason`、`products`、`paymentMethodDetails` 等 JSON string 使用收到并由 JSON parser 解码后的字符串值参与验签；它们只在验签进程内短暂存在，不保存、不记录日志、不进入错误或诊断响应。
+- Webhook 拒绝日志只记录固定白名单错误码，用于区分 body、signature 与 fields 三类失败；不得记录原始 payload、字段名、字段值、签名或任何交易标识。
 - 当前新 API Reference source 把 `paymentMethod` / `walletTypeName` 标为参与签名，但真实 Sandbox 样本只命中上述排除矩阵；这是已知文档 drift。更换 secret、环境或 Provider 规则后必须重新做受控样本验证，不实现双规则兼容或验签降级。
 - 验签、商户号、`merchantTxnId`、`paymentId`、金额和币种关联全部通过，且 PaymentEvent 与 PaymentAttempt 在同一数据库事务中可靠提交后，才返回 HTTP 200、`text/plain`，响应体严格为收到的 `transactionId`。
 - Onerway 在首次通知失败后以 30 分钟间隔重试两次，最多在 T+0、T+30、T+60 投递三次；`transactionId` 是 Webhook PaymentEvent 的 provider 幂等键。
