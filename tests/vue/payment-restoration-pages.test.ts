@@ -416,8 +416,8 @@ describe('payment restoration pages', () => {
     const current = payment()
     const attempt = {
       ...current.attempt,
-      method: 'google-pay' as const,
-      actualWallet: 'google-pay' as const,
+      method: 'apple-pay' as const,
+      actualWallet: 'apple-pay' as const,
       fundingNetwork: 'VISA',
       transactionId: '9000000000000000002',
       attributionTransactionId: '9000000000000000002',
@@ -426,7 +426,7 @@ describe('payment restoration pages', () => {
       ...current,
       attempt,
       attempts: [attempt],
-      paymentMethod: 'GooglePay',
+      paymentMethod: 'ApplePay',
     })
     nuxt.useSdk.mockReturnValue(sdkState({ session }))
 
@@ -439,19 +439,19 @@ describe('payment restoration pages', () => {
     const text = wrapper.text()
     expect(text).toContain('expectedMethod')
     expect(text).toContain('actualWallet')
-    expect(text).toContain('Google Pay')
+    expect(text).toContain('Apple Pay')
     expect(text).toContain('fundingNetwork')
     expect(text).toContain('VISA')
     expect(text).toContain('server-side transaction query')
     expect(text).toContain('sdkCallbackMethod')
   })
 
-  it('labels wallet-only transaction attribution as server-verified', async () => {
+  it('retries wallet-only Apple Pay attribution before treating it as complete', async () => {
     const current = payment()
     const attempt = {
       ...current.attempt,
-      method: 'google-pay' as const,
-      actualWallet: 'google-pay' as const,
+      method: 'apple-pay' as const,
+      actualWallet: 'apple-pay' as const,
       attributionTransactionId: '9000000000000000002',
       transactionId: '9000000000000000002',
     }
@@ -460,7 +460,8 @@ describe('payment restoration pages', () => {
       attempt,
       attempts: [attempt],
     })
-    nuxt.useSdk.mockReturnValue(sdkState({ session }))
+    const verify = vi.fn()
+    nuxt.useSdk.mockReturnValue(sdkState({ session, verify }))
 
     const wrapper = await mountSuspended(ResultPage)
     await flushPromises()
@@ -468,8 +469,9 @@ describe('payment restoration pages', () => {
       ?.element.click()
     await flushPromises()
 
+    expect(verify).toHaveBeenCalledWith(1, false)
     expect(wrapper.text()).toContain('server-side transaction query')
-    expect(wrapper.text()).toContain('Google Pay')
+    expect(wrapper.text()).toContain('Apple Pay')
   })
 
   it('keeps DIRECT method attribution out of subscription checkout and result UI', async () => {
@@ -525,7 +527,7 @@ describe('payment restoration pages', () => {
   it('routes Element events only for the current paymentId and generation', async () => {
     const current = payment('processing')
     const { submissionStartedAt: _submissionStartedAt, ...baseAttempt } = current.attempt
-    const attempt = { ...baseAttempt, method: 'google-pay' as const }
+    const attempt = { ...baseAttempt, method: 'apple-pay' as const }
     const session = shallowRef<SdkSession | null>({ ...current, attempt, attempts: [attempt] })
     const ready = vi.fn()
     const loadFailed = vi.fn()
@@ -554,9 +556,9 @@ describe('payment restoration pages', () => {
     })
     await flushPromises()
     const element = wrapper.findComponent(ElementProbe)
-    expect(element.props('expectedMethod')).toBe('google-pay')
+    expect(element.props('expectedMethod')).toBe('apple-pay')
     expect(wrapper.text()).toContain('Pay by card')
-    expect(wrapper.text()).toContain('use the Google Pay button only if the SDK renders it')
+    expect(wrapper.text()).toContain('use the Apple Pay button only if the SDK renders it')
     const nextAttempt = {
       ...attempt,
       id: 'attempt-2',

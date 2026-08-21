@@ -1,5 +1,8 @@
 import type { ServerProfile } from './profile'
-import type { PaymentAttempt } from '../../shared/payment/attempt'
+import {
+  hasCompletePaymentMethodAttribution,
+  type PaymentAttempt,
+} from '../../shared/payment/attempt'
 import {
   GatewayError,
   queryPaymentMethod,
@@ -34,10 +37,7 @@ export async function enrichDirectPaymentMethod(
     !attempt.paymentId
     || !attempt.transactionId
     || attempt.transactionId !== queriedTransactionId
-    || (
-      attempt.attributionTransactionId === attempt.transactionId
-      && Boolean(attempt.actualWallet || attempt.fundingNetwork)
-    )
+    || hasCompletePaymentMethodAttribution(attempt)
   ) {
     return attempt
   }

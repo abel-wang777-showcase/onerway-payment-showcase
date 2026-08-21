@@ -22,9 +22,17 @@ const emit = defineEmits<{
 }>()
 
 const mountId = 'onerway-payment-element'
-const description = computed(() => props.expectedMethod === 'google-pay'
-  ? 'The Onerway Sandbox SDK owns Google Pay eligibility, branding and wallet interaction. If its Google Pay button is not rendered, this page does not replace it with a merchant-made button. Hosted Card remains available in the same checkout.'
-  : 'Available methods and Card fields are hosted by the Onerway Sandbox SDK. This merchant page does not receive PAN or CVV; saved-card choices remain inside the hosted surface.')
+const walletLabels: Partial<Record<PaymentMethodId, string>> = {
+  'google-pay': 'Google Pay',
+  'apple-pay': 'Apple Pay',
+}
+const description = computed(() => {
+  const wallet = walletLabels[props.expectedMethod]
+
+  return wallet
+    ? `The Onerway Sandbox SDK owns ${wallet} eligibility, branding and wallet interaction. If its ${wallet} button is not rendered, this page does not replace it with a merchant-made button. Hosted Card remains available in the same checkout.`
+    : 'Available methods and Card fields are hosted by the Onerway Sandbox SDK. This merchant page does not receive PAN or CVV; saved-card choices remain inside the hosted surface.'
+})
 let checkout: OnerwayCheckout | null = null
 let element: OnerwayPaymentElement | null = null
 let disposed = false

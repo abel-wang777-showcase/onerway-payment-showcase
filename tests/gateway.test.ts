@@ -336,6 +336,43 @@ describe('Onerway gateway boundary', () => {
     })
   })
 
+  it('strictly attributes a DIRECT Apple Pay transaction and allows partial facts to converge later', () => {
+    const transactionId = '9000000000000000004'
+    const paymentId = '9000000000000000005'
+    const base = {
+      transactionId,
+      paymentId,
+      subProductType: 'DIRECT',
+      txnType: 'SALE',
+    }
+
+    expect(readPaymentMethodQueryResponse({
+      respCode: '20000',
+      data: {
+        content: [{
+          ...base,
+          walletTypeName: 'ApplePay',
+          paymentMethod: 'Visa',
+          paymentMethodDetails: { wallet: 'must-not-pass-through' },
+        }],
+      },
+    }, paymentId, transactionId)).toEqual({
+      paymentId,
+      transactionId,
+      actualWallet: 'apple-pay',
+      fundingNetwork: 'VISA',
+    })
+
+    expect(readPaymentMethodQueryResponse({
+      respCode: '20000',
+      data: { content: [{ ...base, walletTypeName: 'ApplePay' }] },
+    }, paymentId, transactionId)).toEqual({
+      paymentId,
+      transactionId,
+      actualWallet: 'apple-pay',
+    })
+  })
+
   it('rejects ambiguous, cross-Payment and non-DIRECT method attribution', () => {
     const record = {
       transactionId: '9000000000000000003',

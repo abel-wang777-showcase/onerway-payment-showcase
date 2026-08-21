@@ -39,7 +39,7 @@ export const JOURNEYS = Object.freeze({
     scene: 'ecommerce',
     integration: 'web-js-sdk',
     method: 'card',
-    sandboxMethods: Object.freeze(['card', 'google-pay'] as const),
+    sandboxMethods: Object.freeze(['card', 'google-pay', 'apple-pay'] as const),
     country: 'US',
     currency: 'USD',
     amount: 500,

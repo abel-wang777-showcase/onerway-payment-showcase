@@ -68,6 +68,21 @@ export function setAttemptStatus(
   })
 }
 
+export function hasCompletePaymentMethodAttribution(attempt: PaymentAttempt): boolean {
+  if (
+    !attempt.transactionId
+    || attempt.attributionTransactionId !== attempt.transactionId
+  ) {
+    return false
+  }
+
+  if (attempt.method === 'google-pay' || attempt.method === 'apple-pay') {
+    return Boolean(attempt.actualWallet && attempt.fundingNetwork)
+  }
+
+  return Boolean(attempt.actualWallet || attempt.fundingNetwork)
+}
+
 export const RETRY_REASONS = [
   'eligible',
   'pending',

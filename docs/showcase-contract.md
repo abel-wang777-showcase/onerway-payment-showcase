@@ -1,8 +1,8 @@
 # Onerway Payment Showcase 契约
 
-> 状态：M0 Web JS SDK Sandbox Card 黄金路径、Google Pay DIRECT 验收入口、异常旅程、安全重试与演示部署边界
+> 状态：M0 Web JS SDK Sandbox Card 黄金路径、Google Pay / Apple Pay DIRECT 验收入口、异常旅程、安全重试与演示部署边界
 >
-> 更新日期：2026-08-19
+> 更新日期：2026-08-21
 > 作用：这是项目长期有效的产品、架构、状态和安全边界。GitHub Issues 负责交付顺序，不替代本文件。
 
 ## 1. 产品目标、受众和非目标
@@ -57,7 +57,7 @@ Demo Hub 是公开演示入口，不是第二套后台。它负责：
 
 - `E-commerce × Web JS SDK × Card` 为 Available。`USD 5.00 · Standard success` 同时开放确定性 simulation 与真实 Sandbox SDK；`USD 50.00 · 3DS Challenge` 同时开放 simulation 与仅 Sandbox profile 可见的真实验收入口。两条真实 Sandbox Card 黄金路径均已在 canonical Production 域名完成服务端核验，其中 USD 50.00 覆盖 `R → 3DS Challenge → configured returnUrl → same-payment fresh query`。同一能力下另有独立、仅 Sandbox 的 `Halden Daily Essentials` 初始订阅旅程；它没有伪 simulation，也不把订阅计划建模为新的 Integration。
 - Card simulation 额外开放 processing recovery、cancelled retry、deterministic failure 与 form load recovery 四条异常旅程；它们不含 Sandbox mode、不产生 provider 标识，也不扩张真实 create allowlist。deterministic failure 只形成 `source=simulation / status=failed` 的本地事实，不能作为 Payment-level `failed` 原始状态证据。
-- `E-commerce × Web JS SDK × Google Pay` 保持 Conditional，但可用 USD 5.00 `standard-success` 的真实 Sandbox 入口验收；Showcase 只记录用户选择的预期方式，是否渲染 Google Pay 及其资格由同一个 Onerway SDK Element 决定。`E-commerce × Web JS SDK × Apple Pay` 仍为不可启动的 Conditional，等待 #21 真实设备验收。两者都不渲染伪钱包按钮。
+- `E-commerce × Web JS SDK × Google Pay` 与 `E-commerce × Web JS SDK × Apple Pay` 均保持 Conditional，并复用 USD 5.00 `standard-success` 的真实 Sandbox 入口；Showcase 只记录用户选择的预期方式，是否渲染对应钱包按钮及其资格由同一个 Onerway SDK Element 决定。两者都不渲染伪钱包按钮，也没有钱包专属 simulation。Apple Pay 的最终真实设备 / Safari / Wallet canary 仍需单独授权与用户设备配合，不能由桌面浏览器或历史支付替代。
 - Checkout、Direct API、APM 和 Game / Live / AI 场景当前为 Planned。
 - Unavailable 保留为明确证实不支持时使用的状态；当前不为凑齐 UI 而制造无证据的 Unavailable 组合。
 
@@ -126,7 +126,7 @@ v4 初始化以 `paymentId` 调用 `createCheckout(paymentId, options)`，不传
 
 当前 Web SDK 的可选保存卡能力属于普通支付体验，不新增面向用户的“绑卡旅程”。服务端为匿名浏览器维护稳定的 customer identity，在创建支付时把 `productType` 从旧 SDK 的 `CARD` 调整为当前默认值 `ALL`，`subProductType` 继续使用 `DIRECT` 并传入 `merchantCustId`；不得使用旧 SDK 保存卡逻辑中的 `subProductType=TOKEN`。传入 `merchantCustId` 只允许 SDK 在托管表单中提供保存卡选项，是否保存由用户主动选择；它不证明卡已保存，也不形成新的 PaymentAttempt 状态。后续同一 `merchantNo + appId + environment + merchantCustId` 的支付由 SDK 内部回显可选 saved card，Showcase 不自建卡列表、不读取 SDK 原始 token 结果，也不把 `tokenId` 暴露给客户端。
 
-Google Pay DIRECT 不新增 create adapter、钱包专属 fixture 或 Google JS。Demo Hub 的 Google Pay 选择复用 USD 5.00 `standard-success`，服务端仍发送 `paymentMode=WEB + productType=ALL + subProductType=DIRECT + txnType=SALE`；`PaymentAttempt.method=google-pay` 只记录本次验收预期，不保证 SDK 最终渲染该按钮，也不把 Onerway 的 `DIRECT` 与 Google tokenization 的同名概念混用。同一聚合 checkout 保留 Card merchant action 和 SDK 自有钱包按钮；Card action才调用 `confirmPayment()`，SDK 自有按钮继续只通过 `payment_result` 进入核验。
+Google Pay / Apple Pay DIRECT 不新增 create adapter、钱包专属 fixture、Google Pay JS 或 Apple Pay JS。Demo Hub 的两个钱包选择都复用 USD 5.00 `standard-success`，服务端仍发送 `paymentMode=WEB + productType=ALL + subProductType=DIRECT + txnType=SALE`；`PaymentAttempt.method=google-pay / apple-pay` 只记录本次验收预期，不保证 SDK 最终渲染对应按钮，也不把支付方式与 Onerway 的 `DIRECT` 交易模型混用。同一聚合 checkout 保留 Card merchant action 和 SDK 自有钱包按钮；Card action 才调用 `confirmPayment()`，SDK 自有按钮继续只通过 `payment_result` 进入核验。Showcase 不实现 merchant session、validation URL、certificate / private key 或 Apple payment token / wallet payload 处理；这些属于 Onerway SDK / 服务端边界。Showcase 仅在 `/.well-known/apple-developer-merchantid-domain-association.txt` 原样提供 Apple 要求的域名关联文件，该静态资产不扩张支付数据或凭据处理面。
 
 2026-08-13 真实 Sandbox 验收确认：当前 create 会发送非空 `merchantCustId`，用户可在 SDK 托管表单中主动勾选保存卡，后续同 scope 的新支付会正确回显 saved card。Provider 内部先完成 `DIRECT` 支付交易，再为用户选择的保存卡执行第二笔绑卡交易；Payment result Webhook 不包含 `tokenId`，第二笔绑卡交易也不发送 Webhook，因此商户不能从支付通知链路取得 `tokenId`。需要服务端 token 生命周期时，商户可使用同一 `merchantCustId` 调用 [List saved tokens](https://developers.onerway.com/payments/api-reference/endpoints/list-saved-tokens)，从 `data.tokenInfos[]` 读取 `tokenId`；其中 `id` 是 binding record id，不是支付使用的 `tokenId`。该查询是独立的 server-only 能力，不改变支付真值、不把保存卡并入 PaymentAttempt，也不属于当前 Showcase M0 的卡列表、解绑或 token 支付范围。
 
@@ -195,7 +195,7 @@ Provider create 采用两步 BFF：第一步先持久化 Order 与 Attempt，并
 
 最终核验调用 `POST /v1/txn/queryPayments`，以 v4 SDK 使用的 `paymentId` 查询 Payment 级 `paymentStatus`，并只白名单化 `paymentId`、`lastTransactionId` 与原始状态。2026-08-03 的真实 Sandbox 验证显示：同一 v4 Payment 在该接口可立即查询，而使用创建阶段 `transactionId` 调用 `/v1/txn/list` 返回空记录；因此 M0 不以旧 transaction query 作为最终真值入口。
 
-支付方式归因是独立的服务端 enrichment：先由 `/v1/txn/queryPayments` 取得同一 Payment 的 `lastTransactionId` 并持久化状态真值，再以该 transaction id 调用 `POST /v1/txn/list`。只有 fresh Query 已给出终态，且 transaction id、payment id、`subProductType=DIRECT` 与 `txnType=SALE` 全部严格匹配唯一记录时，才可把 `walletTypeName=GooglePay` 归一化为 `actualWallet=google-pay`，并把受限的 `paymentMethod`（例如 `VISA`）保存为底层 `fundingNetwork`。归因必须满足 `attributionTransactionId = PaymentAttempt.transactionId`；同一 Payment 的 `lastTransactionId` 变化时先清除旧归因，再以新 transaction 原子替换，绝不把新 transaction 与旧钱包 / 网络拼接。该短超时 enrichment 缺失、暂不可用或响应不匹配时不得阻断或回退已经建立的 Payment 状态；结果页恢复终态且仍缺少 `attributionTransactionId` 时自动执行一次 fresh Query 重试，recovery 本身只恢复已经持久化的归因，不能使用 create 阶段 transaction id 自行归因。SDK callback 的 `paymentMethod` 只属于当前内存交互事实；Webhook 的 `walletTypeName` / `paymentMethod` 按当前实测验签规则被排除，二者都不得替代 transaction query 成为持久化实际方式真值。
+支付方式归因是独立的服务端 enrichment：先由 `/v1/txn/queryPayments` 取得同一 Payment 的 `lastTransactionId` 并持久化状态真值，再以该 transaction id 调用 `POST /v1/txn/list`。只有 fresh Query 已给出终态，且 transaction id、payment id、`subProductType=DIRECT` 与 `txnType=SALE` 全部严格匹配唯一记录时，才可把 `walletTypeName=GooglePay / ApplePay` 分别归一化为 `actualWallet=google-pay / apple-pay`，并把受限的 `paymentMethod`（例如 `VISA`）保存为底层 `fundingNetwork`。归因必须满足 `attributionTransactionId = PaymentAttempt.transactionId`；同一 Payment 的 `lastTransactionId` 变化时先清除旧归因，再以新 transaction 原子替换，绝不把新 transaction 与旧钱包 / 网络拼接。存储层允许同一 transaction 的单项白名单事实先落库并只补缺失字段，但 Google Pay / Apple Pay 验收只有在 `actualWallet + fundingNetwork` 均存在时才视为归因完成；任一项缺失时，终态结果页会再执行一次 same-payment fresh Query。该短超时 enrichment 缺失、暂不可用或响应不匹配时不得阻断或回退已经建立的 Payment 状态；recovery 本身只恢复已经持久化的归因，不能使用 create 阶段 transaction id 自行归因。SDK callback 的 `paymentMethod` 只属于当前内存交互事实；Webhook 的 `walletTypeName` / `paymentMethod` 按当前实测验签规则被排除，二者都不得替代 transaction query 成为持久化实际方式真值。
 
 Payment result Webhook 的 M0 契约已通过 2026-08-04 当前 Sandbox secret 与新鲜通知做不落盘差分验签确认：
 
@@ -284,7 +284,7 @@ Sandbox 基础域名为 `https://sandbox-acq.onerway.com`，create 与 query 请
 - Demo Hub 的确定性模拟与真实支付 adapter 共用领域模型，但 simulation 事件显式使用独立 source；浏览器会话恢复不是支付真值或正式持久层。
 - Web JS SDK v4 当前使用 `paymentId` 初始化且不需要 `redirectUrl`；客户端结果始终经 `/v1/txn/queryPayments` 按 `paymentId` 服务端核验后才形成最终事件。
 - 当前 Web SDK 使用 `productType=ALL + subProductType=DIRECT + merchantCustId` 提供用户主动选择的保存卡能力；不使用旧 SDK 保存卡逻辑的 `subProductType=TOKEN`，且不回退到 `productType=CARD`；不新增绑卡 journey、卡列表或 CardBinding 状态。
-- Google Pay DIRECT 复用 `standard-success` 与聚合 SDK Element；Showcase 不新增钱包 create 分支、钱包专属 fixture、自绘按钮或 token 处理。`PaymentAttempt.method` 是预期方式，实际钱包 / 底层网络只由 `queryPayments.lastTransactionId → /v1/txn/list` 的严格服务端关联记录补齐。
+- Google Pay / Apple Pay DIRECT 复用 `standard-success` 与聚合 SDK Element；Showcase 不新增钱包 create 分支、钱包专属 fixture、自绘按钮、Apple merchant-validation / certificate 处理或 token 处理。`PaymentAttempt.method` 是预期方式，实际钱包 / 底层网络只由 `queryPayments.lastTransactionId → /v1/txn/list` 的严格服务端关联记录补齐；钱包归因需要钱包类型与底层网络两项事实齐全。
 - 真实 Sandbox 已确认保存卡会在 `DIRECT` 支付后形成独立的 Provider 绑卡交易；Payment result Webhook 不含 `tokenId`，绑卡交易不发送 Webhook。需要 `tokenId` 时由服务端按同一 `merchantCustId` 调用 List saved tokens，且必须区分 binding record `id` 与支付 `tokenId`；Showcase M0 不接入该 token 生命周期。
 - 匿名 customer 只在服务端按 `merchantNo + appId + environment + merchantCustId` 隔离并随 recovery 链延续；本地最多保留 30 天且不承诺删除 Provider 侧 saved card。
 - #4 的临时通知地址只用于 Sandbox harness；它不替代 #5 的 Webhook 持久化和状态收敛。
@@ -318,6 +318,6 @@ Sandbox 基础域名为 `https://sandbox-acq.onerway.com`，create 与 query 请
 7. Legacy #7：完成异常、刷新恢复与安全重试闭环。
 8. Legacy #8：部署并验收客户演示版。
 9. Legacy #20：验收 Web JS SDK v4 Google Pay 并补齐支付方式归因。
-10. Legacy #21：验收 Web JS SDK v4 Apple Pay 真实设备与支付方式归因；该未完成范围需要在公开仓库重新建 Issue。
+10. [Canonical #1](https://github.com/abel-wang777-showcase/onerway-payment-showcase/issues/1)（迁移自 Legacy #21）：验收 Web JS SDK v4 Apple Pay 真实设备、同 Checkout 取消恢复与支付方式归因。
 
 可靠的回跳恢复依赖持久化，因此 #5 是 #6 的前置条件；两者均已完成，#7 在该基线上补齐持久化提交边界、安全 Retry 和异常旅程。每一步由 GitHub Issue 跟踪；Issue 关闭时，新增的长期决定必须同步回写本契约。

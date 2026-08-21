@@ -56,7 +56,7 @@ function defineCapability(
     integration,
     method,
     status: condition ? 'conditional' : 'planned',
-    runnable: method === 'google-pay' && Boolean(condition),
+    runnable: Boolean(condition),
     ...(condition ? { condition } : {}),
   })
 }

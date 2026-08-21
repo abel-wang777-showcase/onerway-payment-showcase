@@ -139,6 +139,13 @@ const expectedMethodLabel = computed(() => {
 
   return current.value ? labels[current.value.attempt.method] : 'Unavailable'
 })
+const expectedWalletLabel = computed(() => {
+  const method = current.value?.attempt.method
+
+  return method === 'google-pay' || method === 'apple-pay'
+    ? expectedMethodLabel.value
+    : null
+})
 const references = computed<PaymentReference[]>(() => {
   if (!current.value) {
     return []
@@ -378,8 +385,8 @@ onMounted(async () => {
           <p class="mt-3 max-w-2xl text-sm leading-relaxed text-toned">
             A signed {{ amount }} {{ currentSubscription ? 'initial subscription' : '' }} payment was created by the server with all merchant-enabled SDK payment methods.
             {{ challenge ? 'This journey requires a 3DS Challenge. Automatic return is preferred; if Onerway keeps the browser on its result page, reopen this Showcase to recover the same payment.' : 'This controlled journey is expected to complete without a 3DS Challenge.' }}
-            {{ current.attempt.method === 'google-pay'
-              ? 'For this acceptance target, use the Google Pay button only if the SDK renders it. The merchant Card action remains available as a fallback and does not prove Google Pay eligibility.'
+            {{ expectedWalletLabel
+              ? `For this acceptance target, use the ${expectedWalletLabel} button only if the SDK renders it. The merchant Card action remains available as a fallback and does not prove ${expectedWalletLabel} eligibility.`
               : 'Use only controlled Onerway Sandbox payment data in the hosted SDK surface.' }}
           </p>
         </div>
