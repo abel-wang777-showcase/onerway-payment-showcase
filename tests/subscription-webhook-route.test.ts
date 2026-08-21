@@ -1,11 +1,13 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
   isSubscriptionWebhookProcessed: vi.fn(),
   querySubscription: vi.fn(),
+  readPaymentWebhook: vi.fn(),
   readSubscriptionPaymentWebhook: vi.fn(),
   readWebhookBody: vi.fn(),
   recordSubscriptionWebhookEvent: vi.fn(),
+  recordWebhookEvent: vi.fn(),
   requireServerProfile: vi.fn(),
 }))
 
@@ -22,14 +24,21 @@ vi.mock('../server/utils/store', () => ({
   isSubscriptionWebhookProcessed: mocks.isSubscriptionWebhookProcessed,
   PaymentStoreError: class PaymentStoreError extends Error {},
   recordSubscriptionWebhookEvent: mocks.recordSubscriptionWebhookEvent,
-  recordWebhookEvent: vi.fn(),
+  recordWebhookEvent: mocks.recordWebhookEvent,
 }))
 
 vi.mock('../server/utils/webhook', () => ({
-  readPaymentWebhook: vi.fn(),
+  readPaymentWebhook: mocks.readPaymentWebhook,
   readSubscriptionPaymentWebhook: mocks.readSubscriptionPaymentWebhook,
   readWebhookBody: mocks.readWebhookBody,
-  WebhookError: class WebhookError extends Error {},
+  WebhookError: class WebhookError extends Error {
+    readonly code: string
+
+    constructor(code: string) {
+      super(code)
+      this.code = code
+    }
+  },
 }))
 
 const fact = {
@@ -60,6 +69,10 @@ beforeEach(() => {
   mocks.isSubscriptionWebhookProcessed.mockResolvedValue(false)
   mocks.querySubscription.mockResolvedValue({ contractId: 'contract_1' })
   mocks.recordSubscriptionWebhookEvent.mockResolvedValue({ duplicate: false })
+})
+
+afterEach(() => {
+  vi.restoreAllMocks()
 })
 
 describe('subscription webhook route', () => {
@@ -97,5 +110,38 @@ describe('subscription webhook route', () => {
       expect.any(String),
     )
     expect(result).toBe(fact.transactionId)
+  })
+
+  it('logs only the bounded rejection code when a webhook is invalid', async () => {
+    const rejectedBody = {
+      merchantTxnId: 'must-not-be-logged',
+      sign: 'must-not-be-logged',
+    }
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+    mocks.readWebhookBody.mockResolvedValue(rejectedBody)
+    const { WebhookError } = await import('../server/utils/webhook')
+    mocks.readPaymentWebhook.mockImplementation(() => {
+      throw new WebhookError('PAYMENT_WEBHOOK_SIGNATURE_INVALID')
+    })
+
+    const { default: handler } = await import('../server/api/webhooks/onerway/payment.post')
+    const request = (handler as (event: { node: { req: unknown } }) => Promise<string>)({
+      node: { req: {} },
+    })
+
+    await expect(request).rejects.toMatchObject({
+      statusCode: 400,
+      statusMessage: 'PAYMENT_WEBHOOK_SIGNATURE_INVALID',
+    })
+    expect(warning).toHaveBeenCalledOnce()
+    expect(warning).toHaveBeenCalledWith(
+      '[payment-webhook] rejected',
+      { code: 'PAYMENT_WEBHOOK_SIGNATURE_INVALID' },
+    )
+
+    const logged = JSON.stringify(warning.mock.calls)
+    expect(logged).not.toContain(rejectedBody.merchantTxnId)
+    expect(logged).not.toContain(rejectedBody.sign)
   })
 })

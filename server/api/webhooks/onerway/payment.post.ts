@@ -57,6 +57,7 @@ export default defineEventHandler(async (event): Promise<string> => {
   }
   catch (error) {
     if (error instanceof WebhookError) {
+      console.warn('[payment-webhook] rejected', { code: error.code })
       fail(400, error.code)
     }
 
