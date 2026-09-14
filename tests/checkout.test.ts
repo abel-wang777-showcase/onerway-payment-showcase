@@ -40,8 +40,8 @@ describe('Hosted Checkout boundaries', () => {
     expect(paymentPath({ ...attempt, status: 'cancelled' })).toBe('/halden/result/o')
   })
 
-  it('does not claim individual methods are verified or simulate a Sandbox-only journey', () => {
+  it.each(['hosted-checkout', 'hosted-checkout-three-ds'] as const)('keeps %s conditional and Sandbox-only', (journeyId) => {
     expect(getCapability('ecommerce', 'checkout', 'all').status).toBe('conditional')
-    expect(() => createSession('hosted-checkout')).toThrow('SIMULATION_JOURNEY_UNAVAILABLE')
+    expect(() => createSession(journeyId)).toThrow('SIMULATION_JOURNEY_UNAVAILABLE')
   })
 })

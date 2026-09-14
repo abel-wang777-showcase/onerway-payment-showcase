@@ -58,7 +58,7 @@ Demo Hub 是公开演示入口，不是第二套后台。它负责：
 - `E-commerce × Web JS SDK × Card` 为 Available。`USD 5.00 · Standard success` 同时开放确定性 simulation 与真实 Sandbox SDK；`USD 50.00 · 3DS Challenge` 同时开放 simulation 与仅 Sandbox profile 可见的真实验收入口。两条真实 Sandbox Card 黄金路径均已在 canonical Production 域名完成服务端核验，其中 USD 50.00 覆盖 `R → 3DS Challenge → configured returnUrl → same-payment fresh query`。同一能力下另有独立、仅 Sandbox 的 `Halden Daily Essentials` 初始订阅旅程；它没有伪 simulation，也不把订阅计划建模为新的 Integration。
 - Card simulation 额外开放 processing recovery、cancelled retry、deterministic failure 与 form load recovery 四条异常旅程；它们不含 Sandbox mode、不产生 provider 标识，也不扩张真实 create allowlist。deterministic failure 只形成 `source=simulation / status=failed` 的本地事实，不能作为 Payment-level `failed` 原始状态证据。
 - `E-commerce × Web JS SDK × Google Pay` 与 `E-commerce × Web JS SDK × Apple Pay` 均保持 Conditional，并复用 USD 5.00 `standard-success` 的真实 Sandbox 入口；Showcase 只记录用户选择的预期方式，是否渲染对应钱包按钮及其资格由同一个 Onerway SDK Element 决定。两者都不渲染伪钱包按钮，也没有钱包专属 simulation。Apple Pay 的最终真实设备 / Safari / Wallet canary 仍需单独授权与用户设备配合，不能由桌面浏览器或历史支付替代。
-- `E-commerce × Checkout × All` 为 Conditional，并提供 Sandbox 一次性支付入口。`All` 是支付方式选择策略，不代表最终使用某张卡或钱包；具体可选项由商户启用、国家、币种和设备条件决定。当前未完成新鲜真实 Sandbox 全链路验收，不宣称任一具体收银台支付方式为 Available。
+- `E-commerce × Checkout × All` 为 Conditional，并提供 USD 5.00 普通支付与 USD 50.00 3DS 的 Sandbox 一次性支付入口。`All` 是支付方式选择策略，不代表最终使用某张卡或钱包；具体可选项由商户启用、国家、币种和设备条件决定。用户已报告首版验证通过，具体方式、设备和通知证据尚待逐项登记；USD 50.00 新旅程仍待独立真实验收，不宣称任一具体收银台支付方式为 Available。
 - Checkout 的具体支付方式直达、Direct API、其余 APM 和 Game / Live / AI 场景当前为 Planned。
 - Unavailable 保留为明确证实不支持时使用的状态；当前不为凑齐 UI 而制造无证据的 Unavailable 组合。
 
@@ -160,7 +160,8 @@ Demo Hub 继续提供两条同结果、可重复的本地模拟旅程。模拟�
 
 实施规则：
 
-- 唯一真实旅程为 `hosted-checkout`：USD 5.00、`HL-CHECKOUT-005`、`integration=checkout`、`method=all`，不提供伪造收银台或结果保证的本地 simulation。`all` 通过 `0007_checkout` 迁移加入已有 method 约束；不增加原始 payload 或 URL 列。
+- 固定真实旅程为 `hosted-checkout`（USD 5.00、`HL-CHECKOUT-005`）与 `hosted-checkout-three-ds`（USD 50.00、`HL-CHECKOUT-050`），均为 `integration=checkout`、`method=all`，不提供伪造收银台或结果保证的本地 simulation。USD 50.00 触发条件由用户在 Issue #8 确认；验收时在托管页选择 Card，由 Provider 承接 Challenge，不新增商户 3DS、risk strategy 补丁或客户端金额输入。选择其他支付方式不构成 Card 3DS 验收。`all` 通过 `0007_checkout` 迁移加入已有 method 约束；新增旅程复用现有 Order / Attempt / Event，无新增数据库字段。
+- Hosted 页与结果页从持久化 Order 的固定商品和金额识别旅程，`threeDSJourney=challenge` 仅表示本次选择的测试旅程，不证明实际发生或通过 Challenge；USD 5.00 使用 `not-selected`，不承诺 Provider 不会要求认证。Hosted 页显式启动独立 Sandbox Order 时保留当前固定旅程，不静默降回 USD 5.00；恢复和 Retry 继续保留原订单关联。
 - 创建继续分为先持久化 intent 并签发 cookie、再认领 Provider create 两步。adapter 由持久化 Attempt 的 integration 决定；Hosted create 只接受空对象，不调用客户端 browser data 采集。页面位于 `/halden/hosted/:order`，展示订单和白名单引用，再由客户点击进入托管收银台；不挂载 SDK、不调用 confirm 或 SDK submission latch。
 - 跳转 URL 仅保留在当前浏览器内存的独立导航引用中，外跳时消费；不进入 Payment session/Event、持久层或 Technical details。刷新、恢复与结果未知时不重放 create、不拼造收银台 URL，只恢复和查询已有交易。
 - Checkout 查询调用 `POST /v1/txn/list`，按保存的 `merchantTxnId` 唯一匹配，并核对金额、币种及已有 provider IDs；`S → succeeded`、`N → cancelled`、`R → requires_action`、`I/U/P → processing`。交易 `F` 可能对应仍开放的 Payment，因此保守保持 `processing`，不开放新扣款 Retry；存在 Payment 轴时结合 `S/O/N`，未知值拒绝。
@@ -169,6 +170,20 @@ Demo Hub 继续提供两条同结果、可重复的本地模拟旅程。模拟�
 - `returnUrl` 在服务端 SSR 前丢弃附加 query（303、no-store、no-referrer），使用同源恢复 cookie 并对同一订单 fresh query；Checkout 按交易维度查询，SDK 按 Payment 维度查询。双方终态冲突遵循第 6 节用户确认的调和规则。Production 交易、canonical origin、限流及凭据边界不变。
 
 验收须覆盖创建与外跳、回跳查询、无 Payment ID 取消、header 验签与幂等、终态冲突、刷新不重复 create、跨 integration 恢复、320/390/834/1440 页面与明暗/键盘以及现有 SDK 回归。真实验收还需迁移数据库、部署携带新 header 的 Relay 与应用，并以新鲜 Sandbox 支付验证通知投递和服务端结果；这些未执行前不得将自动化样本写成真实支付完成。
+
+一次性支付验收采用以下有限矩阵，执行状态与当次证据登记在 [Issue #8](https://github.com/abel-wang777-showcase/onerway-payment-showcase/issues/8)，不把历史 SDK 验收或 `ALL` 入口当作 Checkout 实际方式证据：
+
+| 组合 | 固定条件与验收要求 |
+| --- | --- |
+| Card 普通支付 | USD 5.00 / US；记录实际卡网络、设备 / OS / 浏览器，核对同笔 query、通知、持久化与结果页 |
+| Card 3DS | USD 50.00 / US；记录实际 Challenge、返回同一 Order / Attempt 及 fresh query；成功、取消和失败交互分别登记 |
+| Apple Pay | USD 5.00 / US；仅在商户启用且设备 / 浏览器 / Wallet 满足条件时执行，记录实际钱包与底层网络 |
+| Google Pay | USD 5.00 / US；仅在商户启用且浏览器 / 钱包满足条件时执行，记录实际钱包与底层网络 |
+| 一个选定 APM | USD 5.00 / US；从托管页实际可见且具备测试条件的方式中明确选定一个。没有符合条件的方式时登记原因，不扩张币种、国家或所有 APM |
+
+每条真实记录必须包含执行日期、canonical Production 的部署 SHA、Sandbox profile、固定旅程、实际方式、设备 / 浏览器、国家 / 币种、观察到的交互及最终核验来源；用同笔 `orderId / attemptId / merchantTxnId / transactionId / paymentId` 在受限诊断中关联通知、query 与持久化。公开 Issue 只保留脱敏结果和证据引用，不记录完整交易标识、卡数据、导航 URL、query capability 或原始 payload。未知方式不推断，缺失设备条件明确记为待确认；未显示的钱包 / APM 记录不可测原因，不伪造失败交易。
+
+异常矩阵限定为主动取消、关闭 / 刷新后恢复、3DS 取消 / 失败、被拒后托管页内重试、处理中恢复、Webhook 早到 / 延迟 / 重复、无 Payment ID 取消、创建响应未知。自动化分别验证输入 allowlist、单次 create 认领与 URL 消费、严格关联、状态收敛、终态不回退及页面可执行动作；浏览器 mock 不证明真实 Challenge、Provider 拒付重试、钱包资格或 Webhook 网络投递。不能稳定触发的真实异常必须保留为未验证，不能通过制造 payload 或沿用 SDK 证据补齐。
 
 ## 6. 回跳、通知和最终状态
 

@@ -48,8 +48,9 @@ const {
   probeRecovery,
 } = useSdk()
 
+const initialJourney = getJourney(isJourneyId(route.query.journey) ? route.query.journey : 'standard-success')
 const billingMode = shallowRef<'payment' | 'subscription'>(
-  route.query.mode === 'subscription' && route.query.journey !== 'hosted-checkout' ? 'subscription' : 'payment',
+  route.query.mode === 'subscription' && initialJourney.integration === 'web-js-sdk' ? 'subscription' : 'payment',
 )
 const subscriptionPlanId = shallowRef<SubscriptionPlanId>(
   isSubscriptionPlanId(route.query.plan) ? route.query.plan : 'halden-daily-essentials-v1',
@@ -72,7 +73,6 @@ function readRoutePaymentMethod(value: unknown): PaymentMethodId {
   return 'card'
 }
 
-const initialJourney = getJourney(isJourneyId(route.query.journey) ? route.query.journey : 'standard-success')
 const selection = ref({
   scene: initialJourney.scene as SceneId,
   integration: initialJourney.integration as IntegrationId,

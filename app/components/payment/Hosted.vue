@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { paymentPath } from '#shared/payment/checkout'
+import { findOrderJourney } from '#shared/payment/journey'
 import { isTerminalStatus } from '#shared/payment/sdk'
 
 const route = useRoute()
@@ -11,6 +12,7 @@ const mounted = shallowRef(false)
 const title = useTemplateRef<HTMLElement>('title')
 const orderId = computed(() => String(route.params.order))
 const current = computed(() => session.value?.order.id === orderId.value ? session.value : null)
+const journey = computed(() => current.value ? findOrderJourney(current.value.order) : null)
 const busy = computed(() => restoring.value || ['creating', 'verifying', 'redirecting'].includes(stage.value))
 const amount = computed(() => current.value ? formatMoney(current.value.order.amount) : '')
 const lines = computed(() => current.value ? [
@@ -20,6 +22,8 @@ const lines = computed(() => current.value ? [
 ] : [])
 const details = computed(() => current.value ? [
   { label: 'integration', value: 'checkout' },
+  { label: 'journey', value: journey.value?.id ?? 'unavailable' },
+  { label: 'threeDSJourney', value: journey.value?.id === 'hosted-checkout-three-ds' ? 'challenge' : 'not-selected' },
   { label: 'orderId', value: current.value.order.id },
   { label: 'attemptId', value: current.value.attempt.id },
   { label: 'merchantTxnId', value: current.value.attempt.merchantTxnId ?? 'unavailable' },
@@ -100,6 +104,9 @@ onMounted(async () => {
           <p class="mt-2 text-sm leading-relaxed text-toned">
             Onerway shows the methods enabled for this merchant and eligible for your country, currency and device. Enter payment details only on that page.
           </p>
+          <p v-if="journey?.id === 'hosted-checkout-three-ds'" class="mt-2 text-sm leading-relaxed text-toned">
+            Select Card to test the USD 50.00 Sandbox 3DS challenge. Complete authentication on the hosted page; Halden verifies the payment after your return. Selecting another method does not verify this 3DS journey.
+          </p>
         </section>
         <div role="status" aria-live="polite" class="rounded-lg border border-default bg-muted p-5">
           <p class="font-medium text-highlighted">
@@ -112,7 +119,7 @@ onMounted(async () => {
         <UAlert v-if="error" :description="error" color="warning" variant="subtle" role="alert" />
         <div v-if="!canOpenCheckout" class="flex flex-wrap gap-3">
           <UButton label="Verify existing payment" icon="i-lucide-shield-check" :disabled="busy" :loading="stage === 'verifying'" class="min-h-11" @click="verify()" />
-          <UButton label="Start a separate Sandbox order" variant="outline" color="neutral" :disabled="busy" class="min-h-11" @click="start('hosted-checkout', true)" />
+          <UButton v-if="journey" label="Start a separate Sandbox order" variant="outline" color="neutral" :disabled="busy" class="min-h-11" @click="start(journey.id, true)" />
         </div>
         <section aria-label="Payment references" class="min-w-0 rounded-lg border border-default p-5">
           <h2 class="font-semibold text-highlighted">Payment references</h2>
