@@ -1,4 +1,5 @@
 import { type IncomingMessage, request as httpRequest } from 'node:http'
+import { createHash } from 'node:crypto'
 import { Pool } from '@neondatabase/serverless'
 import { setup, url } from '@nuxt/test-utils/e2e'
 import { describe, expect, it } from 'vitest'
@@ -82,6 +83,76 @@ function request(path: string, init: RequestInit): Promise<Response> {
 }
 
 describe('payment database routes', () => {
+  it('ACKs header-authenticated no-ID Checkout cancellation only after durable deduplicated storage', async () => {
+    let orderId: string | undefined
+    const pool = new Pool({ connectionString: databaseUrl })
+
+    try {
+      const intentResponse = await request('/api/payment/intent', {
+        method: 'POST',
+        headers: {
+          host: 'showcase.example',
+          'x-forwarded-proto': 'https',
+          'x-vercel-forwarded-for': '203.0.113.12',
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({ journeyId: 'hosted-checkout' }),
+      })
+      const intent = await intentResponse.json() as { orderId: string }
+      orderId = intent.orderId
+      expect(intentResponse.status).toBe(200)
+
+      const attempts = await pool.query<{ id: string, merchant_txn_id: string }>(
+        'SELECT id, merchant_txn_id FROM payment_attempts WHERE order_id = $1', [orderId],
+      )
+      const attempt = attempts.rows[0]!
+      const transactionId = `6284${Date.now()}`.slice(0, 20)
+      const body = {
+        notifyType: 'TXN', txnType: 'SALE', merchantNo: 'test-merchant-sentinel',
+        merchantTxnId: attempt.merchant_txn_id, transactionId,
+        orderAmount: '5.00', orderCurrency: 'USD', status: 'N',
+        txnTime: '2026-09-14 12:00:00', txnTimeZone: '+08:00',
+      }
+      const canonical = Object.entries(body)
+        .sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0)
+        .map(([, value]) => value).join('')
+      const signature = createHash('sha256').update(`${canonical}test-secret-sentinel`).digest('hex')
+      const signedBody = JSON.stringify({ ...body, sign: signature })
+      const rejected = await request('/api/webhooks/onerway/payment', {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: signedBody,
+      })
+
+      expect(rejected.status).toBe(400)
+
+      for (let delivery = 0; delivery < 2; delivery++) {
+        const response = await request('/api/webhooks/onerway/payment', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', 'X-Rh-Signature': `v1=${'0'.repeat(64)}, v1=${signature}` },
+          body: signedBody,
+        })
+
+        expect(response.status).toBe(200)
+        expect(response.headers.get('content-type')).toContain('text/plain')
+        expect(await response.text()).toBe(transactionId)
+      }
+
+      const persisted = await pool.query<{ status: string, payment_id: string | null, events: string }>(`
+        SELECT a.status, a.payment_id,
+               (SELECT count(*) FROM payment_events e WHERE e.attempt_id = a.id AND e.source = 'webhook') AS events
+        FROM payment_attempts a WHERE a.id = $1
+      `, [attempt.id])
+
+      expect(persisted.rows[0]).toEqual({ status: 'cancelled', payment_id: null, events: '1' })
+    }
+    finally {
+      if (orderId) {
+        await pool.query('DELETE FROM payment_orders WHERE id = $1', [orderId])
+      }
+
+      await pool.end()
+    }
+  }, 120_000)
+
   it('rejects a same-origin Preview intent before writing payment state', async () => {
     const response = await request('/api/payment/intent', {
       method: 'POST',

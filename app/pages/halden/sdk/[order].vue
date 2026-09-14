@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { paymentPath } from '#shared/payment/checkout'
 import { findOrderJourney } from '#shared/payment/journey'
 import {
   getSdkPaymentActions,
@@ -133,6 +134,7 @@ const expectedMethodLabel = computed(() => {
   const labels: Record<PaymentMethodId, string> = {
     card: 'Card',
     apm: 'APM',
+    all: 'Choose on Checkout',
     'google-pay': 'Google Pay',
     'apple-pay': 'Apple Pay',
   }
@@ -160,7 +162,7 @@ const references = computed<PaymentReference[]>(() => {
     ...(attempt.transactionId
       ? [{ label: 'Onerway transaction ID', value: attempt.transactionId }]
       : []),
-    { label: 'Onerway payment ID', value: current.value.paymentId },
+    { label: 'Onerway payment ID', value: current.value.paymentId ?? 'unavailable' },
     { label: 'Showcase order ID', value: current.value.order.id },
     { label: 'Showcase attempt ID', value: attempt.id },
   ]
@@ -250,8 +252,8 @@ async function restoreCurrent(): Promise<void> {
       return
     }
 
-    if (isTerminalStatus(restored.attempt.status)) {
-      await navigateTo(`/halden/result/${restored.order.id}`)
+    if (isTerminalStatus(restored.attempt.status) || restored.attempt.integration !== 'web-js-sdk') {
+      await navigateTo(paymentPath(restored.attempt))
       return
     }
 
@@ -270,7 +272,7 @@ async function restoreCurrent(): Promise<void> {
 function ownsElement(paymentId: string, generation: number): boolean {
   return isCurrentSdkElementEvent(
     { paymentId, generation },
-    current.value
+    current.value?.paymentId
       ? { paymentId: current.value.paymentId, generation: elementRevision.value }
       : null,
   )
@@ -301,8 +303,8 @@ onMounted(async () => {
 
   mounted.value = true
 
-  if (current.value && isTerminalStatus(current.value.attempt.status)) {
-    await navigateTo(`/halden/result/${current.value.order.id}`, { replace: true })
+  if (current.value && (isTerminalStatus(current.value.attempt.status) || current.value.attempt.integration !== 'web-js-sdk')) {
+    await navigateTo(paymentPath(current.value.attempt), { replace: true })
     return
   }
 
@@ -332,7 +334,7 @@ onMounted(async () => {
     </div>
 
     <section
-      v-else-if="!current || !sdkUrl"
+      v-else-if="!current || !sdkUrl || !current.paymentId || current.attempt.integration !== 'web-js-sdk'"
       class="mx-auto max-w-xl py-20 text-center"
     >
       <UIcon name="i-lucide-circle-off" class="mx-auto size-10 text-dimmed" aria-hidden="true" />

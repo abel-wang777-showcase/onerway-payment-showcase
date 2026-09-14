@@ -17,6 +17,7 @@ import {
   queryPayment,
   queryPaymentCreation,
   querySubscription,
+  queryCheckoutPayment,
 } from '../../utils/gateway'
 import { withPaymentLimit } from '../../utils/limit'
 import { requireServerProfile } from '../../utils/profile'
@@ -44,10 +45,10 @@ function readOrderId(value: unknown): string {
 function fail(error: unknown): never {
   if (error instanceof GatewayError) {
     throw createError({
-      statusCode: error.code === 'PAYMENT_CREATION_QUERY_NOT_FOUND'
+      statusCode: ['PAYMENT_CREATION_QUERY_NOT_FOUND', 'PAYMENT_QUERY_NOT_FOUND'].includes(error.code)
         ? 409
         : error.code === 'PAYMENT_NETWORK_ERROR' ? 504 : 502,
-      statusMessage: error.code === 'PAYMENT_CREATION_QUERY_NOT_FOUND'
+      statusMessage: ['PAYMENT_CREATION_QUERY_NOT_FOUND', 'PAYMENT_QUERY_NOT_FOUND'].includes(error.code)
         ? 'PAYMENT_RECOVERY_PENDING'
         : error.code,
     })
@@ -183,19 +184,27 @@ export default defineEventHandler(async (event): Promise<
         }
       }
 
-      if (!recovery.attempt.paymentId) {
+      if (!recovery.attempt.paymentId && !(recovery.attempt.integration === 'checkout' && recovery.attempt.transactionId && recovery.attempt.status === 'cancelled')) {
         const merchantTxnId = recovery.attempt.merchantTxnId
 
         if (!merchantTxnId) {
           throw new PaymentStoreError('PAYMENT_ATTEMPT_MISMATCH')
         }
 
-        const found = await queryPaymentCreation(
-          profile,
-          merchantTxnId,
-          recovery.order.amount.minor,
-          recovery.order.amount.currency,
-        )
+        const checkout = recovery.attempt.integration === 'checkout'
+        const found = checkout
+          ? await queryCheckoutPayment(profile, {
+              merchantTxnId,
+              amountMinor: recovery.order.amount.minor,
+              currency: recovery.order.amount.currency,
+              transactionId: recovery.attempt.transactionId,
+            })
+          : await queryPaymentCreation(
+              profile,
+              merchantTxnId,
+              recovery.order.amount.minor,
+              recovery.order.amount.currency,
+            )
         const occurredAt = new Date().toISOString()
 
         await completePaymentRecord(
@@ -206,10 +215,11 @@ export default defineEventHandler(async (event): Promise<
             id: randomUUID(),
             attemptId: recovery.attempt.id,
             source: 'query',
-            sourceKey: `creation:${merchantTxnId}:${found.transactionId}:${found.rawStatus}`,
+            sourceKey: `creation:${merchantTxnId}:${found.transactionId}:${found.rawStatus}${checkout ? `:${found.paymentStatus ?? '-'}` : ''}`,
             status: found.status,
             rawStatus: found.rawStatus,
-            ...( ['S', 'F', 'N'].includes(found.rawStatus)
+            ...(found.paymentStatus ? { paymentStatus: found.paymentStatus } : {}),
+            ...(checkout || ['S', 'F', 'N'].includes(found.rawStatus)
               ? { transactionStatus: found.rawStatus }
               : {}),
             transactionId: found.transactionId,
@@ -221,7 +231,7 @@ export default defineEventHandler(async (event): Promise<
 
       const paymentId = recovery?.attempt.paymentId
 
-      if (!recovery || !paymentId) {
+      if (!recovery || (!paymentId && !(recovery.attempt.integration === 'checkout' && recovery.attempt.transactionId && recovery.attempt.status === 'cancelled'))) {
         throw new PaymentStoreError('PAYMENT_ATTEMPT_MISMATCH')
       }
 
@@ -232,11 +242,11 @@ export default defineEventHandler(async (event): Promise<
         attempt: recovery.attempt,
         attempts: Object.freeze(recovery.attempts.map(toPaymentAttemptSummary)),
         events: recovery.events,
-        paymentId,
-        query: Object.freeze({
+        paymentId: paymentId ?? null,
+        query: paymentId ? Object.freeze({
           token: createQueryToken(profile.secret, recovery.attempt.id, paymentId, expiresAt),
           expiresAt,
-        }),
+        }) : null,
         submitted: Boolean(recovery.attempt.submissionStartedAt),
         ...(recovery.subscription
           ? { subscription: toSubscriptionSummary(recovery.subscription) }

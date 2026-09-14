@@ -7,7 +7,7 @@ definePageMeta({
 
 useSeoMeta({
   title: 'Restoring payment · Halden',
-  description: 'Restore the Onerway 3DS browser return and verify the final payment state on the server.',
+  description: 'Restore the Onerway browser return and verify the final payment state on the server.',
 })
 
 const route = useRoute()
@@ -63,7 +63,7 @@ onMounted(restore)
 <template>
   <UContainer class="py-10 sm:py-16">
     <section class="mx-auto max-w-xl text-center">
-      <div v-if="!ready" aria-label="Restoring 3DS return" class="space-y-6">
+      <div v-if="!ready" aria-label="Restoring payment return" class="space-y-6">
         <USkeleton class="mx-auto h-12 w-72 rounded-sm" />
         <USkeleton class="h-40 w-full rounded-lg" />
       </div>
@@ -72,12 +72,12 @@ onMounted(restore)
         <span class="mx-auto flex size-14 items-center justify-center rounded-full bg-primary/10">
           <UIcon name="i-lucide-shield-check" class="size-7 text-primary" aria-hidden="true" />
         </span>
-        <UBadge label="3DS browser return" color="primary" variant="soft" class="mt-5" />
+        <UBadge :label="current.attempt.integration === 'checkout' ? 'Checkout browser return' : '3DS browser return'" color="primary" variant="soft" class="mt-5" />
         <h1 ref="title" tabindex="-1" class="mt-4 text-3xl font-semibold tracking-tight text-highlighted focus:outline-none">
           Verifying your payment.
         </h1>
         <p class="mt-4 text-sm leading-relaxed text-toned">
-          Onerway returned the browser to this order. The return itself is not a success signal, so the server is querying the existing Payment before showing a final result.
+          Onerway returned the browser to this order. The return itself is not a success signal, so the server is querying the existing payment before showing a final result.
         </p>
         <PaymentSdkStatus :stage="stage" class="mt-8 text-left" />
         <UAlert

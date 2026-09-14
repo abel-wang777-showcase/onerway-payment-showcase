@@ -1,8 +1,8 @@
 # Onerway Payment Showcase 契约
 
-> 状态：M0 Web JS SDK Sandbox Card 黄金路径、Google Pay / Apple Pay DIRECT 验收入口、异常旅程、安全重试与演示部署边界
+> 状态：M0 Web JS SDK Card、订阅与钱包；新增 Sandbox Hosted Checkout 与公共 header 验签，待真实交易验收
 >
-> 更新日期：2026-08-21
+> 更新日期：2026-09-14
 > 作用：这是项目长期有效的产品、架构、状态和安全边界。GitHub Issues 负责交付顺序，不替代本文件。
 
 ## 1. 产品目标、受众和非目标
@@ -41,8 +41,8 @@ Demo Hub 是公开演示入口，不是第二套后台。它负责：
 | 维度 | 当前或规划值 |
 | --- | --- |
 | Scene | E-commerce；后续 Game、Live、AI |
-| Integration | Web JS SDK；后续 Checkout、Direct API |
-| Payment Method | Card、APM、Google Pay、Apple Pay |
+| Integration | Web JS SDK、Checkout；后续 Direct API |
+| Payment Method | Card、APM、Google Pay、Apple Pay；Checkout 的 All 表示由客户在托管页选择 |
 
 能力状态：
 
@@ -53,12 +53,13 @@ Demo Hub 是公开演示入口，不是第二套后台。它负责：
 
 能力配置必须是数据，而不是散落在 Vue 组件中的条件判断。M0 首先交付 `E-commerce × Web JS SDK × Card`；其他组合只有在真实契约和验收路径确认后才能标为 Available。
 
-当前 Demo Hub 的数据化矩阵包含全部 48 个组合，状态边界为：
+当前 Demo Hub 的数据化矩阵包含全部 60 个组合，状态边界为：
 
 - `E-commerce × Web JS SDK × Card` 为 Available。`USD 5.00 · Standard success` 同时开放确定性 simulation 与真实 Sandbox SDK；`USD 50.00 · 3DS Challenge` 同时开放 simulation 与仅 Sandbox profile 可见的真实验收入口。两条真实 Sandbox Card 黄金路径均已在 canonical Production 域名完成服务端核验，其中 USD 50.00 覆盖 `R → 3DS Challenge → configured returnUrl → same-payment fresh query`。同一能力下另有独立、仅 Sandbox 的 `Halden Daily Essentials` 初始订阅旅程；它没有伪 simulation，也不把订阅计划建模为新的 Integration。
 - Card simulation 额外开放 processing recovery、cancelled retry、deterministic failure 与 form load recovery 四条异常旅程；它们不含 Sandbox mode、不产生 provider 标识，也不扩张真实 create allowlist。deterministic failure 只形成 `source=simulation / status=failed` 的本地事实，不能作为 Payment-level `failed` 原始状态证据。
 - `E-commerce × Web JS SDK × Google Pay` 与 `E-commerce × Web JS SDK × Apple Pay` 均保持 Conditional，并复用 USD 5.00 `standard-success` 的真实 Sandbox 入口；Showcase 只记录用户选择的预期方式，是否渲染对应钱包按钮及其资格由同一个 Onerway SDK Element 决定。两者都不渲染伪钱包按钮，也没有钱包专属 simulation。Apple Pay 的最终真实设备 / Safari / Wallet canary 仍需单独授权与用户设备配合，不能由桌面浏览器或历史支付替代。
-- Checkout、Direct API、APM 和 Game / Live / AI 场景当前为 Planned。
+- `E-commerce × Checkout × All` 为 Conditional，并提供 Sandbox 一次性支付入口。`All` 是支付方式选择策略，不代表最终使用某张卡或钱包；具体可选项由商户启用、国家、币种和设备条件决定。当前未完成新鲜真实 Sandbox 全链路验收，不宣称任一具体收银台支付方式为 Available。
+- Checkout 的具体支付方式直达、Direct API、其余 APM 和 Game / Live / AI 场景当前为 Planned。
 - Unavailable 保留为明确证实不支持时使用的状态；当前不为凑齐 UI 而制造无证据的 Unavailable 组合。
 
 ## 4. 统一支付模型
@@ -104,7 +105,9 @@ Issue #3 的 UI stage 只通过 `source: simulation` 的不可变 PaymentEvent �
 
 该映射只定义确定性模拟器的行为，不宣称等同于 Onerway 原始状态映射。
 
-## 5. Web JS SDK M0 黄金路径
+## 5. Sandbox 接入路径
+
+### Web JS SDK M0 黄金路径
 
 固定条件：
 
@@ -133,6 +136,39 @@ Google Pay / Apple Pay DIRECT 不新增 create adapter、钱包专属 fixture、
 真实 Sandbox create 只接受服务端 allowlist 中的固定旅程，并从已持久化 Order 生成金额与商品：普通成功为 USD 5.00 / `HL-SAMPLE-005`，3DS Challenge 为 USD 50.00 / `HL-SAMPLE-050`。两者都固定使用 `paymentMode=WEB`、`productType=ALL`、`subProductType=DIRECT`、`txnType=SALE`、`risk3dsStrategy=DEFAULT` 与 `orderCurrency=USD`，并附带当前 Order 私有绑定的 `merchantCustId`；USD 50.00 是当前 Sandbox 受控资料确认的高金额 3DS 触发条件，不把 `INNER` 或客户端可选金额作为触发补丁。同步 create 的 `respCode=20000` 仅表示创建请求成功，返回 `status=U`、`transactionId` 和 `paymentId` 后才初始化 SDK。客户端只提交 allowlist journey id；普通入口遇到已有非终态恢复能力时始终返回原 Order / Attempt，不因页面后来选择另一旅程而创建平行支付。只有下一段定义的用户显式 Sandbox 新订单入口可以更换恢复绑定。
 
 Demo Hub 继续提供两条同结果、可重复的本地模拟旅程。模拟会话使用版本化 `sessionStorage` 在单个浏览器标签页内保存 Order、PaymentAttempt 和 PaymentEvent，刷新时恢复同一 attempt；Retry 追加新 attempt 并保留旧历史。该存储不包含凭据、PAN / CVV 或原始 provider payload，也不替代第 6 节要求的服务端持久化。真实 Sandbox 会话不写入该 simulation 存储。为避免 Provider-created 非终态阻塞后续受控测试，Demo Hub 的真实 Sandbox 按钮与支付页的 clean-run 按钮都显式启动一个新的独立 Sandbox Order；这不是旧 Order 的 PaymentAttempt Retry，不取消、不覆盖旧 Attempt，也不改变其支付真值，旧 Attempt 仍由 query / Webhook 收敛。该测试入口只在 Sandbox profile 开放，普通恢复入口仍复用同一非终态 Attempt，不能据此推导 Production 的放弃或重试语义。
+
+### Checkout 接入决定与验收边界（2026-09-14）
+
+用户已确认首版沿用 Halden 电商场景，接入 Sandbox 托管收银台的一次性支付、回跳与服务端核验，由收银台展示商户在当前交易条件下已启用的全部支付方式。保存卡、订阅、预授权和 Production 交易不属于本次首版。以下记录当天发布文档与用户确认的实施边界；模拟、自动化测试不替代真实 Sandbox 验收。
+
+已确认的官方输入与跳转契约：
+
+- [收银台接入](https://developers.onerway.com/zh/payments/online-payments/checkout)与[创建收银台支付](https://developers.onerway.com/zh/payments/api-reference/endpoints/create-checkout-payment)：调用 `POST /txn/payment`，普通聚合支付使用 `productType=ALL`、`subProductType=DIRECT`、`txnType=SALE`，不传 `lpmsInfo`，避免锁定单一支付方式。金额与商品继续由服务端固定旅程生成；按创建接口必填要求提供固定 Sandbox 账单/收货样例（US、CA 与测试邮箱），不向客户采集这些字段。
+- `txnOrderMsg` 提供 `returnUrl` 与 `notifyUrl`；浏览器、设备及持卡人 IP 由托管收银台采集，商户不沿用 SDK create 的 browser/device/IP 输入。创建返回 `U` 与 `redirectUrl` 后跳转，回跳不构成成功证据。
+- 当前公开示例证实的 Sandbox 跳转 origin 为 `https://sandbox-checkout.onerway.com`，路径包含 `/checkout` 与 `/aggregate`；示例不能作为任意子域或 Production origin 的授权。跳转 URL 只用于当前请求后的浏览器导航，不记录日志、不写入 Order / Attempt / Event、不进入 Technical details。
+
+本次已确认的差异及处理：
+
+| 边界 | 当前项目已验 SDK 契约 | 2026-09-14 发布文档 |
+| --- | --- | --- |
+| 通知验签入口（已迁移） | 历史实现使用 body `sign` | [请求签名](https://developers.onerway.com/zh/payments/get-started/request-signing#webhook-%E9%AA%8C%E7%AD%BE)要求使用 `X-Rh-Signature` 的 `v1` 签名项；body `sign` 仅兼容保留，不能可靠覆盖密钥轮换 |
+| 终态冲突处理（按用户决定保留） | fresh query 可调和冲突的 Webhook 终态，保留冲突事件 | [Webhook 通知](https://developers.onerway.com/zh/payments/get-started/webhooks)要求终态 Webhook 优先，query 只用于补偿 |
+| 收银台查询维度（按 integration 分派） | SDK 继续使用 `POST /v1/txn/queryPayments` | 收银台使用[查询交易记录](https://developers.onerway.com/zh/payments/api-reference/endpoints/query-transactions) `POST /v1/txn/list`；SDK 继续使用 Payment 查询。文档未明确禁止收银台调用 Payment 查询，但不能据此替代它指定的交易查询流程 |
+| 收银台取消通知（新增受限例外） | 仅 Checkout 的 `status=N` 且缺 Payment 级字段可走无 ID 关联 | [支付结果通知](https://developers.onerway.com/zh/payments/api-reference/webhooks/payment-result)明确收银台订单取消可能缺少 `paymentId` 与 `paymentStatus`，需以已验签的商户、交易关联和金额币种处理 |
+
+同日支付结果 API Reference 已将 `paymentMethod` 与 `walletTypeName` 标为不参与验签，与现有字段排除集合一致；新 header 通知链路仍需真实样本验收。
+
+实施规则：
+
+- 唯一真实旅程为 `hosted-checkout`：USD 5.00、`HL-CHECKOUT-005`、`integration=checkout`、`method=all`，不提供伪造收银台或结果保证的本地 simulation。`all` 通过 `0007_checkout` 迁移加入已有 method 约束；不增加原始 payload 或 URL 列。
+- 创建继续分为先持久化 intent 并签发 cookie、再认领 Provider create 两步。adapter 由持久化 Attempt 的 integration 决定；Hosted create 只接受空对象，不调用客户端 browser data 采集。页面位于 `/halden/hosted/:order`，展示订单和白名单引用，再由客户点击进入托管收银台；不挂载 SDK、不调用 confirm 或 SDK submission latch。
+- 跳转 URL 仅保留在当前浏览器内存的独立导航引用中，外跳时消费；不进入 Payment session/Event、持久层或 Technical details。刷新、恢复与结果未知时不重放 create、不拼造收银台 URL，只恢复和查询已有交易。
+- Checkout 查询调用 `POST /v1/txn/list`，按保存的 `merchantTxnId` 唯一匹配，并核对金额、币种及已有 provider IDs；`S → succeeded`、`N → cancelled`、`R → requires_action`、`I/U/P → processing`。交易 `F` 可能对应仍开放的 Payment，因此保守保持 `processing`，不开放新扣款 Retry；存在 Payment 轴时结合 `S/O/N`，未知值拒绝。
+- 无 Payment ID 的取消只允许已验签、商户匹配且 `status=N`、缺 `paymentStatus` 的 Checkout 通知；按唯一 `merchantTxnId`、金额、币种与已存 `transactionId` 核对。它可以早于 create 响应，后续 create 完成不能回退已持久化终态。SDK 和非取消通知不获得此例外。
+- 创建响应丢失后若只有无 Payment ID 的 Checkout 取消事实，恢复响应显式返回 `paymentId=null`、`query=null`；页面按 cookie 恢复既有取消，不能伪造 Payment ID、query capability 或调用 SDK。该情形首版不提供同 Order Retry，用户可回 Demo Hub 启动独立 Sandbox Order；具有 Payment ID 的权威取消继续使用既有唯一 child Retry。
+- `returnUrl` 在服务端 SSR 前丢弃附加 query（303、no-store、no-referrer），使用同源恢复 cookie 并对同一订单 fresh query；Checkout 按交易维度查询，SDK 按 Payment 维度查询。双方终态冲突遵循第 6 节用户确认的调和规则。Production 交易、canonical origin、限流及凭据边界不变。
+
+验收须覆盖创建与外跳、回跳查询、无 Payment ID 取消、header 验签与幂等、终态冲突、刷新不重复 create、跨 integration 恢复、320/390/834/1440 页面与明暗/键盘以及现有 SDK 回归。真实验收还需迁移数据库、部署携带新 header 的 Relay 与应用，并以新鲜 Sandbox 支付验证通知投递和服务端结果；这些未执行前不得将自动化样本写成真实支付完成。
 
 ## 6. 回跳、通知和最终状态
 
@@ -173,7 +209,7 @@ SubscriptionContract 自有 customer scope、plan projection、初始审计标�
 
 Card merchant confirm 使用独立的持久化 submission latch：浏览器在调用 `confirmPayment()` 前，必须以当前 HttpOnly recovery cookie 加精确匹配的 `orderId + attemptId + paymentId` 请求服务端原子写入 `PaymentAttempt.submissionStartedAt`。该时间只证明服务端已经签发一次 confirm 前置许可，不证明浏览器实际调用、confirm 返回或支付成功。首次 claim 返回 `claimed=true` 后客户端才允许调用 confirm；重复 claim 或响应未知不得再次 confirm，只能恢复并查询原 Attempt。顶层 `O` 或 `reason.type=canceled` 仍可在同一未刷新的 Checkout 中沿用已签发的临时许可再次 confirm，但不会清除持久化 latch；刷新后仍一律 query-only。历史 provider-created Attempt 无法证明从未提交，迁移时保守回填该 latch，不能因部署升级重新开放提交。
 
-新 PaymentAttempt Retry 与“重载原 Payment”或“启动独立 Sandbox Order”是三种不同动作：SDK 脚本 / Element 在 pre-confirm 阶段加载失败时先重载同一个 `paymentId`，不创建新 Attempt；create、confirm 或网络结果未知以及 `created / requires_action / processing` 只恢复和 query 原 Attempt；独立 clean-run 继续创建新 Order。只有 query / Webhook 权威建立的 `cancelled`，以及未来具有同等权威来源的 `failed`，才允许服务端在同一 Order 下创建带 `retryOf` 的新 Attempt。当前 transaction `F` 不能映射 Payment-level `failed`，在正式来源确认前真实 Sandbox `failed` 路径保持 stop gate。
+新 PaymentAttempt Retry 与“重载原 Payment”或“启动独立 Sandbox Order”是三种不同动作：SDK 脚本 / Element 在 pre-confirm 阶段加载失败时先重载同一个 `paymentId`，不创建新 Attempt；create、confirm 或网络结果未知以及 `created / requires_action / processing` 只恢复和 query 原 Attempt；独立 clean-run 继续创建新 Order。只有 query / Webhook 权威建立的 `cancelled`，以及未来具有同等权威来源的 `failed`，才允许服务端在同一 Order 下创建带 `retryOf` 的新 Attempt。当前 transaction `F`（包括 Checkout 查询返回的 `F`）不能单独映射 Payment-level `failed`，在正式来源确认前真实 Sandbox `failed` 路径保持 stop gate。
 
 Retry 由服务端在单一数据库事务中锁定 parent、重新计算资格并 get-or-create 唯一直接 child；数据库以非空 `retry_of` 唯一索引防止多击、请求重放或跨实例并发产生兄弟 Attempt。child 继承 parent 的 integration / method，使用新的 `merchantTxnId`，不覆盖旧 Attempt/Event。切换 recovery cookie 前 child 记录必须已完成数据库提交；响应丢失后，无论浏览器仍持有旧 parent cookie，还是已经收到响应头并切换为该 child cookie，重放同一个 parent retry 请求都只回读同一 child，其他 cookie lineage 一律拒绝。child 调用 Provider create 前必须再次锁定并核验 parent 资格，防止 parent 在建 child 后被 fresh query 调和为 `succeeded` 仍产生新扣款；一旦 child 已有 create claim 或 Provider 标识，后续只恢复该 child，不能重放 create。若 pre-create child 因 parent 真值变化而不再具有 Retry 资格，claim 事务必须先持久化本地、非投影且不可逆的拒绝事件，再永久关闭该 child；recovery 只在该拒绝事实存在时恢复并重绑 direct parent，不查询被拒 child 的 Provider creation、不删除 child 历史，也不把 child 伪装为 Provider `cancelled / failed`。
 
@@ -187,26 +223,27 @@ Retry 由服务端在单一数据库事务中锁定 parent、重新计算资格�
 
 同一 recovery 链还用于延续匿名 customer，但 customer identity 不写入 cookie：每个 Order 在服务端私有保存 `environment + merchantNo + appId + merchantCustId`，新 Order 只在 scope 完全一致时继承上一 Order 的 customer；旧数据缺少 customer 时在首次 Provider create 前以数据库行锁原子补齐。浏览器必须用同源 Web Lock 只串行化 `/api/payment/intent` 请求，使并发首开标签页在前一个响应写入 recovery cookie 后再创建或恢复 Order；锁不覆盖 Provider create、SDK 生命周期或后续查询，不支持 Web Locks 时必须在发出 intent 前 fail closed，不能退回到 IP / User-Agent 指纹或客户端 customer id。`merchantCustId` 少于 64 个字符，只使用大小写字母、数字、下划线与 dash，并且不进入共享 `Order` / `PaymentAttempt`、公开 API 响应、URL、浏览器存储、Technical details 或日志。清除 recovery cookie 或连续 30 天没有新 Order 后，Showcase 会把后续访问视为新的匿名 customer；这只表示本地不再关联，不能表述为 Onerway 侧 saved card 已删除。
 
-#6 的 create 使用 `ONERWAY_SHOWCASE_ORIGIN` 生成 canonical `GET /halden/return/:orderId` 回跳地址。Onerway 通过顶层 browser navigation 自动回跳，并可能在 `returnUrl` 后附加 query parameters；Showcase 不解释、不转发、不保存或展示这些参数，客户端恢复开始时立即把地址替换为无 query 的 canonical path。v4 SDK 在 3DS 顶层跳转分支可能不产生客户端 callback，因此 callback 缺席不能触发新 Attempt。回跳页只用 URL order 与 SameSite=Lax 签名 cookie 完成绑定，幂等写入一次 `source=return`、`status=processing`、以 Attempt id 为 source key 的 PaymentEvent；该事件不投影更新 PaymentAttempt。服务端随后无条件对同一 `paymentId` 执行 fresh query 并持久化 query event，即使 Webhook 已先形成终态也由 query 调和冲突；非终态时浏览器继续轮询同一 Payment。Webhook 先到、query 先到、return 先到或重复 return 都不得倒退终态或产生第二次提交。
+#6 的 create 使用 `ONERWAY_SHOWCASE_ORIGIN` 生成 canonical `GET /halden/return/:orderId` 回跳地址。Onerway 通过顶层 browser navigation 自动回跳，并可能在 `returnUrl` 后附加 query parameters；Showcase 不解释、不转发、不保存或展示这些参数；服务端在渲染回跳页面前以 303 跳转到无 query 的同一路径，并设置 no-store 与 no-referrer，避免参数进入 Nuxt hydration 数据。客户端恢复时仍清除 SPA 导航附加的 query。v4 SDK 在 3DS 顶层跳转分支可能不产生客户端 callback，因此 callback 缺席不能触发新 Attempt。回跳页只用 URL order 与 SameSite=Lax 签名 cookie 完成绑定，幂等写入一次 `source=return`、`status=processing`、以 Attempt id 为 source key 的 PaymentEvent；该事件不投影更新 PaymentAttempt。服务端随后无条件对同一 `paymentId` 执行 fresh query 并持久化 query event，即使 Webhook 已先形成终态也由 query 调和冲突；非终态时浏览器继续轮询同一 Payment。Webhook 先到、query 先到、return 先到或重复 return 都不得倒退终态或产生第二次提交。
 
 Provider create 采用两步 BFF：第一步先持久化 Order 与 Attempt，并在独立 HTTP 响应中把恢复 cookie 交付浏览器；第二步以该 cookie 认领同一 Attempt，再调用 Onerway。认领本身写入唯一 `source: server` PaymentEvent，因此取消请求、并发调用或结果未知都不能再次发起 create。Onerway 文档把 `merchantTxnId` 定义为每次交易请求唯一且用于防重复，但没有承诺重复 create 会返回原结果，因此网络或第二次本地事务失败后不得自动重放 create。恢复只使用同一 Attempt 已保存的 `merchantTxnId` 调用 `/v1/txn/list` 找回并关联既有 `paymentId + transactionId`；该 transaction 查询的 `S / F / N` 也只形成非终态事实，最终状态仍必须再经 Payment query。2026-08-04 已用当前新鲜 Sandbox 交易不落盘验证 merchantTxnId 查询返回唯一精确匹配。未查到既有 Provider 记录时保持恢复 pending，不能创建平行 Attempt。
 
 公开 create / query BFF 对带浏览器来源信息的请求执行同源 gate，并共享按 runtime 可信客户端地址计数的应用层速率与并发安全阀；不信任请求自带的通用 `X-Forwarded-For`。Vercel runtime 只读取平台覆盖的 `x-vercel-forwarded-for`，其他 runtime 使用 H3 提供的可信地址；Nuxt dev adapter 未提供 runtime 地址时只使用固定 loopback bucket，非开发 runtime 缺失可信地址则拒绝请求。该安全阀是单进程、单实例边界，不提供 Serverless 跨实例精确配额，也不替代部署平台的 edge / WAF 限流。
 
-最终核验调用 `POST /v1/txn/queryPayments`，以 v4 SDK 使用的 `paymentId` 查询 Payment 级 `paymentStatus`，并只白名单化 `paymentId`、`lastTransactionId` 与原始状态。2026-08-03 的真实 Sandbox 验证显示：同一 v4 Payment 在该接口可立即查询，而使用创建阶段 `transactionId` 调用 `/v1/txn/list` 返回空记录；因此 M0 不以旧 transaction query 作为最终真值入口。
+Web JS SDK 最终核验调用 `POST /v1/txn/queryPayments`，以 v4 SDK 使用的 `paymentId` 查询 Payment 级 `paymentStatus`，并只白名单化 `paymentId`、`lastTransactionId` 与原始状态。2026-08-03 的真实 Sandbox 验证显示：同一 v4 Payment 在该接口可立即查询，而使用创建阶段 `transactionId` 调用 `/v1/txn/list` 返回空记录；因此 M0 不以旧 transaction query 作为最终真值入口。
 
 支付方式归因是独立的服务端 enrichment：先由 `/v1/txn/queryPayments` 取得同一 Payment 的 `lastTransactionId` 并持久化状态真值，再以该 transaction id 调用 `POST /v1/txn/list`。只有 fresh Query 已给出终态，且 transaction id、payment id、`subProductType=DIRECT` 与 `txnType=SALE` 全部严格匹配唯一记录时，才可把 `walletTypeName=GooglePay / ApplePay` 分别归一化为 `actualWallet=google-pay / apple-pay`，并把受限的 `paymentMethod`（例如 `VISA`）保存为底层 `fundingNetwork`。归因必须满足 `attributionTransactionId = PaymentAttempt.transactionId`；同一 Payment 的 `lastTransactionId` 变化时先清除旧归因，再以新 transaction 原子替换，绝不把新 transaction 与旧钱包 / 网络拼接。存储层允许同一 transaction 的单项白名单事实先落库并只补缺失字段，但 Google Pay / Apple Pay 验收只有在 `actualWallet + fundingNetwork` 均存在时才视为归因完成；任一项缺失时，终态结果页会再执行一次 same-payment fresh Query。该短超时 enrichment 缺失、暂不可用或响应不匹配时不得阻断或回退已经建立的 Payment 状态；recovery 本身只恢复已经持久化的归因，不能使用 create 阶段 transaction id 自行归因。SDK callback 的 `paymentMethod` 只属于当前内存交互事实；Webhook 的 `walletTypeName` / `paymentMethod` 按当前实测验签规则被排除，二者都不得替代 transaction query 成为持久化实际方式真值。
 
-Payment result Webhook 的 M0 契约已通过 2026-08-04 当前 Sandbox secret 与新鲜通知做不落盘差分验签确认：
+Payment result Webhook 的字段选取与摘要算法曾于 2026-08-04 用新鲜 Sandbox 通知做不落盘差分验证。2026-09-14 按用户授权迁移公共 header 验签入口；新入口的真实通知验收仍待完成：
 
-- 验签从解析后的顶层字段中剔除 `originTransactionId`、`originMerchantTxnId`、`customsDeclarationAmount`、`customsDeclarationCurrency`、`paymentMethod`、`walletTypeName`、`periodValue`、`tokenExpireTime` 和 `sign`；其余非 `null`、非空字符串字段按字段名 ASCII 升序，只拼接 value，末尾追加当前 profile 的服务端 `secret`，计算小写 SHA-256，并使用 timing-safe comparison。
+- 验签只使用 `X-Rh-Signature`，支持逗号分隔的多项 `v1=<小写 SHA-256>`；当前 profile secret 计算的摘要与任一有效 v1 项 timing-safe 匹配才通过。缺 header、无有效 v1 或不匹配均拒绝，即使 body `sign` 正确也不回退。Relay 必须原样透传该 header；原始 header 与 body `sign` 均不保存或展示。
+- 摘要从解析后的顶层字段中剔除 `originTransactionId`、`originMerchantTxnId`、`customsDeclarationAmount`、`customsDeclarationCurrency`、`paymentMethod`、`walletTypeName`、`periodValue`、`tokenExpireTime` 和 `sign`；其余非 `null`、非空字符串字段按字段名 ASCII 升序，只拼接 value，末尾追加当前 profile 的服务端 `secret`，计算小写 SHA-256，并使用 timing-safe comparison。
 - `reason`、`products`、`paymentMethodDetails` 等 JSON string 使用收到并由 JSON parser 解码后的字符串值参与验签；它们只在验签进程内短暂存在，不保存、不记录日志、不进入错误或诊断响应。
 - Webhook 拒绝日志只记录固定白名单错误码，用于区分 body、signature 与 fields 三类失败；不得记录原始 payload、字段名、字段值、签名或任何交易标识。
-- 当前新 API Reference source 把 `paymentMethod` / `walletTypeName` 标为参与签名，但真实 Sandbox 样本只命中上述排除矩阵；这是已知文档 drift。更换 secret、环境或 Provider 规则后必须重新做受控样本验证，不实现双规则兼容或验签降级。
-- 验签、商户号、`merchantTxnId`、`paymentId`、金额和币种关联全部通过，且 PaymentEvent 与 PaymentAttempt 在同一数据库事务中可靠提交后，才返回 HTTP 200、`text/plain`，响应体严格为收到的 `transactionId`。
+- 2026-09-14 发布 API Reference 已把 `paymentMethod` / `walletTypeName` 标为不参与验签，与现有受控排除矩阵一致。更换环境或 Provider 规则后仍需重新验证，不实现 body/header 双规则回退或验签降级。
+- 验签、商户号、`merchantTxnId`、金额和币种以及 provider 标识关联全部通过（`paymentId` 缺失仅允许本节定义的 Checkout 取消例外），且 PaymentEvent 与 PaymentAttempt 在同一数据库事务中可靠提交后，才返回 HTTP 200、`text/plain`，响应体严格为收到的 `transactionId`。
 - Onerway 在首次通知失败后以 30 分钟间隔重试两次，最多在 T+0、T+30、T+60 投递三次；`transactionId` 是 Webhook PaymentEvent 的 provider 幂等键。
 
-Webhook 同时保留 transaction 级 `status` 和 Payment 级 `paymentStatus` 白名单值。`paymentStatus=S / O / N` 分别投影 `succeeded / processing / cancelled`；缺少 Payment 级状态时，transaction `N` 可投影 `cancelled`，`S / F` 只保留为 `processing` 并等待 query。`status=F + paymentStatus=O` 表示单笔交易失败但 Payment 仍开放，不得投影为 Attempt 失败。query 是终态冲突的调和权威：新 query 可替换冲突的 Webhook 终态；Webhook 不得覆盖已有 query 终态；任何中间态都不得回退终态，冲突事实仍作为 PaymentEvent 保留。
+Webhook 同时保留 transaction 级 `status` 和 Payment 级 `paymentStatus` 白名单值。`paymentStatus=S / O / N` 分别投影 `succeeded / processing / cancelled`；缺少 Payment 级状态时，transaction `N` 可投影 `cancelled`，`S / F` 只保留为 `processing` 并等待 query。`status=F + paymentStatus=O` 表示单笔交易失败但 Payment 仍开放，不得投影为 Attempt 失败。按 2026-09-14 用户再次确认的项目规则，query 是终态冲突的调和权威：新 query 可替换冲突的 Webhook 终态；Webhook 不得覆盖已有 query 终态；任何中间态都不得回退终态，冲突事实仍作为 PaymentEvent 保留。此规则有意区别于当前官方通用指南的 Webhook 优先建议，适用于现有 SDK 与新增 Checkout，不能在实现中隐式改成最后写入覆盖。
 
 正式持久层采用 Vercel Marketplace 管理的 Neon Postgres：
 
@@ -302,7 +339,8 @@ Sandbox 基础域名为 `https://sandbox-acq.onerway.com`，create 与 query 请
 | Web SDK 从可替换 `v4/latest` 迁移到版本化入口 | SDK 团队提供版本化入口后 |
 | Card / APM / Google Pay / Apple Pay 的逐组合能力 | 对应组合标为 Available 前 |
 | Production 启用门槛和演示边界 | 任何 Production 交易能力开放前 |
-| Checkout 与 Direct API 的完整字段契约 | 对应里程碑排期前 |
+| Checkout 新 header 验签与真实支付端到端验收 | 标为 Available 前 |
+| Direct API的完整字段契约 | 对应里程碑排期前 |
 | Payment-level `failed` 的正式原始状态与受控 Sandbox fixture | 真实 failed Retry 标为已通过前 |
 
 ## 11. 实现顺序

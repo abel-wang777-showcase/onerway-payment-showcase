@@ -788,6 +788,7 @@ export async function claimPaymentSubmission(
     if (
       row.payment_id !== paymentId
       || row.status !== 'processing'
+      || row.integration !== 'web-js-sdk'
     ) {
       throw new PaymentStoreError('PAYMENT_SUBMISSION_NOT_ALLOWED')
     }
@@ -868,7 +869,7 @@ export async function createPaymentRetry(
         throw new PaymentStoreError('PAYMENT_RETRY_NOT_ALLOWED')
       }
 
-      const claimed = Boolean(child.paymentId) || Boolean(await findEvent(
+      const claimed = Boolean(child.paymentId || child.transactionId) || Boolean(await findEvent(
         client,
         'server',
         `create-claim:${child.id}`,
@@ -940,7 +941,7 @@ export async function claimPaymentCreation(
       return Object.freeze({ outcome: 'retry_rejected', parentId: row.retry_of })
     }
 
-    if (row.payment_id || await findEvent(client, event.source, sourceKey)) {
+    if (row.payment_id || row.transaction_id || await findEvent(client, event.source, sourceKey)) {
       return Object.freeze({ outcome: 'existing' })
     }
 
@@ -1055,7 +1056,7 @@ export async function recordSubscriptionCreationRecoveryAllowed(
 
 export async function completePaymentRecord(
   attemptId: string,
-  paymentId: string,
+  paymentId: string | undefined,
   transactionId: string,
   event: PaymentEvent,
 ): Promise<PaymentAttempt> {
@@ -1081,7 +1082,16 @@ export async function completePaymentRecord(
 
     const current = attemptFromRow(row)
 
-    if (current.paymentId && current.paymentId !== paymentId) {
+    if (
+      (current.paymentId && paymentId && current.paymentId !== paymentId)
+      || (!paymentId && (
+        current.integration !== 'checkout'
+        || event.status !== 'cancelled'
+        || event.transactionStatus !== 'N'
+        || event.paymentStatus !== undefined
+      ))
+      || (current.integration === 'checkout' && current.transactionId && current.transactionId !== transactionId)
+    ) {
       throw new PaymentStoreError('PAYMENT_ATTEMPT_MISMATCH')
     }
 
@@ -1109,7 +1119,7 @@ export async function completePaymentRecord(
 
     const correlated = Object.freeze({
       ...current,
-      paymentId,
+      ...(paymentId ? { paymentId } : {}),
       transactionId: current.transactionId ?? transactionId,
     })
     const merged = mergeAttempt(correlated, event)
@@ -1134,7 +1144,7 @@ export async function completePaymentRecord(
 
 export async function recordQueryEvent(
   attemptId: string,
-  paymentId: string,
+  paymentId: string | undefined,
   result: QueriedPayment,
   occurredAt: string,
 ): Promise<{ readonly attempt: PaymentAttempt, readonly event: PaymentEvent, readonly duplicate: boolean }> {
@@ -1150,17 +1160,39 @@ export async function recordQueryEvent(
 
     const current = attemptFromRow(row)
 
-    if (current.paymentId !== paymentId || result.paymentId !== paymentId) {
+    const checkout = current.integration === 'checkout'
+
+    if (
+      current.paymentId !== paymentId
+      || (!checkout && (!paymentId || result.paymentId !== paymentId))
+      || (checkout && (
+        result.merchantTxnId !== current.merchantTxnId
+        || (!result.paymentId && (
+          result.transactionStatus !== 'N'
+          || result.paymentStatus !== undefined
+          || result.status !== 'cancelled'
+        ))
+        || (current.paymentId && result.paymentId && result.paymentId !== current.paymentId)
+        || (current.transactionId && result.transactionId !== current.transactionId)
+      ))
+    ) {
       throw new PaymentStoreError('PAYMENT_ATTEMPT_MISMATCH')
     }
 
-    const sourceKey = `${paymentId}:${result.transactionId ?? '-'}:${result.rawStatus}`
+    const queryKey = [paymentId ?? current.merchantTxnId, result.transactionId ?? '-', result.rawStatus]
+
+    if (checkout) {
+      queryKey.push(result.paymentStatus ?? '-')
+    }
+
+    const sourceKey = queryKey.join(':')
     const duplicate = await findEvent(client, 'query', sourceKey)
 
     if (duplicate) {
       return Object.freeze({ attempt: current, event: duplicate, duplicate: true })
     }
 
+    const paymentStatus = result.paymentStatus ?? (checkout ? undefined : result.rawStatus)
     const incoming = createEvent({
       id: randomUUID(),
       attemptId,
@@ -1168,11 +1200,15 @@ export async function recordQueryEvent(
       sourceKey,
       status: result.status,
       rawStatus: result.rawStatus,
-      paymentStatus: result.rawStatus,
+      ...(paymentStatus ? { paymentStatus } : {}),
+      ...(result.transactionStatus ? { transactionStatus: result.transactionStatus } : {}),
       ...(result.transactionId ? { transactionId: result.transactionId } : {}),
       occurredAt,
     })
-    const merged = mergeAttempt(current, incoming)
+    const correlated = !current.paymentId && result.paymentId
+      ? Object.freeze({ ...current, paymentId: result.paymentId })
+      : current
+    const merged = mergeAttempt(correlated, incoming)
     const event = createEvent({ ...incoming, ...(merged.conflict ? { conflict: true } : {}) })
 
     await insertEvent(client, event)
@@ -1492,12 +1528,16 @@ export async function recordWebhookEvent(
     }
 
     const current = attemptFromRow(row)
+    const checkoutCancellation = current.integration === 'checkout'
+      && fact.transactionStatus === 'N'
+      && fact.paymentStatus === undefined
 
     if (
       Number(row.amount_minor) !== fact.amountMinor
       || row.currency !== fact.currency
-      || !fact.paymentId
-      || (current.paymentId && current.paymentId !== fact.paymentId)
+      || (!fact.paymentId && !checkoutCancellation)
+      || (fact.paymentId && current.paymentId && current.paymentId !== fact.paymentId)
+      || (!fact.paymentId && current.transactionId && current.transactionId !== fact.transactionId)
     ) {
       throw new PaymentStoreError('PAYMENT_ATTEMPT_MISMATCH')
     }
@@ -1769,6 +1809,37 @@ export async function getPaymentTimeline(identifier: string): Promise<PaymentTim
       attempt: attemptFromRow(row),
       events: Object.freeze(events.rows.map(eventFromRow)),
     })
+  })
+}
+
+export async function getPaymentQueryContext(
+  attemptId: string,
+  paymentId: string,
+): Promise<{ readonly order: Order, readonly attempt: PaymentAttempt } | null> {
+  return transaction(async (client) => {
+    const found = await client.query<AttemptRow>(`
+      SELECT * FROM payment_attempts WHERE id = $1
+    `, [attemptId])
+    const row = found.rows[0]
+
+    if (!row) {
+      return null
+    }
+
+    if (row.payment_id !== paymentId) {
+      throw new PaymentStoreError('PAYMENT_ATTEMPT_MISMATCH')
+    }
+
+    const orders = await client.query<OrderRow>(`
+      SELECT * FROM payment_orders WHERE id = $1
+    `, [row.order_id])
+    const order = orders.rows[0]
+
+    if (!order) {
+      throw new PaymentStoreError('PAYMENT_ATTEMPT_NOT_FOUND')
+    }
+
+    return Object.freeze({ order: orderFromRow(order), attempt: attemptFromRow(row) })
   })
 }
 

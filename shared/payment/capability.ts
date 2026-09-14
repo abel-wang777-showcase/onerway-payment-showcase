@@ -4,7 +4,7 @@ export type SceneId = typeof SCENES[number]
 export const INTEGRATIONS = ['web-js-sdk', 'checkout', 'direct-api'] as const
 export type IntegrationId = typeof INTEGRATIONS[number]
 
-export const PAYMENT_METHODS = ['card', 'apm', 'google-pay', 'apple-pay'] as const
+export const PAYMENT_METHODS = ['card', 'apm', 'google-pay', 'apple-pay', 'all'] as const
 export type PaymentMethodId = typeof PAYMENT_METHODS[number]
 
 export const WALLET_PAYMENT_METHODS = ['google-pay', 'apple-pay'] as const
@@ -37,6 +37,17 @@ function defineCapability(
   integration: IntegrationId,
   method: PaymentMethodId,
 ): Capability {
+  if (scene === 'ecommerce' && integration === 'checkout' && method === 'all') {
+    return Object.freeze({
+      scene,
+      integration,
+      method,
+      status: 'conditional',
+      runnable: true,
+      condition: 'Choose on Onerway Checkout. Available methods depend on merchant enablement, country, currency and device. Sandbox verification required.',
+    })
+  }
+
   if (scene === 'ecommerce' && integration === 'web-js-sdk' && method === 'card') {
     return Object.freeze({
       scene,

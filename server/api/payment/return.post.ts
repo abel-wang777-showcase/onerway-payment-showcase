@@ -1,5 +1,5 @@
 import { isTerminalStatus, type ObservePaymentReturnResponse } from '../../../shared/payment/sdk'
-import { GatewayError, queryPayment, querySubscription } from '../../utils/gateway'
+import { GatewayError, queryCheckoutPayment, queryPayment, querySubscription } from '../../utils/gateway'
 import { withPaymentLimit } from '../../utils/limit'
 import { requireServerProfile } from '../../utils/profile'
 import { enrichDirectPaymentMethod } from '../../utils/method'
@@ -74,12 +74,20 @@ export default defineEventHandler(async (event): Promise<ObservePaymentReturnRes
         throw createError({ statusCode: 404, statusMessage: 'PAYMENT_RECOVERY_NOT_FOUND' })
       }
 
-      if (!recovery.attempt.paymentId) {
+      if (!recovery.attempt.paymentId && recovery.attempt.integration !== 'checkout') {
         throw createError({ statusCode: 409, statusMessage: 'PAYMENT_RECOVERY_PENDING' })
       }
 
       const result = await recordReturnEvent(recovery.attempt.id, new Date().toISOString())
-      const queried = await queryPayment(profile, recovery.attempt.paymentId)
+      const queried = recovery.attempt.integration === 'checkout'
+        ? await queryCheckoutPayment(profile, {
+            merchantTxnId: recovery.attempt.merchantTxnId!,
+            amountMinor: recovery.order.amount.minor,
+            currency: recovery.order.amount.currency,
+            transactionId: recovery.attempt.transactionId,
+            paymentId: recovery.attempt.paymentId,
+          })
+        : await queryPayment(profile, recovery.attempt.paymentId!)
 
       const recorded = await recordQueryEvent(
         recovery.attempt.id,
@@ -89,7 +97,7 @@ export default defineEventHandler(async (event): Promise<ObservePaymentReturnRes
       )
       const contract = await getSubscriptionForAttempt(recovery.attempt.id)
 
-      if (!contract && isTerminalStatus(queried.status) && queried.transactionId) {
+      if (recovery.attempt.integration !== 'checkout' && !contract && isTerminalStatus(queried.status) && queried.transactionId) {
         await enrichDirectPaymentMethod(
           profile,
           recorded.attempt,

@@ -84,11 +84,15 @@ const worker = {
     }
 
     let upstream
+    const signature = request.headers.get('x-rh-signature')
 
     try {
       upstream = await fetch(UPSTREAM, {
         method: 'POST',
-        headers: { 'content-type': contentType },
+        headers: {
+          'content-type': contentType,
+          ...(signature !== null ? { 'x-rh-signature': signature } : {}),
+        },
         body,
         redirect: 'manual',
         signal: AbortSignal.timeout(TIMEOUT_MS),

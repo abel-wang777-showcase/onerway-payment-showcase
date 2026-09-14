@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
   enrichDirectPaymentMethod: vi.fn(),
+  queryCheckoutPayment: vi.fn(),
   getPaymentRecovery: vi.fn(),
   getSubscriptionForAttempt: vi.fn(),
   queryPayment: vi.fn(),
@@ -18,6 +19,7 @@ vi.mock('../server/utils/method', () => ({
 }))
 
 vi.mock('../server/utils/gateway', () => ({
+  queryCheckoutPayment: mocks.queryCheckoutPayment,
   GatewayError: class GatewayError extends Error {},
   queryPayment: mocks.queryPayment,
   querySubscription: mocks.querySubscription,
@@ -154,4 +156,21 @@ describe('payment return route', () => {
 
     expect(mocks.enrichDirectPaymentMethod).not.toHaveBeenCalled()
   })
+})
+
+it('freshly queries Checkout through its merchant transaction even after cancellation omitted Payment ID', async () => {
+  mocks.getPaymentRecovery.mockResolvedValue({
+    order: { id: 'order-1', amount: { minor: 500, currency: 'USD' } },
+    attempt: { id: 'attempt-1', orderId: 'order-1', integration: 'checkout', merchantTxnId: 'merchant-txn-1', transactionId: '222', status: 'cancelled' },
+    events: [],
+  })
+  mocks.queryCheckoutPayment.mockResolvedValue({ merchantTxnId: 'merchant-txn-1', transactionId: '222', rawStatus: 'N', transactionStatus: 'N', status: 'cancelled' })
+  const { default: handler } = await import('../server/api/payment/return.post')
+  await (handler as (event: unknown) => Promise<unknown>)({})
+  expect(mocks.queryCheckoutPayment).toHaveBeenCalledWith(expect.anything(), {
+    merchantTxnId: 'merchant-txn-1', transactionId: '222', paymentId: undefined, amountMinor: 500, currency: 'USD',
+  })
+  expect(mocks.queryPayment).not.toHaveBeenCalled()
+  expect(mocks.enrichDirectPaymentMethod).not.toHaveBeenCalled()
+  expect(mocks.recordQueryEvent).toHaveBeenCalledWith('attempt-1', undefined, expect.objectContaining({ status: 'cancelled' }), expect.any(String))
 })

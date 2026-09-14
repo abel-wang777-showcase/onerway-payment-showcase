@@ -8,12 +8,14 @@ import {
   GatewayError,
   queryPayment,
   querySubscription,
+  queryCheckoutPayment,
   verifyQueryToken,
 } from '../../utils/gateway'
 import { withPaymentLimit } from '../../utils/limit'
 import { requireServerProfile } from '../../utils/profile'
 import { enrichDirectPaymentMethod } from '../../utils/method'
 import {
+  getPaymentQueryContext,
   getSubscriptionForAttempt,
   PaymentStoreError,
   recordQueryEvent,
@@ -80,7 +82,19 @@ export default defineEventHandler(async (event): Promise<QuerySdkPaymentResponse
     }
 
     try {
-      const result = await queryPayment(profile, input.paymentId)
+      const context = await getPaymentQueryContext(input.attemptId, input.paymentId)
+      if (!context) {
+        throw new PaymentStoreError('PAYMENT_ATTEMPT_NOT_FOUND')
+      }
+      const result = context.attempt.integration === 'checkout'
+        ? await queryCheckoutPayment(profile, {
+            merchantTxnId: context.attempt.merchantTxnId!,
+            amountMinor: context.order.amount.minor,
+            currency: context.order.amount.currency,
+            transactionId: context.attempt.transactionId,
+            paymentId: context.attempt.paymentId,
+          })
+        : await queryPayment(profile, input.paymentId)
       const recorded = await recordQueryEvent(
         input.attemptId,
         input.paymentId,
@@ -88,7 +102,7 @@ export default defineEventHandler(async (event): Promise<QuerySdkPaymentResponse
         new Date().toISOString(),
       )
       const currentContract = await getSubscriptionForAttempt(input.attemptId)
-      const attempt = currentContract || !isTerminalStatus(result.status) || !result.transactionId
+      const attempt = context.attempt.integration === 'checkout' || currentContract || !isTerminalStatus(result.status) || !result.transactionId
         ? recorded.attempt
         : await enrichDirectPaymentMethod(
             profile,

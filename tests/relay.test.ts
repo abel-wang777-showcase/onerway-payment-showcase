@@ -61,10 +61,14 @@ describe('Pages Webhook Relay', () => {
 
   it('forwards exact bytes and returns the upstream status and ACK', async () => {
     const raw = '{"event":"synthetic","value":"001"}'
+    const signature = `v1=${'0'.repeat(64)}, v1=${'1'.repeat(64)}`
     const fetch = vi.fn(async (url: string, init: RequestInit) => {
       expect(url).toBe('https://onerway-payment-showcase.vercel.app/api/webhooks/onerway/payment')
       expect(init.method).toBe('POST')
-      expect(init.headers).toEqual({ 'content-type': 'application/json; charset=utf-8' })
+      expect(init.headers).toEqual({
+        'content-type': 'application/json; charset=utf-8',
+        'x-rh-signature': signature,
+      })
       expect(new TextDecoder().decode(init.body as Uint8Array)).toBe(raw)
       expect(init.redirect).toBe('manual')
 
@@ -80,7 +84,11 @@ describe('Pages Webhook Relay', () => {
 
     const response = await worker.fetch(new Request(relayUrl, {
       method: 'POST',
-      headers: { 'content-type': 'application/json; charset=utf-8' },
+      headers: {
+        'content-type': 'application/json; charset=utf-8',
+        'X-Rh-Signature': signature,
+        authorization: 'do-not-forward',
+      },
       body: raw,
     }))
 

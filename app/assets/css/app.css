@@ -28,3 +28,11 @@
 .dark .halden-shell {
   --ui-primary: #db7089;
 }
+
+.demo-capability-legend > span {
+  max-width: 100%;
+}
+
+.demo-capability-legend [data-slot="label"] {
+  white-space: normal;
+}

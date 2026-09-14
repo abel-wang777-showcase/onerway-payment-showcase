@@ -113,10 +113,18 @@ function digest(body: Record<string, unknown>, secret: string): string {
     .digest('hex')
 }
 
-export function verifyWebhookSignature(body: Record<string, unknown>, secret: string): boolean {
-  const sign = body.sign
+export function verifyWebhookSignature(
+  body: Record<string, unknown>,
+  secret: string,
+  signatureHeader: string | undefined,
+): boolean {
+  if (!signatureHeader || signatureHeader.length > MAX_WEBHOOK_BYTES) {
+    return false
+  }
 
-  if (typeof sign !== 'string' || !/^[a-f0-9]{64}$/.test(sign)) {
+  const signatures = signatureHeader.split(',').map(item => item.trim())
+
+  if (signatures.some(item => !/^v1=[a-f0-9]{64}$/.test(item))) {
     return false
   }
 
@@ -129,7 +137,9 @@ export function verifyWebhookSignature(body: Record<string, unknown>, secret: st
     return false
   }
 
-  return timingSafeEqual(Buffer.from(actual, 'hex'), Buffer.from(sign, 'hex'))
+  const expected = Buffer.from(actual, 'hex')
+
+  return signatures.some(item => timingSafeEqual(expected, Buffer.from(item.slice(3), 'hex')))
 }
 
 export function parseWebhookBody(raw: string | undefined): Record<string, unknown> {
@@ -280,8 +290,9 @@ export function readPaymentWebhook(
   body: Record<string, unknown>,
   secret: string,
   merchantNo: string,
+  signatureHeader: string | undefined,
 ): PaymentWebhook {
-  if (!verifyWebhookSignature(body, secret)) {
+  if (!verifyWebhookSignature(body, secret, signatureHeader)) {
     throw new WebhookError('PAYMENT_WEBHOOK_SIGNATURE_INVALID')
   }
 
@@ -314,8 +325,9 @@ export function readSubscriptionPaymentWebhook(
   body: Record<string, unknown>,
   secret: string,
   merchantNo: string,
+  signatureHeader: string | undefined,
 ): SubscriptionPaymentWebhook {
-  if (!verifyWebhookSignature(body, secret)) {
+  if (!verifyWebhookSignature(body, secret, signatureHeader)) {
     throw new WebhookError('PAYMENT_WEBHOOK_SIGNATURE_INVALID')
   }
 

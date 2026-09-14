@@ -49,16 +49,16 @@ const {
 } = useSdk()
 
 const billingMode = shallowRef<'payment' | 'subscription'>(
-  route.query.mode === 'subscription' ? 'subscription' : 'payment',
+  route.query.mode === 'subscription' && route.query.journey !== 'hosted-checkout' ? 'subscription' : 'payment',
 )
 const subscriptionPlanId = shallowRef<SubscriptionPlanId>(
   isSubscriptionPlanId(route.query.plan) ? route.query.plan : 'halden-daily-essentials-v1',
 )
 const subscriptionPlan = computed(() => getSubscriptionPlan(subscriptionPlanId.value))
-const billingItems: RadioGroupItem[] = [
-  { value: 'payment', label: 'One-time payment', description: 'Run a payment simulation or a real Sandbox SDK journey.' },
-  { value: 'subscription', label: 'Subscription', description: 'Create one merchant-managed daily Sandbox subscription.' },
-]
+const billingItems = computed<RadioGroupItem[]>(() => [
+  { value: 'payment', label: 'One-time payment', description: 'Run a payment simulation or a real Sandbox journey.' },
+  { value: 'subscription', label: 'Subscription', description: 'Create one merchant-managed daily Sandbox subscription with Web JS SDK.', disabled: selection.value.integration !== 'web-js-sdk' },
+])
 
 function readRoutePaymentMethod(value: unknown): PaymentMethodId {
   if (
@@ -72,10 +72,11 @@ function readRoutePaymentMethod(value: unknown): PaymentMethodId {
   return 'card'
 }
 
+const initialJourney = getJourney(isJourneyId(route.query.journey) ? route.query.journey : 'standard-success')
 const selection = ref({
-  scene: 'ecommerce' as SceneId,
-  integration: 'web-js-sdk' as IntegrationId,
-  method: readRoutePaymentMethod(route.query.method),
+  scene: initialJourney.scene as SceneId,
+  integration: initialJourney.integration as IntegrationId,
+  method: initialJourney.integration === 'checkout' ? initialJourney.method : readRoutePaymentMethod(route.query.method),
 })
 const journeyId = shallowRef<JourneyId>(
   isJourneyId(route.query.journey) ? route.query.journey : 'standard-success',
@@ -97,6 +98,7 @@ const integrationLabels: Record<IntegrationId, string> = {
 const methodLabels: Record<PaymentMethodId, string> = {
   card: 'Card',
   apm: 'APM',
+  all: 'Choose on Checkout',
   'google-pay': 'Google Pay',
   'apple-pay': 'Apple Pay',
 }
@@ -135,7 +137,8 @@ const scenes = computed<RadioGroupItem[]>(() => SCENES.map((scene) => {
 }))
 
 const integrations = computed<RadioGroupItem[]>(() => INTEGRATIONS.map((integration) => {
-  const capability = getCapability(selection.value.scene, integration, selection.value.method)
+  const method = integration === 'checkout' ? 'all' : selection.value.method === 'all' ? 'card' : selection.value.method
+  const capability = getCapability(selection.value.scene, integration, method)
   return option(integration, integrationLabels[integration], capability.status, capability.runnable, capability.condition)
 }))
 
@@ -144,7 +147,15 @@ const methods = computed<RadioGroupItem[]>(() => PAYMENT_METHODS.map((method) =>
   return option(method, methodLabels[method], capability.status, capability.runnable, capability.condition)
 }))
 
-const journeyItems = computed<RadioGroupItem[]>(() => JOURNEY_IDS.map(id => ({
+watch(() => selection.value.integration, (integration) => {
+  if (integration !== 'web-js-sdk') billingMode.value = 'payment'
+  selection.value.method = integration === 'checkout' ? 'all' : 'card'
+  journeyId.value = integration === 'checkout' ? 'hosted-checkout' : 'standard-success'
+})
+
+const journeyItems = computed<RadioGroupItem[]>(() => JOURNEY_IDS
+  .filter(id => JOURNEYS[id].integration === selection.value.integration)
+  .map(id => ({
   value: id,
   label: JOURNEYS[id].label,
   description: JOURNEYS[id].description,
@@ -229,7 +240,7 @@ const canStartSimulation = computed(() =>
 )
 const canStartSdk = computed(() =>
   profile.value?.profile === 'sandbox'
-  && profile.value.sdk?.release === 'v4/latest'
+  && (billingMode.value === 'payment' && journey.value.integration === 'checkout' || profile.value.sdk?.release === 'v4/latest')
   && (
     restoringSdk.value
     || billingMode.value === 'subscription'
@@ -244,7 +255,7 @@ const canStartSeparateSandboxOrder = computed(() =>
   && restoringSdk.value
   && !canonicalSandboxHref.value
   && profile.value?.profile === 'sandbox'
-  && profile.value.sdk?.release === 'v4/latest'
+  && (billingMode.value === 'payment' && journey.value.integration === 'checkout' || profile.value.sdk?.release === 'v4/latest')
   && selectedCapability.value.runnable
   && supportsSandboxMethod(journey.value, selection.value.method),
 )
@@ -270,6 +281,8 @@ const sdkLabel = computed(() => {
   if (!journey.value.modes.includes('sandbox')) {
     return 'Real Sandbox unavailable for this fixture'
   }
+
+  if (journey.value.integration === 'checkout') return 'Start a new Sandbox Hosted Checkout'
 
   if (selectedWalletLabel.value) {
     return `Open ${selectedWalletLabel.value} Sandbox`
@@ -393,18 +406,19 @@ watch(() => selection.value.method, (method) => {
 
           <div
             aria-label="Capability status legend"
-            class="flex flex-wrap gap-2"
+            class="demo-capability-legend flex flex-wrap gap-2"
           >
             <UBadge label="Available · Runs now" color="success" variant="soft" />
-            <UBadge label="Conditional · SDK eligibility decides availability" color="warning" variant="soft" />
+            <UBadge label="Conditional · Merchant and customer eligibility apply" color="warning" variant="soft" />
             <UBadge label="Planned · Not delivered" color="neutral" variant="soft" />
             <UBadge label="Unavailable · Explicitly unsupported" color="error" variant="soft" />
           </div>
 
           <HubJourneyPicker
-            v-if="canStartSimulation"
+            v-if="billingMode === 'payment' && (canStartSimulation || journey.integration === 'checkout')"
             v-model="journeyId"
             :items="journeyItems"
+            :hosted="journey.integration === 'checkout'"
           />
 
           <section aria-labelledby="billing-experience-title">
@@ -424,6 +438,7 @@ watch(() => selection.value.method, (method) => {
           :facts="passportFacts"
           :profile="profileLabel"
           :sandbox="billingMode === 'subscription' || journey.modes.includes('sandbox')"
+          :simulation="canStartSimulation"
         >
           <UButton
             v-if="canStartSimulation"

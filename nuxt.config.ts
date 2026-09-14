@@ -37,6 +37,13 @@ export default defineNuxtConfig({
     ],
   },
 
+  icon: {
+    fallbackToApi: false,
+    clientBundle: {
+      icons: ['lucide:package-check', 'lucide:refresh-cw'],
+    },
+  },
+
   ui: {
     ...base.ui,
     theme: {

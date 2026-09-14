@@ -56,7 +56,7 @@ beforeEach(() => {
   vi.stubGlobal('defineEventHandler', (handler: unknown) => handler)
   vi.stubGlobal('setResponseHeader', vi.fn())
   vi.stubGlobal('setResponseStatus', vi.fn())
-  vi.stubGlobal('getHeader', vi.fn())
+  vi.stubGlobal('getHeader', vi.fn((_event, name) => name === 'x-rh-signature' ? 'v1=test-header' : undefined))
   vi.stubGlobal('createError', (input: object) => Object.assign(new Error('HTTP_ERROR'), input))
 
   mocks.requireServerProfile.mockReturnValue({
@@ -85,6 +85,9 @@ describe('subscription webhook route', () => {
     })
 
     expect(result).toBe(fact.transactionId)
+    expect(mocks.readSubscriptionPaymentWebhook).toHaveBeenCalledWith(
+      { scenarios: 'SUBSCRIPTION_INITIAL' }, 'secret', 'merchant', 'v1=test-header',
+    )
     expect(mocks.querySubscription).not.toHaveBeenCalled()
     expect(mocks.recordSubscriptionWebhookEvent).not.toHaveBeenCalled()
     expect(setResponseStatus).toHaveBeenCalledWith(expect.anything(), 200)

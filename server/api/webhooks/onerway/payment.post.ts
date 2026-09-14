@@ -28,10 +28,11 @@ export default defineEventHandler(async (event): Promise<string> => {
 
   try {
     const body = await readWebhookBody(event.node.req, getHeader(event, 'content-length'))
+    const signatureHeader = getHeader(event, 'x-rh-signature')
     let transactionId: string
 
     if (body.scenarios !== undefined) {
-      const fact = readSubscriptionPaymentWebhook(body, profile.secret, profile.merchantNo)
+      const fact = readSubscriptionPaymentWebhook(body, profile.secret, profile.merchantNo, signatureHeader)
 
       if (await isSubscriptionWebhookProcessed(fact)) {
         setResponseStatus(event, 200)
@@ -46,7 +47,7 @@ export default defineEventHandler(async (event): Promise<string> => {
       transactionId = fact.transactionId
     }
     else {
-      const fact = readPaymentWebhook(body, profile.secret, profile.merchantNo)
+      const fact = readPaymentWebhook(body, profile.secret, profile.merchantNo, signatureHeader)
       await recordWebhookEvent(fact)
       transactionId = fact.transactionId
     }

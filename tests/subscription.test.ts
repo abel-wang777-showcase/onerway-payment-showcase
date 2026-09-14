@@ -270,7 +270,8 @@ function signedSubscriptionWebhook(): Record<string, unknown> {
 
 describe('subscription webhook', () => {
   it('uses the shared exclusion contract and projects no raw card payload', () => {
-    const fact = readSubscriptionPaymentWebhook(signedSubscriptionWebhook(), 'secret', 'merchant')
+    const body = signedSubscriptionWebhook()
+    const fact = readSubscriptionPaymentWebhook(body, 'secret', 'merchant', `v1=${body.sign}`)
 
     expect(fact).toMatchObject({
       scenario: 'SUBSCRIPTION_INITIAL',
@@ -282,5 +283,14 @@ describe('subscription webhook', () => {
       subscriptionState: 'active',
     })
     expect(fact).not.toHaveProperty('paymentMethod')
+  })
+
+  it('requires the shared signature header even when the legacy body signature is valid', () => {
+    const body = signedSubscriptionWebhook()
+
+    expect(() => readSubscriptionPaymentWebhook(body, 'secret', 'merchant', undefined))
+      .toThrow('PAYMENT_WEBHOOK_SIGNATURE_INVALID')
+    expect(readSubscriptionPaymentWebhook({ ...body, sign: 'legacy-other-key' }, 'secret', 'merchant', `v1=${body.sign}`).status)
+      .toBe('succeeded')
   })
 })
