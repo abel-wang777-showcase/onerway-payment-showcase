@@ -4,6 +4,7 @@ import {
   parseWebhookBody,
   readWebhookBody,
   readPaymentWebhook as readWebhook,
+  readSubscriptionPaymentWebhook,
   verifyWebhookSignature,
 } from '../server/utils/webhook'
 
@@ -60,6 +61,60 @@ function readPaymentWebhook(body: Record<string, unknown>, secret: string, merch
 }
 
 describe('Onerway payment webhook boundary', () => {
+  it.each([
+    [{ notifyType: 'OTHER' }, 'E01'],
+    [{ txnType: 'OTHER' }, 'E02'],
+    [{ merchantNo: 'other-merchant' }, 'E03'],
+    [{ transactionId: 'invalid-id' }, 'P01'],
+    [{ paymentId: 123 }, 'P02'],
+    [{ merchantTxnId: 'invalid id' }, 'P03'],
+    [{ orderAmount: 5 }, 'P04'],
+    [{ orderCurrency: 'EUR' }, 'P05'],
+    [{ status: 'UNKNOWN' }, 'P06'],
+    [{ paymentStatus: 'UNKNOWN' }, 'P07'],
+    [{ orderAmount: '99999999999999.99' }, 'P08'],
+    [{ txnTime: '2026-09-15T08:57:51' }, 'T01'],
+    [{ txnTimeZone: 'UTC+8' }, 'T02'],
+    [{ txnTime: '2026-02-30 08:57:51' }, 'T03'],
+  ])('identifies a signed field rejection with a fixed internal code: %j', (overrides, diagnosticCode) => {
+    const body = payload(overrides as Record<string, unknown>)
+    let rejection: unknown
+    try {
+      readPaymentWebhook(body, secret, 'merchant')
+    }
+    catch (error) {
+      rejection = error
+    }
+    expect(rejection).toMatchObject({
+      code: 'PAYMENT_WEBHOOK_FIELDS_INVALID',
+      message: 'PAYMENT_WEBHOOK_FIELDS_INVALID',
+      diagnosticCode,
+    })
+    const serialized = JSON.stringify(rejection)
+    expect(serialized).not.toContain(body.sign)
+    expect(serialized).not.toContain('merchantTxnId')
+    expect(serialized).not.toContain('orderAmount')
+  })
+
+  it('keeps signature rejection ahead of field diagnostics', () => {
+    const body = payload({ merchantNo: 'other-merchant', orderAmount: 5 })
+    let rejection: unknown
+    try {
+      readWebhook(body, secret, 'merchant', `v1=${'0'.repeat(64)}`)
+    }
+    catch (error) {
+      rejection = error
+    }
+    expect(rejection).toMatchObject({ code: 'PAYMENT_WEBHOOK_SIGNATURE_INVALID' })
+    expect(rejection).not.toHaveProperty('diagnosticCode', expect.any(String))
+  })
+
+  it.each([null, '', 'SUBSCRIPTION_RENEWAL'])('diagnoses an invalid subscription scenario without accepting it: %s', (scenarios) => {
+    const body = payload({ scenarios })
+    expect(() => readSubscriptionPaymentWebhook(body, secret, 'merchant', `v1=${body.sign}`))
+      .toThrow(expect.objectContaining({ code: 'PAYMENT_WEBHOOK_FIELDS_INVALID', diagnosticCode: 'S01' }))
+  })
+
   it('accepts any current-secret v1 item during key rotation and ignores body sign', () => {
     const body = payload()
     const header = `v1=${'0'.repeat(64)}, v1=${body.sign}`

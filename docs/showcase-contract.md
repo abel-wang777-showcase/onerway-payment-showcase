@@ -253,7 +253,7 @@ Payment result Webhook 的字段选取与摘要算法曾于 2026-08-04 用新鲜
 - 验签只使用 `X-Rh-Signature`，支持逗号分隔的多项 `v1=<小写 SHA-256>`；当前 profile secret 计算的摘要与任一有效 v1 项 timing-safe 匹配才通过。缺 header、无有效 v1 或不匹配均拒绝，即使 body `sign` 正确也不回退。Relay 必须原样透传该 header；原始 header 与 body `sign` 均不保存或展示。
 - 摘要从解析后的顶层字段中剔除 `originTransactionId`、`originMerchantTxnId`、`customsDeclarationAmount`、`customsDeclarationCurrency`、`paymentMethod`、`walletTypeName`、`periodValue`、`tokenExpireTime` 和 `sign`；其余非 `null`、非空字符串字段按字段名 ASCII 升序，只拼接 value，末尾追加当前 profile 的服务端 `secret`，计算小写 SHA-256，并使用 timing-safe comparison。
 - `reason`、`products`、`paymentMethodDetails` 等 JSON string 使用收到并由 JSON parser 解码后的字符串值参与验签；它们只在验签进程内短暂存在，不保存、不记录日志、不进入错误或诊断响应。
-- Webhook 拒绝日志只记录固定白名单错误码，用于区分 body、signature 与 fields 三类失败；不得记录原始 payload、字段名、字段值、签名或任何交易标识。
+- Webhook 拒绝日志只记录固定白名单错误码，用于区分 body、signature 与 fields 三类失败；字段拒绝可额外记录代码内定义的固定 `diagnosticCode`，定位校验步骤。诊断码只留在服务端日志，不进入 HTTP 响应、PaymentEvent 或客户端；映射以 `server/utils/webhook.ts` 为准，不从请求动态生成。不得记录原始 payload、字段名、字段值、签名或任何交易标识；诊断不改变验签、字段接受规则、订阅分流或支付真值。
 - 2026-09-14 发布 API Reference 已把 `paymentMethod` / `walletTypeName` 标为不参与验签，与现有受控排除矩阵一致。更换环境或 Provider 规则后仍需重新验证，不实现 body/header 双规则回退或验签降级。
 - 验签、商户号、`merchantTxnId`、金额和币种以及 provider 标识关联全部通过（`paymentId` 缺失仅允许本节定义的 Checkout 取消例外），且 PaymentEvent 与 PaymentAttempt 在同一数据库事务中可靠提交后，才返回 HTTP 200、`text/plain`，响应体严格为收到的 `transactionId`。
 - Onerway 在首次通知失败后以 30 分钟间隔重试两次，最多在 T+0、T+30、T+60 投递三次；`transactionId` 是 Webhook PaymentEvent 的 provider 幂等键。
