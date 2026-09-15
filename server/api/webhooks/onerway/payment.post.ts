@@ -31,7 +31,7 @@ export default defineEventHandler(async (event): Promise<string> => {
     const signatureHeader = getHeader(event, 'x-rh-signature')
     let transactionId: string
 
-    if (body.scenarios !== undefined) {
+    if (body.scenarios !== undefined && body.scenarios !== null) {
       const fact = readSubscriptionPaymentWebhook(body, profile.secret, profile.merchantNo, signatureHeader)
 
       if (await isSubscriptionWebhookProcessed(fact)) {

@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { createHash } from 'node:crypto'
 
 const mocks = vi.hoisted(() => ({
   isSubscriptionWebhookProcessed: vi.fn(),
@@ -69,6 +70,35 @@ afterEach(() => {
 })
 
 describe('subscription webhook route', () => {
+  it.each([undefined, null])('processes a signed ordinary notification with scenario %s through the payment boundary', async (scenarios) => {
+    const body = {
+      notifyType: 'TXN', txnType: 'SALE', merchantNo: 'merchant',
+      transactionId: '2084000000000000001', paymentId: '2084000000000000002',
+      merchantTxnId: 'showcase-ordinary-payment', orderAmount: '5.00', orderCurrency: 'USD',
+      status: 'S', paymentStatus: 'S', txnTime: '2026-09-15 08:57:51', txnTimeZone: '+08:00',
+      ...(scenarios === undefined ? {} : { scenarios }),
+    }
+    const digest = createHash('sha256').update(Object.entries(body)
+      .filter(([, value]) => value !== null)
+      .sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0)
+      .map(([, value]) => value).join('') + 'secret').digest('hex')
+    const real = await vi.importActual<typeof import('../server/utils/webhook')>('../server/utils/webhook')
+    mocks.readWebhookBody.mockResolvedValue(real.parseWebhookBody(JSON.stringify(body)))
+    mocks.readPaymentWebhook.mockImplementation(real.readPaymentWebhook)
+    vi.mocked(getHeader).mockImplementation((_event, name) => name === 'x-rh-signature' ? `v1=${digest}` : undefined)
+    mocks.recordWebhookEvent.mockResolvedValue({ duplicate: false })
+    const { default: handler } = await import('../server/api/webhooks/onerway/payment.post')
+    const result = await (handler as (event: { node: { req: unknown } }) => Promise<string>)({ node: { req: {} } })
+    expect(result).toBe(body.transactionId)
+    expect(mocks.recordWebhookEvent).toHaveBeenCalledWith(expect.objectContaining({
+      transactionId: body.transactionId, paymentId: body.paymentId, amountMinor: 500, status: 'succeeded',
+    }))
+    expect(mocks.readSubscriptionPaymentWebhook).not.toHaveBeenCalled()
+    expect(mocks.recordSubscriptionWebhookEvent).not.toHaveBeenCalled()
+    expect(mocks.querySubscription).not.toHaveBeenCalled()
+    expect(setResponseStatus).toHaveBeenCalledWith(expect.anything(), 200)
+  })
+
   it('ACKs a locally processed retry without depending on Provider Query', async () => {
     mocks.isSubscriptionWebhookProcessed.mockResolvedValue(true)
 
@@ -141,9 +171,9 @@ describe('subscription webhook route', () => {
     expect(logged).not.toContain(rejectedBody.sign)
   })
 
-  it('keeps field diagnostics in the server log and never persists or returns them', async () => {
+  it.each(['', 'SUBSCRIPTION_RENEWAL', 'UNKNOWN'])('rejects scenario %s and keeps diagnostics only in server logs', async (scenarios) => {
     const warning = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    const rejectedBody = { scenarios: null, merchantTxnId: 'private-order', reason: 'private-reason' }
+    const rejectedBody = { scenarios, merchantTxnId: 'private-order', reason: 'private-reason' }
     mocks.readWebhookBody.mockResolvedValue(rejectedBody)
     const { WebhookError } = await import('../server/utils/webhook')
     mocks.readSubscriptionPaymentWebhook.mockImplementation(() => {
