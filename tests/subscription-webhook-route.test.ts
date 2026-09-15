@@ -27,18 +27,11 @@ vi.mock('../server/utils/store', () => ({
   recordWebhookEvent: mocks.recordWebhookEvent,
 }))
 
-vi.mock('../server/utils/webhook', () => ({
+vi.mock('../server/utils/webhook', async (importOriginal) => ({
   readPaymentWebhook: mocks.readPaymentWebhook,
   readSubscriptionPaymentWebhook: mocks.readSubscriptionPaymentWebhook,
   readWebhookBody: mocks.readWebhookBody,
-  WebhookError: class WebhookError extends Error {
-    readonly code: string
-
-    constructor(code: string) {
-      super(code)
-      this.code = code
-    }
-  },
+  WebhookError: (await importOriginal<typeof import('../server/utils/webhook')>()).WebhookError,
 }))
 
 const fact = {
@@ -146,5 +139,37 @@ describe('subscription webhook route', () => {
     const logged = JSON.stringify(warning.mock.calls)
     expect(logged).not.toContain(rejectedBody.merchantTxnId)
     expect(logged).not.toContain(rejectedBody.sign)
+  })
+
+  it('keeps field diagnostics in the server log and never persists or returns them', async () => {
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const rejectedBody = { scenarios: null, merchantTxnId: 'private-order', reason: 'private-reason' }
+    mocks.readWebhookBody.mockResolvedValue(rejectedBody)
+    const { WebhookError } = await import('../server/utils/webhook')
+    mocks.readSubscriptionPaymentWebhook.mockImplementation(() => {
+      throw Object.assign(new WebhookError('PAYMENT_WEBHOOK_FIELDS_INVALID', 'S01'), {
+        payload: rejectedBody,
+        signature: 'private-signature',
+      })
+    })
+    const { default: handler } = await import('../server/api/webhooks/onerway/payment.post')
+    let responseError: unknown
+    try {
+      await (handler as (event: { node: { req: unknown } }) => Promise<string>)({ node: { req: {} } })
+    }
+    catch (error) {
+      responseError = error
+    }
+    expect(responseError).toMatchObject({ statusCode: 400, statusMessage: 'PAYMENT_WEBHOOK_FIELDS_INVALID' })
+    expect(responseError).not.toHaveProperty('diagnosticCode')
+    expect(warning).toHaveBeenCalledExactlyOnceWith('[payment-webhook] rejected', {
+      code: 'PAYMENT_WEBHOOK_FIELDS_INVALID', diagnosticCode: 'S01',
+    })
+    expect(mocks.readPaymentWebhook).not.toHaveBeenCalled()
+    expect(mocks.recordWebhookEvent).not.toHaveBeenCalled()
+    expect(mocks.recordSubscriptionWebhookEvent).not.toHaveBeenCalled()
+    expect(mocks.querySubscription).not.toHaveBeenCalled()
+    expect(JSON.stringify(warning.mock.calls)).not.toMatch(/private-|merchantTxnId|payload|signature|reason/)
+    expect(JSON.stringify(responseError)).not.toMatch(/S01|private-/)
   })
 })
