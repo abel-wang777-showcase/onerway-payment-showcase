@@ -2,7 +2,7 @@
 
 > 状态：M0 Web JS SDK Card、订阅与钱包；Sandbox Hosted Checkout 已有真实演示证据，逐方式能力保持条件限制
 >
-> 更新日期：2026-09-16
+> 更新日期：2026-09-17
 > 作用：这是项目长期有效的产品、架构、状态和安全边界。GitHub Issues 负责交付顺序，不替代本文件。
 
 ## 1. 产品目标、受众和非目标
@@ -140,7 +140,7 @@ Demo Hub 继续提供两条同结果、可重复的本地模拟旅程。模拟�
 
 ### Checkout 接入决定与验收边界（2026-09-14）
 
-用户已确认首版沿用 Halden 电商场景，接入 Sandbox 托管收银台的一次性支付、回跳与服务端核验，由收银台展示商户在当前交易条件下已启用的全部支付方式。保存卡、订阅、预授权和 Production 交易不属于本次首版。以下记录当天发布文档与用户确认的实施边界；模拟、自动化测试不替代真实 Sandbox 验收。
+用户已确认首版沿用 Halden 电商场景，接入 Sandbox 托管收银台的一次性支付、回跳与服务端核验，由收银台展示商户在当前交易条件下已启用的全部支付方式。首版不含保存卡；后续保存卡与复购按下方 Issue #9 边界接入。Checkout 订阅、预授权和 Production 交易仍不属于此范围。以下记录当天发布文档与用户确认的实施边界；模拟、自动化测试不替代真实 Sandbox 验收。
 
 已确认的官方输入与跳转契约：
 
@@ -186,6 +186,18 @@ Demo Hub 继续提供两条同结果、可重复的本地模拟旅程。模拟�
 Showcase 对 transaction F 的保守映射、缺 Payment ID 取消的受限关联、未知创建结果禁止重复 create、通知验签 / 幂等 / 终态调和仍是实现要求，继续由相关自动化验证。后续真实样本未验证不等于本次演示未完成，也不得写成已通过。`ALL` 仅表示托管页选择策略，不作为任何具体支付方式已验证的依据；能力改为 Available 仍须满足对应组合条件。
 
 代理执行的真实记录应包含日期、canonical Production 部署 SHA、Sandbox profile、固定旅程、实际方式、设备 / 浏览器、国家 / 币种、观察到的交互及核验来源；未取得的字段明确标为未知。用户人工验收按其明确确认的范围登记，不推定缺失订单或设备信息。受限诊断使用同笔白名单标识关联通知、query 与持久化，公开 Issue / PR 只保留脱敏尾号及证据摘要；不记录完整交易标识、卡数据、导航 URL、query capability 或原始 payload。模拟、自动化、人工确认、真实 Provider 发送与手动回放不得互相替代。
+
+### Checkout 保存卡与复购（Issue #9）
+
+Checkout 与 Web JS SDK 的普通一次性支付共用第 6 节定义的服务端匿名 customer 与签名 recovery 链。Checkout create 必须读取当前 Order 的私有 customer；旧记录缺失时使用现有 `ensurePaymentCustomer` 原子补齐，并在认领 Provider create 前验证 environment、merchantNo、appId 与客户标识。请求保持 `ALL + DIRECT + SALE`，在顶层传入稳定的 `merchantCustId`；不接受客户端 customer 或 token 输入，不新增 cookie、数据库字段或支付状态。
+
+按 [Checkout 保存卡](https://developers.onerway.com/payments/online-payments/checkout#saved-card-option)与[保存支付方式](https://developers.onerway.com/payments/online-payments/scenarios/saved-payment-methods)指南，保存选项默认不勾选，由客户在 Provider 托管页主动选择并完成支付；后续同 scope 的新 Order 继续传入同一客户标识，保存与选卡均由 Provider 承接。Showcase 不自建卡列表、解绑、token 支付或“绑卡成功”状态。现有显式新 Sandbox Order 入口用于复购，恢复仍只收敛原 Attempt；支付成功不能单独证明卡已保存。
+
+SDK → Checkout 与 Checkout → SDK 切换沿用同 scope 身份，但实际跨入口卡可见性必须由新鲜 Provider 证据确认；若 Provider 隔离可见性，只记录限制，不复制或绕过 token。清除 recovery 后的新访问成为新匿名客户，不再关联旧客户卡，不表示 Provider 卡已删除；既有 30 天保留边界不变。
+
+2026-09-17 核对的官方保存支付方式指南描述独立保存结果通知；2026-08-13 SDK 历史验收则记录未收到第二笔绑卡通知。两者不能直接推定为当前 Checkout 行为，本次真实验收须单列是否观察到该通知及其关联证据。当前托管复购不依赖商户 token 消费，不新增 List saved tokens 或绑卡 Webhook 消费；若出现需要改变处理方式的契约冲突，先保留脱敏证据并停止依赖该事实的实现。
+
+执行与证据登记在 [Issue #9](https://github.com/abel-wang777-showcase/onerway-payment-showcase/issues/9)：自动化验证客户传递、scope 隔离、并发补齐、公开响应不泄露与 SDK 回归；真实 Sandbox 按“不保存对照 → 主动保存支付 → 同客户新订单回显并选卡复购 → 双向跨入口对照”验证，并分别记录托管交互、每笔支付服务端核验和通知观察。历史 SDK 证据与本次自动化均不替代本次真实保存、回显及复购证据；完成前这些子场景保持未验证，Checkout 能力继续为 Conditional。无关渠道或设备异常不扩展为本次交付阻断。
 
 ## 6. 回跳、通知和最终状态
 
@@ -266,7 +278,7 @@ Webhook 同时保留 transaction 级 `status` 和 Payment 级 `paymentStatus` �
 
 - 只保存 `Order → PaymentAttempt → PaymentEvent` 的最小白名单字段，以及 Order 私有的匿名 customer scope；`PaymentAttempt.id` 是 Showcase 内部关联标识，不发送给 Onerway。Attempt 的 `method` 是预期方式，nullable `actualWallet` / `fundingNetwork` / `attributionTransactionId` 只来自严格关联的 transaction query，且三者满足“全部为空或归因 transaction 非空并至少有一项方式元数据”的约束；`submissionStartedAt` 只记录服务端签发 merchant confirm 前置许可的时间，不保存 SDK 请求或结果。
 - Order 保存商品摘要、整数 minor amount、currency 和履约状态；Attempt 分开保存 `merchantTxnId`、Payment `paymentId` 与 transaction `transactionId`；Event 保存 source/source key、双轴原始状态、标准状态、冲突标记和时间。
-- 不存在原始 request/response/Webhook payload、`sign`、`secret`、PAN、CVV、`reason`、`paymentMethodDetails`、`tokenId` 或卡详情列；私有 `merchantCustId` 只用于当前 SDK create 和同 scope 后续支付。
+- 不存在原始 request/response/Webhook payload、`sign`、`secret`、PAN、CVV、`reason`、`paymentMethodDetails`、`tokenId` 或卡详情列；私有 `merchantCustId` 用于 Checkout / Web JS SDK create 和同 scope 后续支付。
 - Order、Attempt 和 Event 保留 30 天；Vercel Cron 每日调用独立 `CRON_SECRET` 保护的内部清理路由，删除到期 Order 并通过外键级联清理 Attempt/Event。
 - 受限时间线只可通过独立 `PAYMENT_DIAGNOSTIC_TOKEN` 查询 `merchantTxnId` 或 Onerway `transactionId`；未配置 token 时路由 fail closed，响应只返回白名单领域字段。
 - Vercel build 同时校验 `VERCEL_ENV` 与独立的 `PAYMENT_MIGRATION_MODE` 并 fail closed：只允许 Production=`production + apply`，在构建前完成串行 migration；只允许 Preview=`preview + skip`，不迁移共享运行时数据库；缺失、未知或交叉配置一律中止构建。数据库集成测试只接受显式确认的隔离 `TEST_DATABASE_URL`，在任何 migration/test 写入前必须同时拒绝两个运行时 DSN 的同库别名，并验证只存在于 CI branch、不会由正式 migration 创建的 `payment_test_guard(singleton=true, purpose='onerway-payment-showcase:ci')`。`Neon integration` 对当前 exact head 必须成功；当前私有 Hobby 仓库不能由 GitHub branch protection 强制 required check，因此合并操作者必须回读并人工执行该门禁，直到仓库能力允许平台强制。

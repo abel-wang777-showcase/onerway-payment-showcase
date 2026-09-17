@@ -33,6 +33,25 @@ vi.mock('../server/utils/store', () => ({
   getPaymentRecovery: mocks.getPaymentRecovery,
 }))
 
+function recoveryFixture() {
+  return {
+    order: { id: 'order-1' },
+    attempt: {
+      id: 'attempt-1',
+      orderId: 'order-1',
+      status: 'processing',
+      paymentId: '9000000000000000001',
+    },
+    events: [],
+    customer: {
+      environment: 'sandbox',
+      merchantNo: 'test-merchant',
+      appId: 'test-app',
+      merchantCustId: 'Cust-Existing_9',
+    },
+  }
+}
+
 beforeEach(() => {
   vi.clearAllMocks()
   vi.resetModules()
@@ -48,22 +67,7 @@ beforeEach(() => {
     appId: 'test-app',
   })
   mocks.readPaymentRecovery.mockReturnValue({ orderId: 'order-1', attemptId: 'attempt-1' })
-  mocks.getPaymentRecovery.mockResolvedValue({
-    order: { id: 'order-1' },
-    attempt: {
-      id: 'attempt-1',
-      orderId: 'order-1',
-      status: 'processing',
-      paymentId: '9000000000000000001',
-    },
-    events: [],
-    customer: {
-      environment: 'sandbox',
-      merchantNo: 'test-merchant',
-      appId: 'test-app',
-      merchantCustId: 'Cust-Existing_9',
-    },
-  })
+  mocks.getPaymentRecovery.mockResolvedValue(recoveryFixture())
   mocks.ensurePaymentCustomer.mockResolvedValue({
     environment: 'sandbox',
     merchantNo: 'test-merchant',
@@ -86,9 +90,19 @@ describe('payment intent route', () => {
     expect(mocks.setPaymentRecovery).not.toHaveBeenCalled()
   })
 
-  it('creates a separate Sandbox order only after explicit restart', async () => {
+  it.each([
+    ['web-js-sdk', 'three-ds-success', 'web-js-sdk'],
+    ['web-js-sdk', 'hosted-checkout', 'checkout'],
+    ['checkout', 'standard-success', 'web-js-sdk'],
+    ['checkout', 'hosted-checkout-three-ds', 'checkout'],
+  ])('preserves the customer across a new %s → %s order', async (previousIntegration, journeyId, integration) => {
+    const previous = recoveryFixture()
+    mocks.getPaymentRecovery.mockResolvedValue({
+      ...previous,
+      attempt: { ...previous.attempt, integration: previousIntegration },
+    })
     vi.stubGlobal('readBody', vi.fn().mockResolvedValue({
-      journeyId: 'three-ds-success',
+      journeyId,
       restart: true,
     }))
 
@@ -105,6 +119,7 @@ describe('payment intent route', () => {
       expect.objectContaining({
         id: `${result.orderId}-attempt-1`,
         orderId: result.orderId,
+        integration,
       }),
       expect.objectContaining({
         environment: 'sandbox',
@@ -114,12 +129,71 @@ describe('payment intent route', () => {
       }),
     )
     expect(createdAttempt).not.toHaveProperty('retryOf')
+    expect(result).toEqual({ orderId: result.orderId, create: true })
+    expect(mocks.ensurePaymentCustomer).not.toHaveBeenCalled()
     expect(mocks.setPaymentRecovery).toHaveBeenCalledWith(
       expect.anything(),
       'test-secret',
       result.orderId,
       `${result.orderId}-attempt-1`,
     )
+  })
+
+  it.each(['standard-success', 'hosted-checkout'])(
+    'creates a new anonymous customer for %s without recovery',
+    async (journeyId) => {
+      mocks.readPaymentRecovery.mockReturnValue(null)
+      vi.stubGlobal('readBody', vi.fn().mockResolvedValue({ journeyId }))
+
+      const { default: handler } = await import('../server/api/payment/intent.post')
+      const first = await (handler as (event: unknown) => Promise<{ orderId: string, create: boolean }>)({})
+      const second = await (handler as (event: unknown) => Promise<{ orderId: string, create: boolean }>)({})
+      const firstCustomer = mocks.createPaymentRecord.mock.calls[0]?.[2]
+      const secondCustomer = mocks.createPaymentRecord.mock.calls[1]?.[2]
+
+      expect(first.orderId).not.toBe(second.orderId)
+      expect(firstCustomer).toEqual({
+        environment: 'sandbox',
+        merchantNo: 'test-merchant',
+        appId: 'test-app',
+        merchantCustId: expect.stringMatching(/^[A-Za-z0-9_-]{1,63}$/),
+      })
+      expect(secondCustomer).toEqual({ ...firstCustomer, merchantCustId: expect.any(String) })
+      expect(firstCustomer.merchantCustId).not.toBe(secondCustomer.merchantCustId)
+      expect(first).toEqual({ orderId: first.orderId, create: true })
+      expect(second).toEqual({ orderId: second.orderId, create: true })
+      expect(mocks.getPaymentRecovery).not.toHaveBeenCalled()
+      expect(mocks.ensurePaymentCustomer).not.toHaveBeenCalled()
+    },
+  )
+
+  it.each([
+    ['environment', 'production'],
+    ['merchantNo', 'other-merchant'],
+    ['appId', 'other-app'],
+  ])('starts a new Checkout customer when the recovered %s differs', async (field, value) => {
+    const previous = recoveryFixture()
+    mocks.getPaymentRecovery.mockResolvedValue({
+      ...previous,
+      customer: { ...previous.customer, [field]: value },
+    })
+    vi.stubGlobal('readBody', vi.fn().mockResolvedValue({
+      journeyId: 'hosted-checkout',
+      restart: true,
+    }))
+
+    const { default: handler } = await import('../server/api/payment/intent.post')
+    await (handler as (event: unknown) => Promise<unknown>)({})
+    const createdCustomer = mocks.createPaymentRecord.mock.calls[0]?.[2]
+
+    expect(createdCustomer).toEqual({
+      environment: 'sandbox',
+      merchantNo: 'test-merchant',
+      appId: 'test-app',
+      merchantCustId: expect.stringMatching(/^[A-Za-z0-9_-]{1,63}$/),
+    })
+    expect(createdCustomer.merchantCustId).not.toBe(previous.customer.merchantCustId)
+    expect(mocks.ensurePaymentCustomer).not.toHaveBeenCalled()
   })
 
   it.each(['google-pay', 'apple-pay'] as const)(
@@ -200,7 +274,11 @@ describe('payment intent route', () => {
     )
   })
 
-  it('rejects a legacy customer established concurrently in another profile scope', async () => {
+  it.each([
+    ['environment', 'production'],
+    ['merchantNo', 'other-merchant'],
+    ['appId', 'other-app'],
+  ])('rejects a legacy customer established concurrently with another %s', async (field, value) => {
     mocks.getPaymentRecovery.mockResolvedValueOnce({
       order: { id: 'order-1' },
       attempt: {
@@ -215,8 +293,9 @@ describe('payment intent route', () => {
     mocks.ensurePaymentCustomer.mockResolvedValueOnce({
       environment: 'sandbox',
       merchantNo: 'test-merchant',
-      appId: 'other-app',
+      appId: 'test-app',
       merchantCustId: 'Cust-Other_2',
+      [field]: value,
     })
     vi.stubGlobal('readBody', vi.fn().mockResolvedValue({
       journeyId: 'standard-success',
@@ -231,7 +310,11 @@ describe('payment intent route', () => {
     expect(mocks.setPaymentRecovery).not.toHaveBeenCalled()
   })
 
-  it('rejects reuse when the recovered customer belongs to another profile scope', async () => {
+  it.each([
+    ['environment', 'production'],
+    ['merchantNo', 'other-merchant'],
+    ['appId', 'other-app'],
+  ])('rejects reuse when the recovered customer belongs to another %s', async (field, value) => {
     mocks.getPaymentRecovery.mockResolvedValueOnce({
       order: { id: 'order-1' },
       attempt: {
@@ -244,8 +327,9 @@ describe('payment intent route', () => {
       customer: {
         environment: 'sandbox',
         merchantNo: 'test-merchant',
-        appId: 'other-app',
+        appId: 'test-app',
         merchantCustId: 'Cust-Other_1',
+        [field]: value,
       },
     })
     vi.stubGlobal('readBody', vi.fn().mockResolvedValue({ journeyId: 'standard-success' }))
