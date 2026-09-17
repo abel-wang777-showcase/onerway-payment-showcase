@@ -35,7 +35,7 @@ function readInput(value: unknown): CreatePaymentIntentInput {
     ? value as Record<string, unknown>
     : null
   const journeyId = input?.journeyId
-  const method = input?.method ?? 'card'
+  const method = input?.method ?? (isJourneyId(journeyId) ? getJourney(journeyId).method : 'card')
   const restart = input?.restart
   const keys = input ? Object.keys(input) : []
 
@@ -101,7 +101,7 @@ export default defineEventHandler(async (event): Promise<CreatePaymentIntentResp
 
           return Object.freeze({
             orderId: existing.order.id,
-            create: !existing.attempt.paymentId && !claimed,
+            create: !existing.attempt.paymentId && !existing.attempt.transactionId && !claimed,
           })
         }
       }
@@ -126,8 +126,8 @@ export default defineEventHandler(async (event): Promise<CreatePaymentIntentResp
       const attempt = createAttempt({
         id: attemptId,
         orderId,
-        integration: 'web-js-sdk',
-        method: input.method ?? 'card',
+        integration: journey.integration,
+        method: input.method ?? journey.method,
         merchantTxnId: `showcase-${randomUUID()}`,
         createdAt: now,
       })

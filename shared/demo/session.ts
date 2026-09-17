@@ -128,6 +128,7 @@ function appendStage(
 
 export function createSession(journeyId: JourneyId): DemoSession {
   const journey = getJourney(journeyId)
+  if (!journey.modes.includes('simulation')) throw new TypeError('SIMULATION_JOURNEY_UNAVAILABLE')
   const order = createDemoOrder(journey)
   const attempt = createDemoAttempt(journey, 1, order.createdAt)
   const session = freezeSession({

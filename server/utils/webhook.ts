@@ -54,13 +54,47 @@ export type WebhookErrorCode
     | 'PAYMENT_WEBHOOK_SIGNATURE_INVALID'
     | 'PAYMENT_WEBHOOK_FIELDS_INVALID'
 
+// Fixed internal codes identify validation sites without logging payload keys or values.
+const FIELD_DIAGNOSTICS = {
+  transactionId: 'P01',
+  paymentId: 'P02',
+  merchantTxnId: 'P03',
+  orderAmount: 'P04',
+  orderCurrency: 'P05',
+  status: 'P06',
+  paymentStatus: 'P07',
+  txnTime: 'T01',
+  txnTimeZone: 'T02',
+  contractId: 'S02',
+  dataStatus: 'S03',
+  subscriptionStatus: 'S04',
+  price: 'S05',
+  currency: 'S06',
+  num: 'S07',
+} as const
+
+type WebhookDiagnosticCode
+  = | typeof FIELD_DIAGNOSTICS[keyof typeof FIELD_DIAGNOSTICS]
+    | 'F00' // Unclassified field rejection.
+    | 'E01' // Notification category.
+    | 'E02' // Transaction category.
+    | 'E03' // Merchant binding.
+    | 'P08' // Minor amount conversion or safe integer range.
+    | 'T03' // Calendar or offset conversion.
+    | 'S01' // Subscription scenario.
+    | 'S08' // Opaque subscription text.
+    | 'S09' // Subscription product structure.
+    | 'S10' // Subscription state/identifier consistency.
+
 export class WebhookError extends Error {
   readonly code: WebhookErrorCode
+  readonly diagnosticCode?: WebhookDiagnosticCode
 
-  constructor(code: WebhookErrorCode) {
+  constructor(code: WebhookErrorCode, diagnosticCode?: WebhookDiagnosticCode) {
     super(code)
     this.name = 'WebhookError'
     this.code = code
+    this.diagnosticCode = diagnosticCode
   }
 }
 
@@ -81,7 +115,10 @@ function readText(
   }
 
   if (typeof value !== 'string' || !pattern.test(value)) {
-    throw new WebhookError('PAYMENT_WEBHOOK_FIELDS_INVALID')
+    const diagnosticCode = Object.hasOwn(FIELD_DIAGNOSTICS, key)
+      ? FIELD_DIAGNOSTICS[key as keyof typeof FIELD_DIAGNOSTICS]
+      : 'F00'
+    throw new WebhookError('PAYMENT_WEBHOOK_FIELDS_INVALID', diagnosticCode)
   }
 
   return value
@@ -113,10 +150,18 @@ function digest(body: Record<string, unknown>, secret: string): string {
     .digest('hex')
 }
 
-export function verifyWebhookSignature(body: Record<string, unknown>, secret: string): boolean {
-  const sign = body.sign
+export function verifyWebhookSignature(
+  body: Record<string, unknown>,
+  secret: string,
+  signatureHeader: string | undefined,
+): boolean {
+  if (!signatureHeader || signatureHeader.length > MAX_WEBHOOK_BYTES) {
+    return false
+  }
 
-  if (typeof sign !== 'string' || !/^[a-f0-9]{64}$/.test(sign)) {
+  const signatures = signatureHeader.split(',').map(item => item.trim())
+
+  if (signatures.some(item => !/^v1=[a-f0-9]{64}$/.test(item))) {
     return false
   }
 
@@ -129,7 +174,9 @@ export function verifyWebhookSignature(body: Record<string, unknown>, secret: st
     return false
   }
 
-  return timingSafeEqual(Buffer.from(actual, 'hex'), Buffer.from(sign, 'hex'))
+  const expected = Buffer.from(actual, 'hex')
+
+  return signatures.some(item => timingSafeEqual(expected, Buffer.from(item.slice(3), 'hex')))
 }
 
 export function parseWebhookBody(raw: string | undefined): Record<string, unknown> {
@@ -188,13 +235,13 @@ function readMinorAmount(value: string): number {
   const match = /^(0|[1-9]\d{0,13})\.(\d{2})$/.exec(value)
 
   if (!match) {
-    throw new WebhookError('PAYMENT_WEBHOOK_FIELDS_INVALID')
+    throw new WebhookError('PAYMENT_WEBHOOK_FIELDS_INVALID', 'P08')
   }
 
   const minor = Number(`${match[1]}${match[2]}`)
 
   if (!Number.isSafeInteger(minor)) {
-    throw new WebhookError('PAYMENT_WEBHOOK_FIELDS_INVALID')
+    throw new WebhookError('PAYMENT_WEBHOOK_FIELDS_INVALID', 'P08')
   }
 
   return minor
@@ -214,7 +261,7 @@ function readOpaqueText(value: unknown, maxBytes: number, optional = false): str
       return code <= 31 || code === 127
     })
   ) {
-    throw new WebhookError('PAYMENT_WEBHOOK_FIELDS_INVALID')
+    throw new WebhookError('PAYMENT_WEBHOOK_FIELDS_INVALID', 'S08')
   }
 
   return value
@@ -228,7 +275,7 @@ function readSubscriptionProduct(body: Record<string, unknown>): {
   const wire = body.products
 
   if (typeof wire !== 'string' || Buffer.byteLength(wire, 'utf8') > 16_384) {
-    throw new WebhookError('PAYMENT_WEBHOOK_FIELDS_INVALID')
+    throw new WebhookError('PAYMENT_WEBHOOK_FIELDS_INVALID', 'S09')
   }
 
   let parsed: unknown
@@ -237,11 +284,11 @@ function readSubscriptionProduct(body: Record<string, unknown>): {
     parsed = JSON.parse(wire)
   }
   catch {
-    throw new WebhookError('PAYMENT_WEBHOOK_FIELDS_INVALID')
+    throw new WebhookError('PAYMENT_WEBHOOK_FIELDS_INVALID', 'S09')
   }
 
   if (!Array.isArray(parsed) || parsed.length !== 1 || !isRecord(parsed[0])) {
-    throw new WebhookError('PAYMENT_WEBHOOK_FIELDS_INVALID')
+    throw new WebhookError('PAYMENT_WEBHOOK_FIELDS_INVALID', 'S09')
   }
 
   const product = parsed[0]
@@ -251,7 +298,7 @@ function readSubscriptionProduct(body: Record<string, unknown>): {
   const num = readText(product, 'num', /^1$/)
 
   if (num !== '1') {
-    throw new WebhookError('PAYMENT_WEBHOOK_FIELDS_INVALID')
+    throw new WebhookError('PAYMENT_WEBHOOK_FIELDS_INVALID', 'S07')
   }
 
   return Object.freeze({ name, amountMinor: readMinorAmount(price), currency })
@@ -264,30 +311,43 @@ function readOccurredAt(body: Record<string, unknown>): string {
   const calendar = new Date(`${local}Z`)
 
   if (!Number.isFinite(calendar.getTime()) || calendar.toISOString().slice(0, 19) !== local) {
-    throw new WebhookError('PAYMENT_WEBHOOK_FIELDS_INVALID')
+    throw new WebhookError('PAYMENT_WEBHOOK_FIELDS_INVALID', 'T03')
   }
 
   const date = new Date(`${time!.replace(' ', 'T')}${zone}`)
 
   if (!Number.isFinite(date.getTime())) {
-    throw new WebhookError('PAYMENT_WEBHOOK_FIELDS_INVALID')
+    throw new WebhookError('PAYMENT_WEBHOOK_FIELDS_INVALID', 'T03')
   }
 
   return date.toISOString()
+}
+
+function readEnvelope(body: Record<string, unknown>, merchantNo: string): void {
+  if (body.notifyType !== 'TXN') {
+    throw new WebhookError('PAYMENT_WEBHOOK_FIELDS_INVALID', 'E01')
+  }
+
+  if (body.txnType !== 'SALE') {
+    throw new WebhookError('PAYMENT_WEBHOOK_FIELDS_INVALID', 'E02')
+  }
+
+  if (body.merchantNo !== merchantNo) {
+    throw new WebhookError('PAYMENT_WEBHOOK_FIELDS_INVALID', 'E03')
+  }
 }
 
 export function readPaymentWebhook(
   body: Record<string, unknown>,
   secret: string,
   merchantNo: string,
+  signatureHeader: string | undefined,
 ): PaymentWebhook {
-  if (!verifyWebhookSignature(body, secret)) {
+  if (!verifyWebhookSignature(body, secret, signatureHeader)) {
     throw new WebhookError('PAYMENT_WEBHOOK_SIGNATURE_INVALID')
   }
 
-  if (body.notifyType !== 'TXN' || body.txnType !== 'SALE' || body.merchantNo !== merchantNo) {
-    throw new WebhookError('PAYMENT_WEBHOOK_FIELDS_INVALID')
-  }
+  readEnvelope(body, merchantNo)
 
   const transactionId = readText(body, 'transactionId', /^\d{1,20}$/)!
   const paymentId = readText(body, 'paymentId', /^\d{1,20}$/, true)
@@ -314,18 +374,16 @@ export function readSubscriptionPaymentWebhook(
   body: Record<string, unknown>,
   secret: string,
   merchantNo: string,
+  signatureHeader: string | undefined,
 ): SubscriptionPaymentWebhook {
-  if (!verifyWebhookSignature(body, secret)) {
+  if (!verifyWebhookSignature(body, secret, signatureHeader)) {
     throw new WebhookError('PAYMENT_WEBHOOK_SIGNATURE_INVALID')
   }
 
-  if (
-    body.notifyType !== 'TXN'
-    || body.txnType !== 'SALE'
-    || body.merchantNo !== merchantNo
-    || body.scenarios !== 'SUBSCRIPTION_INITIAL'
-  ) {
-    throw new WebhookError('PAYMENT_WEBHOOK_FIELDS_INVALID')
+  readEnvelope(body, merchantNo)
+
+  if (body.scenarios !== 'SUBSCRIPTION_INITIAL') {
+    throw new WebhookError('PAYMENT_WEBHOOK_FIELDS_INVALID', 'S01')
   }
 
   const transactionId = readText(body, 'transactionId', /^\d{1,20}$/)!
@@ -351,7 +409,7 @@ export function readSubscriptionPaymentWebhook(
     || (paymentStatus === 'S' && (!contractId || !tokenId))
     || (subscriptionStatus === 'active' && (!contractId || !tokenId))
   ) {
-    throw new WebhookError('PAYMENT_WEBHOOK_FIELDS_INVALID')
+    throw new WebhookError('PAYMENT_WEBHOOK_FIELDS_INVALID', 'S10')
   }
 
   return Object.freeze({

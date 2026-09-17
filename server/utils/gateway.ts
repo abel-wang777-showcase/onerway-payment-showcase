@@ -1,4 +1,5 @@
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto'
+import { mapCheckoutTransactionStatus, readCheckoutRedirectUrl } from '../../shared/payment/checkout'
 import { mapQueryStatus } from '../../shared/payment/sdk'
 import type { PaymentStatus } from '../../shared/payment/attempt'
 import type { WalletPaymentMethodId } from '../../shared/payment/capability'
@@ -43,10 +44,13 @@ function formatAmount(minor: number): string {
   return `${Math.floor(minor / 100)}.${String(minor % 100).padStart(2, '0')}`
 }
 
+export type CheckoutCreateContext = Pick<CreateContext, 'merchantTxnId' | 'order' | 'returnUrl'>
+
 export interface CreatedPayment {
   readonly transactionId: string
   readonly paymentId: string
   readonly rawStatus: 'U'
+  readonly redirectUrl?: string
 }
 
 export interface CreatedSubscriptionPayment extends CreatedPayment {
@@ -54,13 +58,17 @@ export interface CreatedSubscriptionPayment extends CreatedPayment {
 }
 
 export interface QueriedPayment {
-  readonly paymentId: string
+  readonly merchantTxnId?: string
+  readonly paymentId?: string
+  readonly paymentStatus?: string
+  readonly transactionStatus?: string
   readonly transactionId?: string
   readonly rawStatus: string
   readonly status: PaymentStatus
 }
 
 export interface RecoveredPaymentCreation {
+  readonly paymentStatus?: string
   readonly paymentId: string
   readonly transactionId: string
   readonly rawStatus: string
@@ -178,6 +186,7 @@ export function buildCreatePayload(profile: Extract<ServerProfile, { profile: 's
 
   if (
     !journey
+    || journey.integration !== 'web-js-sdk'
     || !/^[A-Za-z0-9_-]{1,63}$/.test(context.merchantCustId)
     || !journey.modes.includes('sandbox')
     || order.amount.currency !== 'USD'
@@ -312,6 +321,164 @@ export function buildSubscriptionCreatePayload(
   })
 }
 
+export function buildCheckoutCreatePayload(
+  profile: Extract<ServerProfile, { profile: 'sandbox' }>,
+  context: CheckoutCreateContext,
+): Payload {
+  const { order } = context
+  const journey = findOrderJourney(order)
+
+  if (
+    journey?.integration !== 'checkout'
+    || !journey.modes.includes('sandbox')
+    || order.amount.currency !== 'USD'
+    || order.item.unitAmount.currency !== order.amount.currency
+    || order.item.quantity * order.item.unitAmount.minor !== order.amount.minor
+  ) {
+    throw new TypeError('PAYMENT_ORDER_INVALID')
+  }
+
+  const address = { country: 'US', email: 'customer@test.com', province: 'CA' }
+
+  return Object.freeze({
+    billingInformation: address,
+    shippingInformation: address,
+    merchantNo: profile.merchantNo,
+    merchantTxnId: context.merchantTxnId,
+    orderAmount: formatAmount(order.amount.minor),
+    orderCurrency: order.amount.currency,
+    productType: 'ALL',
+    subProductType: 'DIRECT',
+    txnType: 'SALE',
+    txnOrderMsg: {
+      appId: profile.appId,
+      products: [{
+        currency: order.item.unitAmount.currency,
+        name: order.item.name,
+        num: String(order.item.quantity),
+        price: formatAmount(order.item.unitAmount.minor),
+      }],
+      returnUrl: context.returnUrl,
+      notifyUrl: profile.notifyUrl,
+    },
+  })
+}
+
+export function readCheckoutCreateResponse(value: unknown): CreatedPayment {
+  const created = readCreateResponse(value)
+  const data = (value as Record<string, unknown>).data as Record<string, unknown>
+  const redirectUrl = readCheckoutRedirectUrl(data.redirectUrl)
+
+  if (!redirectUrl) {
+    throw new GatewayError('PAYMENT_CREATE_RESPONSE_INVALID')
+  }
+
+  return Object.freeze({ ...created, redirectUrl })
+}
+
+export interface CheckoutQueryContext {
+  readonly merchantTxnId: string
+  readonly amountMinor: number
+  readonly currency: string
+  readonly transactionId?: string
+  readonly paymentId?: string
+}
+
+function validateCheckoutQueryContext(context: CheckoutQueryContext): void {
+  if (
+    typeof context.merchantTxnId !== 'string'
+    || !/^[A-Za-z0-9-]{1,128}$/.test(context.merchantTxnId)
+    || !Number.isSafeInteger(context.amountMinor)
+    || context.amountMinor < 0
+    || context.currency !== 'USD'
+    || (context.transactionId !== undefined && !isProviderId(context.transactionId))
+    || (context.paymentId !== undefined && !isProviderId(context.paymentId))
+  ) {
+    throw new GatewayError('PAYMENT_QUERY_RESPONSE_INVALID')
+  }
+}
+
+export function readCheckoutQueryResponse(
+  value: unknown,
+  merchantNo: string,
+  context: CheckoutQueryContext,
+): QueriedPayment & { readonly transactionId: string } {
+  validateCheckoutQueryContext(context)
+  const response = readResponse(value, 'PAYMENT_QUERY_REJECTED')
+  const data = response.data
+  const content = isRecord(data) ? data.content : null
+
+  if (!Array.isArray(content)) {
+    throw new GatewayError('PAYMENT_QUERY_RESPONSE_INVALID')
+  }
+
+  const matches = content.filter(item => isRecord(item) && item.merchantTxnId === context.merchantTxnId)
+
+  if (matches.length === 0) {
+    throw new GatewayError('PAYMENT_QUERY_NOT_FOUND')
+  }
+
+  if (matches.length !== 1 || !isRecord(matches[0]) || (isRecord(data) && Number(data.totalPages ?? 1) > 1)) {
+    throw new GatewayError('PAYMENT_QUERY_RESPONSE_INVALID')
+  }
+
+  const record = matches[0]
+  const transactionId = readText(record, 'transactionId')
+  const paymentId = readText(record, 'paymentId')
+  const rawStatus = readText(record, 'status')
+  const paymentStatus = readText(record, 'paymentStatus')
+
+  if (
+    !isProviderId(transactionId)
+    || (context.transactionId !== undefined && transactionId !== context.transactionId)
+    || (record.paymentId !== undefined && record.paymentId !== null && !isProviderId(paymentId))
+    || (record.paymentStatus !== undefined && record.paymentStatus !== null && !paymentStatus)
+    || (context.paymentId !== undefined && paymentId !== null && paymentId !== context.paymentId)
+    || (paymentId === null && (rawStatus !== 'N' || paymentStatus !== null))
+    || (record.merchantNo !== undefined && record.merchantNo !== merchantNo)
+    || (record.txnType !== undefined && record.txnType !== 'SALE')
+    || readUsdMinor(readText(record, 'orderAmount')) !== context.amountMinor
+    || readText(record, 'orderCurrency') !== context.currency
+    || !rawStatus
+  ) {
+    throw new GatewayError('PAYMENT_QUERY_RESPONSE_INVALID')
+  }
+
+  try {
+    return Object.freeze({
+      ...(paymentId ? { paymentId } : {}),
+      merchantTxnId: context.merchantTxnId,
+      transactionId,
+      rawStatus,
+      transactionStatus: rawStatus,
+      ...(paymentStatus ? { paymentStatus } : {}),
+      status: mapCheckoutTransactionStatus(rawStatus, paymentStatus ?? undefined),
+    })
+  }
+  catch {
+    throw new GatewayError('PAYMENT_QUERY_RESPONSE_INVALID')
+  }
+}
+
+export async function createCheckoutPayment(
+  profile: Extract<ServerProfile, { profile: 'sandbox' }>,
+  context: CheckoutCreateContext,
+): Promise<CreatedPayment> {
+  return readCheckoutCreateResponse(await post(profile, '/txn/payment', buildCheckoutCreatePayload(profile, context)))
+}
+
+export async function queryCheckoutPayment(
+  profile: Extract<ServerProfile, { profile: 'sandbox' }>,
+  context: CheckoutQueryContext,
+): Promise<QueriedPayment & { readonly transactionId: string }> {
+  validateCheckoutQueryContext(context)
+  return readCheckoutQueryResponse(
+    await post(profile, '/v1/txn/list', buildCreationQueryPayload(profile, context.merchantTxnId)),
+    profile.merchantNo,
+    context,
+  )
+}
+
 export function buildQueryPayload(profile: Extract<ServerProfile, { profile: 'sandbox' }>, paymentId: string): Payload {
   return Object.freeze({
     current: '1',
@@ -428,7 +595,7 @@ export function readSubscriptionCreateResponse(value: unknown): CreatedSubscript
   })
 }
 
-export function readQueryResponse(value: unknown, expectedPaymentId: string): QueriedPayment {
+export function readQueryResponse(value: unknown, expectedPaymentId: string): QueriedPayment & { readonly paymentId: string } {
   const response = readResponse(value, 'PAYMENT_QUERY_REJECTED')
   const data = response.data
   const content = isRecord(data) ? data.content : null
@@ -755,7 +922,7 @@ export async function createSubscriptionPayment(
   return readSubscriptionCreateResponse(response)
 }
 
-export async function queryPayment(profile: Extract<ServerProfile, { profile: 'sandbox' }>, paymentId: string): Promise<QueriedPayment> {
+export async function queryPayment(profile: Extract<ServerProfile, { profile: 'sandbox' }>, paymentId: string): Promise<QueriedPayment & { readonly paymentId: string }> {
   const response = await post(profile, '/v1/txn/queryPayments', buildQueryPayload(profile, paymentId))
   return readQueryResponse(response, paymentId)
 }

@@ -8,6 +8,7 @@ import {
   createSubscriptionPlaceholder,
   getSubscriptionPlan,
 } from '../shared/payment/subscription'
+import { readCheckoutQueryResponse } from '../server/utils/gateway'
 import { requireTestDatabaseUrl } from './db'
 import { createMerchantCustomer } from '../server/utils/customer'
 import {
@@ -699,6 +700,108 @@ describe('Neon payment persistence integration', () => {
 
       await expect(recordWebhookEvent(withoutPaymentId))
         .rejects.toMatchObject({ code: 'PAYMENT_ATTEMPT_MISMATCH' })
+    }
+    finally {
+      await deleteTestOrder(orderId)
+    }
+  }, 120_000)
+
+  it.each(['I', 'U', 'P', 'R'])('persists Checkout %s during creation recovery and subsequent query', async (rawStatus) => {
+    const { orderId, attemptId, now, order, attempt } = recoveryFixture(`Checkout ${rawStatus}`)
+    const transactionId = `6184${Date.now()}`.slice(0, 20)
+    const paymentId = `5184${Date.now()}`.slice(0, 20)
+    const checkout = createAttempt({ ...attempt, integration: 'checkout', method: 'all' })
+    const found = readCheckoutQueryResponse({
+      respCode: '20000',
+      data: { content: [{
+        merchantTxnId: checkout.merchantTxnId,
+        transactionId,
+        paymentId,
+        orderAmount: '5.00',
+        orderCurrency: 'USD',
+        status: rawStatus,
+      }] },
+    }, 'test-merchant', {
+      merchantTxnId: checkout.merchantTxnId!,
+      amountMinor: order.amount.minor,
+      currency: order.amount.currency,
+    })
+    const expectedStatus = rawStatus === 'R' ? 'requires_action' : 'processing'
+
+    try {
+      await createPaymentRecord(order, checkout, customer())
+      await completePaymentRecord(attemptId, found.paymentId, found.transactionId, createEvent({
+        id: randomUUID(), attemptId, source: 'query',
+        sourceKey: `creation:${checkout.merchantTxnId}:${transactionId}:${rawStatus}:-`,
+        status: found.status, rawStatus: found.rawStatus,
+        transactionStatus: found.transactionStatus, transactionId, occurredAt: now,
+      }))
+      const restored = await getPaymentRecovery(orderId, attemptId)
+
+      expect(restored?.attempt).toMatchObject({ paymentId, transactionId, status: expectedStatus, statusSource: 'query' })
+      expect(restored?.events).toEqual(expect.arrayContaining([
+        expect.objectContaining({ transactionStatus: rawStatus, status: expectedStatus }),
+      ]))
+
+      const queried = await recordQueryEvent(attemptId, paymentId, found, now)
+      const duplicate = await recordQueryEvent(attemptId, paymentId, found, now)
+      const persisted = await getPaymentRecovery(orderId, attemptId)
+
+      expect(queried.duplicate).toBe(false)
+      expect(duplicate.duplicate).toBe(true)
+      expect(persisted?.attempt.status).toBe(expectedStatus)
+      expect(persisted?.events).toEqual(expect.arrayContaining([
+        expect.objectContaining({ id: queried.event.id, transactionStatus: rawStatus, status: expectedStatus }),
+      ]))
+    }
+    finally {
+      await deleteTestOrder(orderId)
+    }
+  }, 120_000)
+
+  it('persists and deduplicates an early Checkout cancellation without Payment ID', async () => {
+    const { orderId, attemptId, now, order, attempt } = recoveryFixture('Checkout cancellation')
+    const transactionId = `6184${Date.now()}`.slice(0, 20)
+    const paymentId = `5184${Date.now()}`.slice(0, 20)
+    const checkout = createAttempt({ ...attempt, integration: 'checkout', method: 'all' })
+    const notification = {
+      transactionId,
+      merchantTxnId: checkout.merchantTxnId!,
+      amountMinor: 500,
+      currency: 'USD' as const,
+      transactionStatus: 'N' as const,
+      status: 'cancelled' as const,
+      occurredAt: now,
+    }
+
+    try {
+      await createPaymentRecord(order, checkout, customer())
+      const first = await recordWebhookEvent(notification)
+      const duplicate = await recordWebhookEvent(notification)
+
+      expect(first.attempt.status).toBe('cancelled')
+      expect(first.attempt).not.toHaveProperty('paymentId')
+      expect(duplicate.duplicate).toBe(true)
+
+      const completed = await completePaymentRecord(attemptId, paymentId, transactionId, createEvent({
+        id: randomUUID(), attemptId, source: 'server', sourceKey: `create:${attemptId}`,
+        status: 'processing', rawStatus: 'U', transactionId, occurredAt: now,
+      }))
+
+      expect(completed).toMatchObject({ paymentId, transactionId, status: 'cancelled', statusSource: 'webhook' })
+      await expect(recordWebhookEvent({ ...notification, transactionId: `${transactionId}9`.slice(-20) }))
+        .rejects.toMatchObject({ code: 'PAYMENT_ATTEMPT_MISMATCH' })
+      const reconciled = await recordQueryEvent(attemptId, paymentId, {
+        paymentId, transactionId, merchantTxnId: notification.merchantTxnId,
+        transactionStatus: 'S', paymentStatus: 'S', rawStatus: 'S', status: 'succeeded',
+      }, now)
+
+      expect(reconciled.attempt).toMatchObject({ status: 'succeeded', statusSource: 'query' })
+      expect(reconciled.event.conflict).toBe(true)
+      const recovery = await getPaymentRecovery(orderId, attemptId)
+
+      expect(recovery?.events.filter(event => event.source === 'webhook')).toHaveLength(1)
+      expect(recovery?.attempt.status).toBe('succeeded')
     }
     finally {
       await deleteTestOrder(orderId)

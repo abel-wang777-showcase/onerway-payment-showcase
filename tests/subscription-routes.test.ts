@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   ensurePaymentCustomer: vi.fn(),
   enrichDirectPaymentMethod: vi.fn(),
   getPaymentRecovery: vi.fn(),
+  getPaymentQueryContext: vi.fn(),
   getRetainedSubscriptionRecovery: vi.fn(),
   getSubscriptionForAttempt: vi.fn(),
   queryPayment: vi.fn(),
@@ -47,6 +48,7 @@ vi.mock('../server/utils/store', () => ({
   createSubscriptionPaymentRecord: mocks.createSubscriptionPaymentRecord,
   ensurePaymentCustomer: mocks.ensurePaymentCustomer,
   getPaymentRecovery: mocks.getPaymentRecovery,
+  getPaymentQueryContext: mocks.getPaymentQueryContext,
   getRetainedSubscriptionRecovery: mocks.getRetainedSubscriptionRecovery,
   getSubscriptionForAttempt: mocks.getSubscriptionForAttempt,
   PaymentStoreError: class PaymentStoreError extends Error {
@@ -99,6 +101,10 @@ beforeEach(() => {
   vi.stubGlobal('createError', (input: object) => Object.assign(new Error('HTTP_ERROR'), input))
 
   mocks.requireServerProfile.mockReturnValue(profile)
+  mocks.getPaymentQueryContext.mockResolvedValue({
+    order: { id: 'order-1', amount: { minor: 500, currency: 'USD' } },
+    attempt: { id: 'attempt-1', orderId: 'order-1', integration: 'web-js-sdk', paymentId: 'payment-1' },
+  })
   mocks.readPaymentRecovery.mockReturnValue({ orderId: 'order-1', attemptId: 'attempt-1' })
   mocks.verifyQueryToken.mockReturnValue(true)
   mocks.enrichDirectPaymentMethod.mockImplementation(async (_profile, attempt) => attempt)

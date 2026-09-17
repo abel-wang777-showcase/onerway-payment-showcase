@@ -7,6 +7,7 @@ import {
 import { readBrowserData } from '../../utils/browser'
 import {
   createPayment,
+  createCheckoutPayment,
   createQueryExpiry,
   createQueryToken,
   GatewayError,
@@ -29,6 +30,10 @@ import {
   createMerchantCustomer,
   isMerchantCustomerInScope,
 } from '../../utils/customer'
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
 
 function gatewayFailure(error: unknown): never {
   if (error instanceof PaymentStoreError) {
@@ -60,15 +65,7 @@ export default defineEventHandler(async (event): Promise<CreateSdkPaymentRespons
   requireCanonicalPaymentOrigin(event, profile.showcaseOrigin)
 
   return withPaymentLimit(event, 'create', async (clientIp) => {
-    let browser
-
-    try {
-      browser = readBrowserData(await readBody<unknown>(event))
-    }
-    catch {
-      throw createError({ statusCode: 400, statusMessage: 'PAYMENT_INPUT_INVALID' })
-    }
-    const transactionIp = requireIp(profile.transactionIp ?? clientIp)
+    const input = await readBody<unknown>(event)
 
     try {
       const ref = readPaymentRecovery(event, profile.secret)
@@ -80,20 +77,32 @@ export default defineEventHandler(async (event): Promise<CreateSdkPaymentRespons
       const recovery = await getPaymentRecovery(ref.orderId, ref.attemptId)
       const merchantTxnId = recovery?.attempt.merchantTxnId
 
-      if (
-        !recovery
-        || !merchantTxnId
-        || recovery.attempt.paymentId
-      ) {
+      if (!recovery || !merchantTxnId || recovery.attempt.paymentId || recovery.attempt.transactionId) {
         throw createError({ statusCode: 409, statusMessage: 'PAYMENT_ATTEMPT_ACTIVE' })
       }
 
-      const customer = recovery.customer
-        ?? await ensurePaymentCustomer(recovery.order.id, createMerchantCustomer(profile))
+      const checkout = recovery.attempt.integration === 'checkout'
+      if (checkout && (!isRecord(input) || Object.keys(input).length !== 0)) {
+        throw createError({ statusCode: 400, statusMessage: 'PAYMENT_INPUT_INVALID' })
+      }
+      if (!checkout && recovery.attempt.integration !== 'web-js-sdk') {
+        throw createError({ statusCode: 400, statusMessage: 'PAYMENT_JOURNEY_UNAVAILABLE' })
+      }
+      let browser
+      try {
+        browser = checkout ? null : readBrowserData(input)
+      }
+      catch {
+        throw createError({ statusCode: 400, statusMessage: 'PAYMENT_INPUT_INVALID' })
+      }
+      const customer = checkout
+        ? null
+        : recovery.customer ?? await ensurePaymentCustomer(recovery.order.id, createMerchantCustomer(profile))
 
-      if (!isMerchantCustomerInScope(customer, profile)) {
+      if (customer && !isMerchantCustomerInScope(customer, profile)) {
         throw createError({ statusCode: 409, statusMessage: 'PAYMENT_CUSTOMER_SCOPE_MISMATCH' })
       }
+      const transactionIp = checkout ? null : requireIp(profile.transactionIp ?? clientIp)
 
       const now = new Date().toISOString()
       const claim = createEvent({
@@ -116,16 +125,21 @@ export default defineEventHandler(async (event): Promise<CreateSdkPaymentRespons
         throw createError({ statusCode: 409, statusMessage: 'PAYMENT_CREATE_IN_PROGRESS' })
       }
 
-      const created = await createPayment(profile, {
+      const context = {
         merchantTxnId,
-        merchantCustId: customer.merchantCustId,
         order: recovery.order,
         returnUrl: `${profile.showcaseOrigin}/halden/return/${recovery.order.id}`,
-        transactionIp,
-        accept: getHeader(event, 'accept')?.slice(0, 512) || '*/*',
-        userAgent: getHeader(event, 'user-agent')?.slice(0, 512) || 'unknown',
-        ...browser,
-      })
+      }
+      const created = checkout
+        ? await createCheckoutPayment(profile, context)
+        : await createPayment(profile, {
+            ...context,
+            merchantCustId: customer!.merchantCustId,
+            transactionIp: transactionIp!,
+            accept: getHeader(event, 'accept')?.slice(0, 512) || '*/*',
+            userAgent: getHeader(event, 'user-agent')?.slice(0, 512) || 'unknown',
+            ...browser!,
+          })
       const paymentEvent = createEvent({
         id: randomUUID(),
         attemptId: recovery.attempt.id,
@@ -152,6 +166,7 @@ export default defineEventHandler(async (event): Promise<CreateSdkPaymentRespons
         )),
         event: paymentEvent,
         paymentId: created.paymentId,
+        ...(created.redirectUrl ? { redirectUrl: created.redirectUrl } : {}),
         query: Object.freeze({
           token: createQueryToken(profile.secret, recovery.attempt.id, created.paymentId, expiresAt),
           expiresAt,

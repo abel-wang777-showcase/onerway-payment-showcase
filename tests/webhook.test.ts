@@ -3,7 +3,8 @@ import { describe, expect, it } from 'vitest'
 import {
   parseWebhookBody,
   readWebhookBody,
-  readPaymentWebhook,
+  readPaymentWebhook as readWebhook,
+  readSubscriptionPaymentWebhook,
   verifyWebhookSignature,
 } from '../server/utils/webhook'
 
@@ -55,17 +56,98 @@ function payload(overrides: Record<string, unknown> = {}): Record<string, unknow
   return { ...body, sign: sign(body) }
 }
 
+function readPaymentWebhook(body: Record<string, unknown>, secret: string, merchant: string) {
+  return readWebhook(body, secret, merchant, `v1=${sign(body)}`)
+}
+
 describe('Onerway payment webhook boundary', () => {
+  it.each([
+    [{ notifyType: 'OTHER' }, 'E01'],
+    [{ txnType: 'OTHER' }, 'E02'],
+    [{ merchantNo: 'other-merchant' }, 'E03'],
+    [{ transactionId: 'invalid-id' }, 'P01'],
+    [{ paymentId: 123 }, 'P02'],
+    [{ merchantTxnId: 'invalid id' }, 'P03'],
+    [{ orderAmount: 5 }, 'P04'],
+    [{ orderCurrency: 'EUR' }, 'P05'],
+    [{ status: 'UNKNOWN' }, 'P06'],
+    [{ paymentStatus: 'UNKNOWN' }, 'P07'],
+    [{ orderAmount: '99999999999999.99' }, 'P08'],
+    [{ txnTime: '2026-09-15T08:57:51' }, 'T01'],
+    [{ txnTimeZone: 'UTC+8' }, 'T02'],
+    [{ txnTime: '2026-02-30 08:57:51' }, 'T03'],
+  ])('identifies a signed field rejection with a fixed internal code: %j', (overrides, diagnosticCode) => {
+    const body = payload(overrides as Record<string, unknown>)
+    let rejection: unknown
+    try {
+      readPaymentWebhook(body, secret, 'merchant')
+    }
+    catch (error) {
+      rejection = error
+    }
+    expect(rejection).toMatchObject({
+      code: 'PAYMENT_WEBHOOK_FIELDS_INVALID',
+      message: 'PAYMENT_WEBHOOK_FIELDS_INVALID',
+      diagnosticCode,
+    })
+    const serialized = JSON.stringify(rejection)
+    expect(serialized).not.toContain(body.sign)
+    expect(serialized).not.toContain('merchantTxnId')
+    expect(serialized).not.toContain('orderAmount')
+  })
+
+  it('keeps signature rejection ahead of field diagnostics', () => {
+    const body = payload({ merchantNo: 'other-merchant', orderAmount: 5 })
+    let rejection: unknown
+    try {
+      readWebhook(body, secret, 'merchant', `v1=${'0'.repeat(64)}`)
+    }
+    catch (error) {
+      rejection = error
+    }
+    expect(rejection).toMatchObject({ code: 'PAYMENT_WEBHOOK_SIGNATURE_INVALID' })
+    expect(rejection).not.toHaveProperty('diagnosticCode', expect.any(String))
+  })
+
+  it.each([null, '', 'SUBSCRIPTION_RENEWAL'])('diagnoses an invalid subscription scenario without accepting it: %s', (scenarios) => {
+    const body = payload({ scenarios })
+    expect(() => readSubscriptionPaymentWebhook(body, secret, 'merchant', `v1=${body.sign}`))
+      .toThrow(expect.objectContaining({ code: 'PAYMENT_WEBHOOK_FIELDS_INVALID', diagnosticCode: 'S01' }))
+  })
+
+  it('accepts any current-secret v1 item during key rotation and ignores body sign', () => {
+    const body = payload()
+    const header = `v1=${'0'.repeat(64)}, v1=${body.sign}`
+
+    expect(verifyWebhookSignature({ ...body, sign: 'legacy-other-key' }, secret, header)).toBe(true)
+    expect(readWebhook({ ...body, sign: undefined }, secret, 'merchant', header).status).toBe('succeeded')
+  })
+
+  it.each([undefined, '', 'v1=bad', `v2=${'0'.repeat(64)}`, `v1=${'A'.repeat(64)}`])(
+    'rejects missing or malformed signature headers without body fallback: %s',
+    (header) => {
+      expect(verifyWebhookSignature(payload(), secret, header)).toBe(false)
+    },
+  )
+
+  it('projects Checkout cancellation without inventing a Payment ID', () => {
+    const result = readPaymentWebhook(payload({ paymentId: undefined, paymentStatus: undefined, status: 'N' }), secret, 'merchant')
+
+    expect(result).toMatchObject({ transactionStatus: 'N', status: 'cancelled' })
+    expect(result).not.toHaveProperty('paymentId')
+    expect(result).not.toHaveProperty('paymentStatus')
+  })
+
   it('verifies the observed Sandbox exclusion matrix', () => {
     const body = payload()
 
-    expect(verifyWebhookSignature(body, secret)).toBe(true)
-    expect(verifyWebhookSignature({ ...body, paymentMethod: 'OTHER' }, secret)).toBe(true)
-    expect(verifyWebhookSignature({ ...body, walletTypeName: 'OtherWallet' }, secret)).toBe(true)
+    expect(verifyWebhookSignature(body, secret, `v1=${body.sign}`)).toBe(true)
+    expect(verifyWebhookSignature({ ...body, paymentMethod: 'OTHER' }, secret, `v1=${body.sign}`)).toBe(true)
+    expect(verifyWebhookSignature({ ...body, walletTypeName: 'OtherWallet' }, secret, `v1=${body.sign}`)).toBe(true)
     expect(verifyWebhookSignature({
       ...body,
       paymentMethodDetails: '{"card":{"issuer":"Changed"}}',
-    }, secret)).toBe(false)
+    }, secret, `v1=${body.sign}`)).toBe(false)
   })
 
   it('projects only the identifiers and dual-axis status needed for persistence', () => {
@@ -89,7 +171,7 @@ describe('Onerway payment webhook boundary', () => {
   })
 
   it('fails closed for invalid signatures, merchants and provider statuses', () => {
-    expect(() => readPaymentWebhook({ ...payload(), sign: '0'.repeat(64) }, secret, 'merchant'))
+    expect(() => readWebhook(payload(), secret, 'merchant', `v1=${'0'.repeat(64)}`))
       .toThrow('PAYMENT_WEBHOOK_SIGNATURE_INVALID')
     expect(() => readPaymentWebhook(payload(), secret, 'other-merchant'))
       .toThrow('PAYMENT_WEBHOOK_FIELDS_INVALID')

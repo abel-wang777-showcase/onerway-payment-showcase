@@ -145,7 +145,9 @@ describe('subscription result outcome', () => {
     const wrapper = await mountSuspended(HaldenLayout)
 
     expect(wrapper.text()).toContain('Sandbox')
-    expect(wrapper.text()).toContain('card fields are hosted by Onerway Sandbox')
+    const paymentNotice = wrapper.get('footer').text()
+    expect(paymentNotice).toMatch(/payment details.*Onerway Sandbox/i)
+    expect(paymentNotice).toMatch(/never pass through.*merchant server/i)
     expect(wrapper.text()).not.toContain('This journey is simulated')
     wrapper.unmount()
   })

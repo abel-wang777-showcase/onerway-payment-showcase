@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
+  queryCheckoutPayment: vi.fn(),
   createQueryExpiry: vi.fn(),
   createQueryToken: vi.fn(),
   queryPayment: vi.fn(),
@@ -16,6 +17,7 @@ const mocks = vi.hoisted(() => ({
 }))
 
 vi.mock('../server/utils/gateway', () => ({
+  queryCheckoutPayment: mocks.queryCheckoutPayment,
   createQueryExpiry: mocks.createQueryExpiry,
   createQueryToken: mocks.createQueryToken,
   GatewayError: class GatewayError extends Error {},
@@ -338,4 +340,37 @@ describe('payment recovery route', () => {
     expect(mocks.setPaymentRecovery).not.toHaveBeenCalled()
     expect(mocks.queryPaymentCreation).not.toHaveBeenCalled()
   })
+})
+
+it('restores a cancelled Checkout with no Payment ID or query token', async () => {
+  const current = recovery()
+  const attempt = {
+    id: 'attempt-1', orderId: 'order-1', integration: 'checkout', merchantTxnId: 'merchant-txn-1', transactionId: '222', status: 'cancelled',
+  }
+  mocks.getPaymentRecovery.mockResolvedValue({ ...current, attempt, attempts: [attempt] })
+  const { default: handler } = await import('../server/api/payment/recover.get')
+  const result = await (handler as (event: unknown) => Promise<Record<string, unknown>>)({})
+  expect(result.paymentId).toBeNull()
+  expect(result.query).toBeNull()
+  expect(mocks.createQueryToken).not.toHaveBeenCalled()
+  expect(mocks.queryPaymentCreation).not.toHaveBeenCalled()
+  expect(mocks.queryCheckoutPayment).not.toHaveBeenCalled()
+})
+
+it('recovers an unknown Checkout creation with transaction query without ever resending create', async () => {
+  const current = recovery()
+  const initial = { id: 'attempt-1', orderId: 'order-1', integration: 'checkout', merchantTxnId: 'merchant-txn-1', status: 'created' }
+  const restored = { ...initial, transactionId: '222', status: 'cancelled' }
+  mocks.getPaymentRecovery.mockResolvedValueOnce({ ...current, attempt: initial, attempts: [initial] })
+    .mockResolvedValueOnce({ ...current, attempt: restored, attempts: [restored] })
+  mocks.queryCheckoutPayment.mockResolvedValue({ transactionId: '222', rawStatus: 'N', transactionStatus: 'N', status: 'cancelled' })
+  const { default: handler } = await import('../server/api/payment/recover.get')
+  const result = await (handler as (event: unknown) => Promise<Record<string, unknown>>)({})
+  expect(mocks.queryCheckoutPayment).toHaveBeenCalledWith(expect.anything(), {
+    merchantTxnId: 'merchant-txn-1', amountMinor: 500, currency: 'USD', transactionId: undefined,
+  })
+  expect(mocks.completePaymentRecord).toHaveBeenCalledWith('attempt-1', undefined, '222', expect.objectContaining({ source: 'query', status: 'cancelled', transactionStatus: 'N' }))
+  expect(mocks.queryPaymentCreation).not.toHaveBeenCalled()
+  expect(result.paymentId).toBeNull()
+  expect(result.query).toBeNull()
 })

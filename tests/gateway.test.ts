@@ -1,7 +1,11 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { createOrder } from '../shared/payment/order'
 import {
   buildCreatePayload,
+  buildCheckoutCreatePayload,
+  readCheckoutCreateResponse,
+  readCheckoutQueryResponse,
+  queryCheckoutPayment,
   buildCreationQueryPayload,
   buildPaymentMethodQueryPayload,
   buildQueryPayload,
@@ -464,4 +468,107 @@ describe('Onerway gateway boundary', () => {
       now,
     )).toBe(false)
   })
+})
+
+const checkoutOrder = createOrder({
+  ...fixtureOrder(500),
+  item: { ...fixtureOrder(500).item, sku: 'HL-CHECKOUT-005', variant: 'Hosted checkout' },
+})
+const checkoutContext = {
+  merchantTxnId: 'showcase-checkout', amountMinor: 500, currency: 'USD',
+  transactionId: '9000000000000000002', paymentId: '9000000000000000001',
+}
+function checkoutQuery(overrides: Record<string, unknown> = {}) {
+  return {
+    respCode: '20000',
+    data: { content: [{
+      merchantTxnId: checkoutContext.merchantTxnId,
+      transactionId: checkoutContext.transactionId,
+      paymentId: checkoutContext.paymentId,
+      orderAmount: '5.00', orderCurrency: 'USD', status: 'S',
+      ...overrides,
+    }] },
+  }
+}
+
+describe('Hosted Checkout gateway boundary', () => {
+  it('builds an aggregate one-time payment with required addresses but without browser, IP or a selected method', () => {
+    const payload = buildCheckoutCreatePayload(profile, {
+      merchantTxnId: checkoutContext.merchantTxnId,
+      order: checkoutOrder,
+      returnUrl: 'https://showcase.example/halden/return/order-500',
+    })
+    expect(payload).toEqual({
+      billingInformation: { country: 'US', email: 'customer@test.com', province: 'CA' },
+      shippingInformation: { country: 'US', email: 'customer@test.com', province: 'CA' },
+      merchantNo: profile.merchantNo, merchantTxnId: checkoutContext.merchantTxnId,
+      orderAmount: '5.00', orderCurrency: 'USD', productType: 'ALL',
+      subProductType: 'DIRECT', txnType: 'SALE',
+      txnOrderMsg: {
+        appId: profile.appId, products: [{ currency: 'USD', name: 'Halden sample', num: '1', price: '5.00' }],
+        returnUrl: 'https://showcase.example/halden/return/order-500', notifyUrl: profile.notifyUrl,
+      },
+    })
+    expect(() => buildCheckoutCreatePayload(profile, {
+      merchantTxnId: checkoutContext.merchantTxnId, order: fixtureOrder(500), returnUrl: 'https://showcase.example',
+    })).toThrow('PAYMENT_ORDER_INVALID')
+  })
+
+  it('requires the confirmed Sandbox redirect boundary before returning a created payment', () => {
+    const response = { respCode: '20000', data: {
+      transactionId: checkoutContext.transactionId, paymentId: checkoutContext.paymentId, status: 'U',
+      redirectUrl: 'https://sandbox-checkout.onerway.com/checkout?token=ephemeral',
+    } }
+    expect(readCheckoutCreateResponse(response).redirectUrl).toBe(response.data.redirectUrl)
+    expect(() => readCheckoutCreateResponse({ ...response, data: { ...response.data, redirectUrl: 'https://evil.example/checkout' } }))
+      .toThrow('PAYMENT_CREATE_RESPONSE_INVALID')
+  })
+
+  it.each([['S', 'succeeded'], ['N', 'cancelled'], ['F', 'processing'], ['R', 'requires_action']])(
+    'uses transaction %s conservatively as %s', (rawStatus, status) => {
+      expect(readCheckoutQueryResponse(checkoutQuery({ status: rawStatus }), profile.merchantNo, checkoutContext))
+        .toMatchObject({ status, transactionStatus: rawStatus, merchantTxnId: checkoutContext.merchantTxnId })
+    },
+  )
+
+  it('accepts a cancelled checkout without manufacturing a Payment ID', () => {
+    const result = readCheckoutQueryResponse(checkoutQuery({ status: 'N', paymentId: undefined }), profile.merchantNo, {
+      ...checkoutContext, paymentId: undefined,
+    })
+    expect(result.status).toBe('cancelled')
+    expect(result).not.toHaveProperty('paymentId')
+  })
+
+  it.each([
+    { transactionId: '999' }, { paymentId: '999' }, { merchantNo: 'another-merchant' },
+    { orderAmount: '50.00' }, { orderCurrency: 'EUR' }, { status: 'UNKNOWN' }, { txnType: 'REFUND' },
+    { paymentId: undefined }, { paymentId: undefined, status: 'N', paymentStatus: 'S' },
+    { paymentId: undefined, status: 'N', paymentStatus: 'N' },
+    { paymentId: undefined, status: 'N', paymentStatus: 'O' }, { paymentId: 123, status: 'N' }, { paymentId: '', status: 'N' }, { paymentStatus: 123 },
+  ])('rejects mismatched or unproven transaction data %#', (override) => {
+    expect(() => readCheckoutQueryResponse(checkoutQuery(override), profile.merchantNo, checkoutContext))
+      .toThrow('PAYMENT_QUERY_RESPONSE_INVALID')
+  })
+
+  it('rejects ambiguous merchant transaction matches and incomplete pagination', () => {
+    const response = checkoutQuery()
+    response.data.content.push(response.data.content[0]!)
+    expect(() => readCheckoutQueryResponse(response, profile.merchantNo, checkoutContext))
+      .toThrow('PAYMENT_QUERY_RESPONSE_INVALID')
+    const paged = checkoutQuery()
+    expect(() => readCheckoutQueryResponse({ ...paged, data: { ...paged.data, totalPages: 2 } }, profile.merchantNo, checkoutContext))
+      .toThrow('PAYMENT_QUERY_RESPONSE_INVALID')
+  })
+})
+
+it('fails closed before sending a Checkout query with a missing merchant transaction binding', async () => {
+  const fetch = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('UNEXPECTED_FETCH'))
+  try {
+    await expect(queryCheckoutPayment(profile, { ...checkoutContext, merchantTxnId: '' }))
+      .rejects.toThrow('PAYMENT_QUERY_RESPONSE_INVALID')
+    expect(fetch).not.toHaveBeenCalled()
+  }
+  finally {
+    fetch.mockRestore()
+  }
 })

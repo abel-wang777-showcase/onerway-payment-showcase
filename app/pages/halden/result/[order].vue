@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { paymentPath } from '#shared/payment/checkout'
 import { findOrderJourney, getJourney } from '#shared/payment/journey'
 import {
   getActiveAttempt,
@@ -73,6 +74,7 @@ const canRetrySdk = computed(() => Boolean(
   sdk.value
   && !contract.value
   && attempt.value
+  && sdk.value.paymentId
   && (
     retrying.value
     || (
@@ -103,7 +105,7 @@ const verification = computed(() => {
   }
 
   if (source === 'query') {
-    return { source, label: 'server-side Payment query', rawLabel: 'queryRawStatus' }
+    return { source, label: attempt.value?.integration === 'checkout' ? 'server-side transaction query' : 'server-side Payment query', rawLabel: 'queryRawStatus' }
   }
 
   return {
@@ -125,6 +127,7 @@ const clientResult = computed(() => sdk.value?.events.some(event => event.source
 const paymentMethodLabels: Record<PaymentMethodId, string> = {
   card: 'Card',
   apm: 'APM',
+  all: 'Choose on Checkout',
   'google-pay': 'Google Pay',
   'apple-pay': 'Apple Pay',
 }
@@ -205,8 +208,8 @@ const details = computed(() => {
   if (sdk.value) {
     return [
       { label: 'mode', value: 'sandbox' },
-      { label: 'integration', value: 'web-js-sdk' },
-      ...(!contract.value
+      { label: 'integration', value: attempt.value.integration },
+      ...(!contract.value && attempt.value.integration === 'web-js-sdk'
         ? [
             { label: 'expectedMethod', value: paymentMethodLabels[attempt.value.method] },
             { label: 'actualWallet', value: attempt.value.actualWallet
@@ -218,7 +221,9 @@ const details = computed(() => {
               : 'unavailable' },
           ]
         : []),
-      { label: 'sdkRelease', value: 'v4/latest · replaceable current entry' },
+      ...(attempt.value.integration === 'web-js-sdk'
+        ? [{ label: 'sdkRelease', value: 'v4/latest · replaceable current entry' }]
+        : [{ label: 'paymentSelection', value: 'Choose on Checkout' }]),
       { label: 'journey', value: sdkJourney.value?.id ?? 'unavailable' },
       ...(contract.value
         ? [
@@ -227,19 +232,19 @@ const details = computed(() => {
             { label: 'contractVerificationSource', value: contract.value.statusSource },
           ]
         : []),
-      {
-        label: 'threeDSJourney',
-        value: contract.value || sdkJourney.value?.id === 'three-ds-success'
-          ? 'challenge'
-          : 'not-required',
-      },
+      ...(attempt.value.integration === 'web-js-sdk'
+        ? [{
+            label: 'threeDSJourney',
+            value: contract.value || sdkJourney.value?.id === 'three-ds-success' ? 'challenge' : 'not-required',
+          }]
+        : []),
       { label: 'returnObserved', value: returned.value ? 'yes' : 'no' },
       { label: 'orderId', value: order.value.id },
       { label: 'attemptId', value: attempt.value.id },
       { label: 'retryOf', value: attempt.value.retryOf ?? 'not-a-retry' },
       { label: 'merchantTxnId', value: attempt.value.merchantTxnId ?? 'unavailable' },
       { label: 'transactionId', value: attempt.value.transactionId ?? 'unavailable' },
-      { label: 'paymentId', value: sdk.value.paymentId },
+      { label: 'paymentId', value: sdk.value.paymentId ?? 'not returned' },
       { label: 'amountMinor / currency', value: `${order.value.amount.minor} / ${order.value.amount.currency}` },
       { label: 'normalizedStatus', value: attempt.value.status },
       { label: verification.value.rawLabel, value: verificationEvent.value?.rawStatus ?? 'unavailable' },
@@ -282,7 +287,7 @@ async function restoreCurrentSdkOrder(): Promise<void> {
     const restored = sdkSession.value
 
     if (restored && !isTerminalStatus(restored.attempt.status)) {
-      await navigateTo(`/halden/sdk/${restored.order.id}`)
+      await navigateTo(paymentPath(restored.attempt))
       return
     }
 
@@ -331,6 +336,7 @@ onMounted(async () => {
       !isTerminalStatus(sdk.value.attempt.status)
       || (
         !contract.value
+        && sdk.value.attempt.integration === 'web-js-sdk'
         && !hasCompletePaymentMethodAttribution(sdk.value.attempt)
       )
     ),
@@ -340,7 +346,7 @@ onMounted(async () => {
     await verifySdk(1, false)
 
     if (sdk.value && !isTerminalStatus(sdk.value.attempt.status)) {
-      await navigateTo(`/halden/sdk/${sdk.value.order.id}`, { replace: true })
+      await navigateTo(paymentPath(sdk.value.attempt), { replace: true })
       return
     }
   }

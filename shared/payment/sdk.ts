@@ -76,6 +76,7 @@ export function toPaymentAttemptSummary(attempt: PaymentAttempt): PaymentAttempt
 }
 
 export interface CreateSdkPaymentResponse {
+  readonly redirectUrl?: string
   readonly order: Order
   readonly attempt: PaymentAttempt
   readonly attempts: readonly PaymentAttemptSummary[]
@@ -127,8 +128,8 @@ export interface SdkSession {
   readonly attempt: PaymentAttempt
   readonly attempts: readonly PaymentAttemptSummary[]
   readonly events: readonly PaymentEvent[]
-  readonly paymentId: string
-  readonly query: QueryRef
+  readonly paymentId: string | null
+  readonly query: QueryRef | null
   readonly paymentMethod?: string
 }
 

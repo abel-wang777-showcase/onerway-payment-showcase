@@ -296,3 +296,14 @@ describe('payment intent route', () => {
     expect(mocks.createPaymentRecord).not.toHaveBeenCalled()
   })
 })
+
+it('persists the selected Hosted Checkout integration and all-method selection', async () => {
+  vi.stubGlobal('readBody', vi.fn().mockResolvedValue({ journeyId: 'hosted-checkout', restart: true }))
+  const { default: handler } = await import('../server/api/payment/intent.post')
+  await (handler as (event: unknown) => Promise<unknown>)({})
+  expect(mocks.createPaymentRecord).toHaveBeenCalledWith(
+    expect.objectContaining({ item: expect.objectContaining({ sku: 'HL-CHECKOUT-005' }) }),
+    expect.objectContaining({ integration: 'checkout', method: 'all' }),
+    expect.objectContaining({ merchantCustId: 'Cust-Existing_9' }),
+  )
+})

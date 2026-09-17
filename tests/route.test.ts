@@ -81,10 +81,23 @@ describe('application routes', () => {
     }
   })
 
+  it('strips provider return parameters before rendering Nuxt hydration data', async () => {
+    const path = '/halden/return/HLD-SANDBOX?providerStatus=S&session=discarded-fixture'
+    const redirect = await fetch(path, { redirect: 'manual' })
+    expect(redirect.status).toBe(303)
+    expect(redirect.headers.get('location')).toBe('/halden/return/HLD-SANDBOX')
+    expect(redirect.headers.get('referrer-policy')).toBe('no-referrer')
+    expect(redirect.headers.get('cache-control')).toBe('no-store')
+
+    const page = await fetch(path)
+    expect(await page.text()).not.toContain('discarded-fixture')
+  })
+
   it.each([
     ['/halden/checkout/HLD-DEMO-500', 'Simulated checkout · Halden', 'Restoring demo session'],
+    ['/halden/hosted/HLD-SANDBOX', 'Hosted Checkout · Halden', 'Restoring hosted checkout'],
     ['/halden/sdk/HLD-SANDBOX', 'Sandbox checkout · Halden', 'Restoring Sandbox checkout'],
-    ['/halden/return/HLD-SANDBOX?a=discarded', 'Restoring payment · Halden', 'Restoring 3DS return'],
+    ['/halden/return/HLD-SANDBOX?a=discarded', 'Restoring payment · Halden', 'Restoring payment return'],
     ['/halden/result/HLD-DEMO-500', 'Payment result · Halden', 'Restoring payment result'],
   ])('renders the client-restored shell for %s', async (path, title, label) => {
     const response = await fetch(path, {
@@ -97,7 +110,7 @@ describe('application routes', () => {
     expect(response.status).toBe(200)
     expect(html).toContain(`<title>${title}</title>`)
     expect(html).toContain(label)
-    expect(html).toContain(path.includes('/sdk/') ? 'Sandbox' : 'Simulation')
+    expect(html).toContain(/\/(sdk|hosted|return)\//.test(path) ? 'Sandbox' : 'Simulation')
     expect(html.match(/id="main"/g) ?? []).toHaveLength(1)
 
     for (const value of privateValues) {

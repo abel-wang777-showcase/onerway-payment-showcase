@@ -2,6 +2,8 @@ import { createEvent } from '#shared/payment/event'
 import type { JourneyId } from '#shared/payment/journey'
 import type { PaymentMethodId } from '#shared/payment/capability'
 import type { SubscriptionPlanId, SubscriptionSummary } from '#shared/payment/subscription'
+import { getJourney } from '#shared/payment/journey'
+import { paymentPath, readCheckoutRedirectUrl } from '#shared/payment/checkout'
 import {
   getRetryDecision,
   hasCompletePaymentMethodAttribution,
@@ -170,7 +172,8 @@ function assertSessionCorrelation(
   if (
     (expectedOrderId !== undefined && next.order.id !== expectedOrderId)
     || next.attempt.orderId !== next.order.id
-    || next.attempt.paymentId !== next.paymentId
+    || (next.attempt.paymentId ?? null) !== next.paymentId
+    || (!next.paymentId && (next.attempt.integration !== 'checkout' || !isTerminalStatus(next.attempt.status)))
     || active.length !== 1
     || summary?.status !== next.attempt.status
     || summary?.retryOf !== next.attempt.retryOf
@@ -205,6 +208,9 @@ export function useSdk() {
   const subscription = useState<SubscriptionSummary | null>('sdk-subscription', () => null)
   const retainedSubscriptionOrderId = useState<string | null>('sdk-retained-subscription-order', () => null)
   const retainedSubscriptionPaymentStatus = useState<PaymentAttempt['status'] | null>('sdk-retained-subscription-payment-status', () => null)
+  // Client-memory navigation capability, deliberately separate from the session
+  // and its event projection. Recovery never restores or recreates this URL.
+  const checkoutRedirect = useState<{ attemptId: string, url: string } | null>('checkout-redirect', () => null)
   const stage = useState<SdkStage>('sdk-stage', () => 'not_completed')
   const error = useState<string | null>('sdk-error', () => null)
   const failure = useState<PaymentFailure | null>('sdk-failure', () => null)
@@ -237,6 +243,29 @@ export function useSdk() {
     const current = session.value
     return current !== null && submittedAttempt.value === current.attempt.id
   })
+  const canOpenCheckout = computed(() => Boolean(
+    session.value?.attempt.integration === 'checkout'
+    && !isTerminalStatus(session.value.attempt.status)
+    && checkoutRedirect.value?.attemptId === session.value.attempt.id,
+  ))
+
+  async function openCheckout(): Promise<void> {
+    if (!ownsState() || !canOpenCheckout.value) return
+    const url = readCheckoutRedirectUrl(checkoutRedirect.value?.url)
+    checkoutRedirect.value = null
+    if (!url) {
+      setFailure('create', 'The checkout link is unavailable. Verify this payment before starting another order.')
+      return
+    }
+    stage.value = 'redirecting'
+    try {
+      await navigateTo(url, { external: true })
+    }
+    catch {
+      stage.value = 'not_completed'
+      setFailure('query', 'Checkout navigation could not complete. Verify the existing payment before continuing.')
+    }
+  }
 
   function ownsState(): boolean {
     return active && owner === ownerRevision.value
@@ -326,7 +355,11 @@ export function useSdk() {
   function write(next: SdkSession, expectedOrderId?: string, retryParentId?: string): void {
     assertSessionCorrelation(next, expectedOrderId, retryParentId)
     session.value = Object.freeze({
-      ...next,
+      order: next.order,
+      attempt: next.attempt,
+      paymentId: next.paymentId,
+      query: next.query,
+      ...(next.paymentMethod ? { paymentMethod: next.paymentMethod } : {}),
       attempts: Object.freeze([...next.attempts]),
       events: Object.freeze([...next.events]),
     })
@@ -400,7 +433,10 @@ export function useSdk() {
     resultAttempt.value = null
     submittedAttempt.value = null
     deferredResult = null
-    stage.value = 'loading'
+    const hosted = created.attempt.integration === 'checkout'
+    const redirectUrl = hosted ? readCheckoutRedirectUrl(created.redirectUrl) : null
+    checkoutRedirect.value = redirectUrl ? { attemptId: created.attempt.id, url: redirectUrl } : null
+    stage.value = hosted ? 'not_completed' : 'loading'
     clearFailure()
     subscription.value = contract ?? null
     retainedSubscriptionOrderId.value = null
@@ -408,13 +444,13 @@ export function useSdk() {
     if (retryParentId !== undefined) {
       retrying.value = false
     }
-    await navigateTo(`/halden/sdk/${created.order.id}`)
+    await navigateTo(paymentPath(created.attempt))
   }
 
   async function start(
     journeyId: JourneyId,
     restart = false,
-    method: PaymentMethodId = 'card',
+    method: PaymentMethodId = getJourney(journeyId).method,
   ): Promise<void> {
     if (!ownsState()) {
       return
@@ -425,6 +461,7 @@ export function useSdk() {
     }
 
     resubmitAttempt = null
+    checkoutRedirect.value = null
     let controller: AbortController | null = null
     let orderId: string | null = null
     stage.value = 'creating'
@@ -458,7 +495,7 @@ export function useSdk() {
         createAbort = controller
         const created = await $fetch<CreateSdkPaymentResponse>('/api/payment/create', {
           method: 'POST',
-          body: browserData(),
+          body: getJourney(journeyId).integration === 'checkout' ? {} : browserData(),
           signal: controller.signal,
         })
 
@@ -508,6 +545,7 @@ export function useSdk() {
     }
 
     let orderId: string | null = null
+    checkoutRedirect.value = null
     stage.value = 'creating'
     clearFailure()
     createFlight = (async () => {
@@ -578,6 +616,7 @@ export function useSdk() {
     }
 
     resubmitAttempt = null
+    checkoutRedirect.value = null
     restoring.value = true
     recoverFlight = (async () => {
       try {
@@ -629,7 +668,7 @@ export function useSdk() {
         retainedSubscriptionPaymentStatus.value = null
 
         resultAttempt.value = null
-        submittedAttempt.value = wasSubmitted ? next.attempt.id : null
+        submittedAttempt.value = wasSubmitted || next.attempt.integration === 'checkout' ? next.attempt.id : null
         deferredResult = null
         write(next, orderId, retryParentId)
         stage.value = next.attempt.status === 'succeeded' ? 'succeeded' : 'not_completed'
@@ -643,6 +682,7 @@ export function useSdk() {
         }
 
         const status = responseStatus(reason)
+        stage.value = 'not_completed'
         recoveryFailure.value = status !== null && [400, 401, 403, 404].includes(status)
           ? 'unauthorized'
           : 'retryable'
@@ -690,9 +730,7 @@ export function useSdk() {
     }
 
     await navigateTo(
-      isTerminalStatus(restored.attempt.status)
-        ? `/halden/result/${restored.order.id}`
-        : `/halden/sdk/${restored.order.id}`,
+      paymentPath(restored.attempt),
     )
     return 'restored'
   }
@@ -779,9 +817,7 @@ export function useSdk() {
 
     retrying.value = false
     await navigateTo(
-      isTerminalStatus(restored.attempt.status)
-        ? `/halden/result/${restored.order.id}`
-        : `/halden/sdk/${restored.order.id}`,
+      paymentPath(restored.attempt),
     )
     return 'restored'
   }
@@ -827,7 +863,7 @@ export function useSdk() {
         try {
           const created = await $fetch<CreateSdkPaymentResponse>('/api/payment/create', {
             method: 'POST',
-            body: browserData(),
+            body: parent.integration === 'checkout' ? {} : browserData(),
           })
 
           if (!ownsState()) {
@@ -881,6 +917,7 @@ export function useSdk() {
       started
       && isTerminalStatus(started.attempt.status)
       && subscription.value === null
+      && started.attempt.integration === 'web-js-sdk'
       && !hasCompletePaymentMethodAttribution(started.attempt),
     )
 
@@ -912,6 +949,16 @@ export function useSdk() {
           let response: QuerySdkPaymentResponse | QuerySubscriptionPaymentResponse
 
           try {
+            if (!current.paymentId || !current.query) {
+              if (current.attempt.integration !== 'checkout') throw new Error('PAYMENT_QUERY_UNAVAILABLE')
+              if (await recoverOwned(current.order.id, true) !== 'restored') throw new Error('PAYMENT_RECOVERY_PENDING')
+              const recovered = session.value
+              if (recovered && isTerminalStatus(recovered.attempt.status)) {
+                if (navigate) await navigateTo(paymentPath(recovered.attempt), { replace: true })
+                return
+              }
+              throw new Error('PAYMENT_RECOVERY_PENDING')
+            }
             response = await $fetch<QuerySdkPaymentResponse | QuerySubscriptionPaymentResponse>('/api/payment/query', {
               method: 'POST',
               body: {
@@ -1093,7 +1140,7 @@ export function useSdk() {
 
     const current = session.value
 
-    if (!current || isTerminalStatus(current.attempt.status)) {
+    if (!current || !current.paymentId || current.attempt.integration !== 'web-js-sdk' || isTerminalStatus(current.attempt.status)) {
       return Promise.resolve()
     }
 
@@ -1139,7 +1186,7 @@ export function useSdk() {
   const submit = singleFlight(async (confirm: () => Promise<unknown>): Promise<void> => {
     let current = session.value
 
-    if (!ownsState() || stage.value !== 'ready' || !current || isTerminalStatus(current.attempt.status)) {
+    if (!ownsState() || stage.value !== 'ready' || !current || !current.paymentId || current.attempt.integration !== 'web-js-sdk' || isTerminalStatus(current.attempt.status)) {
       return
     }
 
@@ -1198,7 +1245,7 @@ export function useSdk() {
         return
       }
 
-      const confirmed = readConfirmResult(result, current.paymentId)
+      const confirmed = readConfirmResult(result, current.paymentId!)
       const queued = takeDeferredResult(current.attempt.id)
 
       if (confirmed.rawStatus === 'R') {
@@ -1261,6 +1308,8 @@ export function useSdk() {
     elementRevision: readonly(elementRevision),
     retrying: readonly(retrying),
     restoring: readonly(restoring),
+    canOpenCheckout: readonly(canOpenCheckout),
+    openCheckout,
     start,
     startSubscription,
     restore,

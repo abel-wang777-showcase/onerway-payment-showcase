@@ -2099,6 +2099,43 @@ describe('SDK composable lifecycle', () => {
     expect(sdk.failure.value).toBeNull()
   })
 
+  it('preserves subscription and payment method facts across recovery and query projection', async () => {
+    const base = session()
+    const contract = {
+      planId: 'halden-daily-essentials-v1' as const,
+      productName: 'Halden Daily Essentials',
+      amount: { minor: 500, currency: 'USD' as const },
+      frequencyType: 'D' as const,
+      frequencyPoint: 1,
+      expireDate: '2099-12-31',
+      state: 'pending' as const,
+      statusSource: 'placeholder' as const,
+    }
+    const activeContract = { ...contract, state: 'active', statusSource: 'query' }
+    const state = new Map<string, { value: unknown }>()
+    const fetch = vi.fn()
+      .mockResolvedValueOnce({
+        ...base, subscription: contract, paymentMethod: 'Visa', submitted: true,
+        redirectUrl: 'https://sandbox-checkout.onerway.com/checkout?key=discard',
+      })
+      .mockResolvedValueOnce({ ...queried('succeeded', 'S'), subscription: activeContract })
+    stubState(state)
+    vi.stubGlobal('onScopeDispose', vi.fn())
+    vi.stubGlobal('$fetch', fetch)
+    vi.stubGlobal('navigateTo', vi.fn())
+    const { useSdk } = await import('../app/composables/useSdk')
+    const sdk = useSdk()
+
+    expect(await sdk.recover('order-1')).toBe(true)
+    expect(sdk.subscription.value).toEqual(contract)
+    expect(sdk.session.value?.paymentMethod).toBe('Visa')
+    expect(sdk.session.value).not.toHaveProperty('redirectUrl')
+    await sdk.verify(1, false)
+    expect(sdk.subscription.value).toEqual(activeContract)
+    expect(sdk.session.value?.paymentMethod).toBe('Visa')
+    expect(sdk.session.value?.attempt.status).toBe('succeeded')
+  })
+
   it('requests a separate server-owned customer for an explicit Sandbox replay', async () => {
     const state = new Map<string, { value: unknown }>()
     const subscription = {
@@ -2141,5 +2178,82 @@ describe('SDK composable lifecycle', () => {
     })
     expect(navigate).toHaveBeenCalledWith('/halden/sdk/order-1')
     expect(sdk.subscription.value).toEqual(subscription)
+  })
+})
+
+describe('Hosted Checkout through the shared payment session', () => {
+  function hosted() {
+    const result = created()
+    const attempt = { ...result.attempt, integration: 'checkout' as const, method: 'all' as const }
+    return { ...result, attempt, attempts: [attempt], redirectUrl: 'https://sandbox-checkout.onerway.com/aggregate?key=fixture' }
+  }
+
+  it('creates without browser data and keeps the navigation URL out of payment facts', async () => {
+    const response = hosted()
+    const state = new Map<string, { value: unknown }>()
+    const fetch = vi.fn().mockResolvedValueOnce({ orderId: 'order-1', create: true }).mockResolvedValueOnce(response)
+    const navigate = vi.fn()
+    stubState(state)
+    vi.stubGlobal('onScopeDispose', vi.fn())
+    vi.stubGlobal('$fetch', fetch)
+    vi.stubGlobal('navigateTo', navigate)
+    vi.stubGlobal('navigator', browserNavigator())
+    const { useSdk } = await import('../app/composables/useSdk')
+    const payment = useSdk()
+    await payment.start('hosted-checkout', true)
+    expect(fetch).toHaveBeenNthCalledWith(1, '/api/payment/intent', {
+      method: 'POST',
+      body: { journeyId: 'hosted-checkout', method: 'all', restart: true },
+    })
+    expect(fetch.mock.calls[1]?.[1].body).toEqual({})
+    expect(navigate).toHaveBeenCalledWith('/halden/hosted/order-1')
+    expect(JSON.stringify(payment.session.value)).not.toContain('redirectUrl')
+    expect(JSON.stringify(payment.session.value)).not.toContain('key=fixture')
+    expect(payment.canOpenCheckout.value).toBe(true)
+    await payment.openCheckout()
+    expect(navigate).toHaveBeenLastCalledWith(response.redirectUrl, { external: true })
+    expect(payment.canOpenCheckout.value).toBe(false)
+    await payment.openCheckout()
+    expect(navigate).toHaveBeenCalledTimes(2)
+  })
+
+  it('restores Hosted Checkout without opening an SDK or creating another payment', async () => {
+    const response = hosted()
+    const state = new Map<string, { value: unknown }>()
+    const fetch = vi.fn().mockResolvedValue({ ...response, events: [response.event], submitted: false })
+    const navigate = vi.fn()
+    stubState(state)
+    vi.stubGlobal('onScopeDispose', vi.fn())
+    vi.stubGlobal('$fetch', fetch)
+    vi.stubGlobal('navigateTo', navigate)
+    const { useSdk } = await import('../app/composables/useSdk')
+    const payment = useSdk()
+    await payment.restore()
+    expect(navigate).toHaveBeenCalledWith('/halden/hosted/order-1')
+    expect(payment.canOpenCheckout.value).toBe(false)
+    const confirm = vi.fn()
+    await payment.submit(confirm)
+    await payment.acceptResult({ paymentId: 'payment-1', paymentStatus: 'S' })
+    expect(confirm).not.toHaveBeenCalled()
+    expect(fetch).toHaveBeenCalledTimes(1)
+  })
+
+  it('restores an authenticated Checkout cancellation without inventing a Payment ID', async () => {
+    const response = hosted()
+    const { paymentId: _id, ...base } = response.attempt
+    const attempt = { ...base, status: 'cancelled', statusSource: 'webhook' }
+    const state = new Map<string, { value: unknown }>()
+    const fetch = vi.fn().mockResolvedValue({ ...response, attempt, attempts: [attempt], events: [], paymentId: null, query: null, submitted: true })
+    stubState(state)
+    vi.stubGlobal('onScopeDispose', vi.fn())
+    vi.stubGlobal('$fetch', fetch)
+    vi.stubGlobal('navigateTo', vi.fn())
+    const { useSdk } = await import('../app/composables/useSdk')
+    const payment = useSdk()
+    expect(await payment.recover('order-1')).toBe(true)
+    expect(payment.session.value?.paymentId).toBeNull()
+    await payment.verify()
+    await payment.retry()
+    expect(fetch).toHaveBeenCalledTimes(1)
   })
 })

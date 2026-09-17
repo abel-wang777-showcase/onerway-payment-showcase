@@ -3,12 +3,15 @@ const route = useRoute()
 const { session, retainedSubscriptionOrderId } = useSdk()
 const isCheckout = computed(() =>
   route.path.includes('/checkout/')
+  || route.path.includes('/hosted/')
   || route.path.includes('/sdk/')
   || route.path.includes('/subscription/return'),
 )
 const isResult = computed(() => route.path.includes('/result/'))
 const isSandbox = computed(() =>
-  route.path.includes('/sdk/')
+  route.path.includes('/hosted/')
+  || route.path.includes('/return/')
+  || route.path.includes('/sdk/')
   || route.path.includes('/subscription/')
   || (isResult.value && session.value?.order.id === String(route.params.order))
   || (
@@ -96,7 +99,7 @@ const isSandbox = computed(() =>
       <UContainer class="py-6">
         <p class="text-sm text-toned">
           {{ isSandbox
-            ? 'Halden is a fictional merchant. When payment is active, card fields are hosted by Onerway Sandbox and never pass through this merchant server.'
+            ? 'Halden is a fictional merchant. Payment details are entered on Onerway Sandbox pages or fields and never pass through this merchant server.'
             : 'Halden is a fictional merchant. This journey is simulated and does not collect payment data.' }}
         </p>
       </UContainer>

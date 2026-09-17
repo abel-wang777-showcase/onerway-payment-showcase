@@ -11,6 +11,7 @@ defineProps<{
   facts: readonly Fact[]
   profile: string
   sandbox: boolean
+  simulation?: boolean
 }>()
 </script>
 
@@ -32,7 +33,7 @@ defineProps<{
         </h2>
       </div>
       <UBadge
-        :label="sandbox ? 'Simulation + Sandbox' : 'Simulation'"
+        :label="sandbox ? (simulation === false ? 'Sandbox' : 'Simulation + Sandbox') : 'Simulation'"
         color="info"
         variant="soft"
       />
@@ -68,7 +69,7 @@ defineProps<{
         aria-hidden="true"
       />
       <p class="text-xs leading-relaxed text-toned">
-        {{ profile }}. Simulation stays local; the real Sandbox button uses signed server calls and Onerway-hosted card fields. Production remains locked.
+        {{ profile }}. Simulation stays local; the real Sandbox button uses signed server calls and Onerway-hosted payment pages or fields. Production remains locked.
       </p>
     </div>
 

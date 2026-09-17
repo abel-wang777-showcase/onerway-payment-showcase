@@ -3,6 +3,7 @@ import type { Currency, Order } from './order'
 import type { DemoStage } from './state'
 
 export const JOURNEY_IDS = [
+  'hosted-checkout',
   'standard-success',
   'three-ds-success',
   'processing-recovery',
@@ -32,6 +33,24 @@ export interface Journey {
 }
 
 export const JOURNEYS = Object.freeze({
+  'hosted-checkout': Object.freeze({
+    id: 'hosted-checkout',
+    label: 'USD 5.00 · Hosted Checkout',
+    description: 'Choose from the payment methods available on Onerway Checkout, then return to Halden for server verification.',
+    scene: 'ecommerce',
+    integration: 'checkout',
+    method: 'all',
+    sandboxMethods: Object.freeze(['all'] as const),
+    country: 'US',
+    currency: 'USD',
+    amount: 500,
+    orderId: 'HLD-HOSTED-500',
+    sku: 'HL-CHECKOUT-005',
+    item: 'Halden sample',
+    variant: 'Hosted checkout',
+    modes: Object.freeze(['sandbox'] as const),
+    stages: Object.freeze([]),
+  }),
   'standard-success': Object.freeze({
     id: 'standard-success',
     label: 'USD 5.00 · Standard success',
