@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { createOrder } from '../shared/payment/order'
+import { getJourney, type JourneyId } from '../shared/payment/journey'
 import {
   buildCreatePayload,
   buildCheckoutCreatePayload,
@@ -474,6 +475,20 @@ const checkoutOrder = createOrder({
   ...fixtureOrder(500),
   item: { ...fixtureOrder(500).item, sku: 'HL-CHECKOUT-005', variant: 'Hosted checkout' },
 })
+
+function checkoutFixture(journeyId: JourneyId) {
+  const journey = getJourney(journeyId)
+  return createOrder({
+    id: journey.orderId,
+    scene: journey.scene,
+    item: {
+      sku: journey.sku, name: journey.item, variant: journey.variant, quantity: 1,
+      unitAmount: { minor: journey.amount, currency: journey.currency },
+    },
+    amount: { minor: journey.amount, currency: journey.currency },
+    createdAt: '2026-09-14T00:00:00.000Z',
+  })
+}
 const checkoutContext = {
   merchantTxnId: 'showcase-checkout', amountMinor: 500, currency: 'USD',
   transactionId: '9000000000000000002', paymentId: '9000000000000000001',
@@ -492,6 +507,61 @@ function checkoutQuery(overrides: Record<string, unknown> = {}) {
 }
 
 describe('Hosted Checkout gateway boundary', () => {
+  it.each([
+    ['hosted-checkout', '5.00'],
+    ['hosted-checkout-three-ds', '50.00'],
+  ] as const)('builds %s from its fixed persisted Order', (journeyId, amount) => {
+    const order = checkoutFixture(journeyId)
+    const payload = buildCheckoutCreatePayload(profile, {
+      merchantTxnId: checkoutContext.merchantTxnId,
+      order,
+      returnUrl: `https://showcase.example/halden/return/${order.id}`,
+    })
+
+    expect(payload).toMatchObject({
+      orderAmount: amount, orderCurrency: 'USD', productType: 'ALL', subProductType: 'DIRECT', txnType: 'SALE',
+      txnOrderMsg: {
+        products: [{ currency: 'USD', name: order.item.name, num: '1', price: amount }],
+        returnUrl: `https://showcase.example/halden/return/${order.id}`,
+        notifyUrl: profile.notifyUrl,
+      },
+    })
+    expect(payload).not.toHaveProperty('lpmsInfo')
+    expect(payload).not.toHaveProperty('risk3dsStrategy')
+    expect(payload).not.toHaveProperty('paymentMode')
+  })
+
+  it.each(['hosted-checkout', 'hosted-checkout-three-ds'] as const)(
+    'rejects amount and product mutations of %s even when totals balance', (journeyId) => {
+      const order = checkoutFixture(journeyId)
+      const otherAmount = order.amount.minor === 500 ? 5_000 : 500
+      const context = { merchantTxnId: checkoutContext.merchantTxnId, returnUrl: 'https://showcase.example' }
+      for (const invalid of [
+        { ...order, amount: { minor: otherAmount, currency: 'USD' as const }, item: { ...order.item, unitAmount: { minor: otherAmount, currency: 'USD' as const } } },
+        { ...order, item: { ...order.item, sku: 'merchant-defined-product' } },
+        { ...order, item: { ...order.item, quantity: 2, unitAmount: { minor: order.amount.minor / 2, currency: 'USD' as const } } },
+      ]) {
+        expect(() => buildCheckoutCreatePayload(profile, { ...context, order: invalid })).toThrow('PAYMENT_ORDER_INVALID')
+      }
+    },
+  )
+
+  it.each([500, 5_000] as const)('does not accept a USD %s SDK order through the Checkout adapter', (amount) => {
+    expect(() => buildCheckoutCreatePayload(profile, {
+      merchantTxnId: checkoutContext.merchantTxnId, order: fixtureOrder(amount), returnUrl: 'https://showcase.example',
+    })).toThrow('PAYMENT_ORDER_INVALID')
+  })
+
+  it.each(['hosted-checkout', 'hosted-checkout-three-ds'] as const)('does not accept %s through the SDK adapter', (journeyId) => {
+    expect(() => buildCreatePayload(profile, {
+      merchantTxnId: checkoutContext.merchantTxnId, merchantCustId: 'cust_test',
+      order: checkoutFixture(journeyId), returnUrl: 'https://showcase.example',
+      transactionIp: '203.0.113.10', accept: '*/*', javaEnabled: false,
+      colorDepth: '24', screenHeight: '844', screenWidth: '390', timeZoneOffset: '-480',
+      contentLength: '1234', language: 'en-US', userAgent: 'Browser',
+    })).toThrow('PAYMENT_ORDER_INVALID')
+  })
+
   it('builds an aggregate one-time payment with required addresses but without browser, IP or a selected method', () => {
     const payload = buildCheckoutCreatePayload(profile, {
       merchantTxnId: checkoutContext.merchantTxnId,
@@ -537,6 +607,11 @@ describe('Hosted Checkout gateway boundary', () => {
     })
     expect(result.status).toBe('cancelled')
     expect(result).not.toHaveProperty('paymentId')
+  })
+
+  it('keeps a failed transaction with an open Payment processing', () => {
+    expect(readCheckoutQueryResponse(checkoutQuery({ status: 'F', paymentStatus: 'O' }), profile.merchantNo, checkoutContext))
+      .toMatchObject({ status: 'processing', transactionStatus: 'F', paymentStatus: 'O' })
   })
 
   it.each([

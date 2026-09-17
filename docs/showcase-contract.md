@@ -1,8 +1,8 @@
 # Onerway Payment Showcase 契约
 
-> 状态：M0 Web JS SDK Card、订阅与钱包；新增 Sandbox Hosted Checkout 与公共 header 验签，待真实交易验收
+> 状态：M0 Web JS SDK Card、订阅与钱包；Sandbox Hosted Checkout 已有真实演示证据，逐方式能力保持条件限制
 >
-> 更新日期：2026-09-14
+> 更新日期：2026-09-16
 > 作用：这是项目长期有效的产品、架构、状态和安全边界。GitHub Issues 负责交付顺序，不替代本文件。
 
 ## 1. 产品目标、受众和非目标
@@ -19,6 +19,7 @@ Onerway Payment Showcase 是一个面向客户的参考商户网站。访问者�
 非目标：
 
 - 不是 Onerway 商户后台、开发者控制台或内部 Presenter Console。
+- 不承担 Provider 的完整认证、风控或渠道测试；交付围绕约定的客户演示体验，仍保证 Showcase 自身的支付真值、恢复、幂等与安全边界。
 - 不要求业务人员在隐藏 Console 中切换配置后，客户才能看到不同场景。
 - M0 不包含 iOS / Android SDK，也不执行 Production 实际交易。
 - 不为每个临时演示需求新增一次性页面；新需求必须落入既有场景、接入或能力模型。
@@ -58,7 +59,7 @@ Demo Hub 是公开演示入口，不是第二套后台。它负责：
 - `E-commerce × Web JS SDK × Card` 为 Available。`USD 5.00 · Standard success` 同时开放确定性 simulation 与真实 Sandbox SDK；`USD 50.00 · 3DS Challenge` 同时开放 simulation 与仅 Sandbox profile 可见的真实验收入口。两条真实 Sandbox Card 黄金路径均已在 canonical Production 域名完成服务端核验，其中 USD 50.00 覆盖 `R → 3DS Challenge → configured returnUrl → same-payment fresh query`。同一能力下另有独立、仅 Sandbox 的 `Halden Daily Essentials` 初始订阅旅程；它没有伪 simulation，也不把订阅计划建模为新的 Integration。
 - Card simulation 额外开放 processing recovery、cancelled retry、deterministic failure 与 form load recovery 四条异常旅程；它们不含 Sandbox mode、不产生 provider 标识，也不扩张真实 create allowlist。deterministic failure 只形成 `source=simulation / status=failed` 的本地事实，不能作为 Payment-level `failed` 原始状态证据。
 - `E-commerce × Web JS SDK × Google Pay` 与 `E-commerce × Web JS SDK × Apple Pay` 均保持 Conditional，并复用 USD 5.00 `standard-success` 的真实 Sandbox 入口；Showcase 只记录用户选择的预期方式，是否渲染对应钱包按钮及其资格由同一个 Onerway SDK Element 决定。两者都不渲染伪钱包按钮，也没有钱包专属 simulation。Apple Pay 的最终真实设备 / Safari / Wallet canary 仍需单独授权与用户设备配合，不能由桌面浏览器或历史支付替代。
-- `E-commerce × Checkout × All` 为 Conditional，并提供 Sandbox 一次性支付入口。`All` 是支付方式选择策略，不代表最终使用某张卡或钱包；具体可选项由商户启用、国家、币种和设备条件决定。当前未完成新鲜真实 Sandbox 全链路验收，不宣称任一具体收银台支付方式为 Available。
+- `E-commerce × Checkout × All` 为 Conditional，并提供 USD 5.00 普通支付与 USD 50.00 3DS 的 Sandbox 一次性支付入口。`All` 是支付方式选择策略，不代表最终使用某张卡或钱包；具体可选项由商户启用、国家、币种和设备条件决定。USD 50.00 真实 3DS 已获用户人工验收确认，返回恢复、超时取消与通知链路已有独立 Sandbox 证据，执行范围见 Issue #8；这些证据不代表所有设备或具体支付方式均已验证，不宣称任一具体收银台支付方式为 Available。
 - Checkout 的具体支付方式直达、Direct API、其余 APM 和 Game / Live / AI 场景当前为 Planned。
 - Unavailable 保留为明确证实不支持时使用的状态；当前不为凑齐 UI 而制造无证据的 Unavailable 组合。
 
@@ -156,19 +157,35 @@ Demo Hub 继续提供两条同结果、可重复的本地模拟旅程。模拟�
 | 收银台查询维度（按 integration 分派） | SDK 继续使用 `POST /v1/txn/queryPayments` | 收银台使用[查询交易记录](https://developers.onerway.com/zh/payments/api-reference/endpoints/query-transactions) `POST /v1/txn/list`；SDK 继续使用 Payment 查询。文档未明确禁止收银台调用 Payment 查询，但不能据此替代它指定的交易查询流程 |
 | 收银台取消通知（新增受限例外） | 仅 Checkout 的 `status=N` 且缺 Payment 级字段可走无 ID 关联 | [支付结果通知](https://developers.onerway.com/zh/payments/api-reference/webhooks/payment-result)明确收银台订单取消可能缺少 `paymentId` 与 `paymentStatus`，需以已验签的商户、交易关联和金额币种处理 |
 
-同日支付结果 API Reference 已将 `paymentMethod` 与 `walletTypeName` 标为不参与验签，与现有字段排除集合一致；新 header 通知链路仍需真实样本验收。
+同日支付结果 API Reference 已将 `paymentMethod` 与 `walletTypeName` 标为不参与验签，与现有字段排除集合一致。普通通知的 `scenarios: null` 分流修复后，header 通知链路已取得真实 Sandbox 重发与自动超时取消样本；两类证据分别登记在 Issue #8。
 
 实施规则：
 
-- 唯一真实旅程为 `hosted-checkout`：USD 5.00、`HL-CHECKOUT-005`、`integration=checkout`、`method=all`，不提供伪造收银台或结果保证的本地 simulation。`all` 通过 `0007_checkout` 迁移加入已有 method 约束；不增加原始 payload 或 URL 列。
+- 固定真实旅程为 `hosted-checkout`（USD 5.00、`HL-CHECKOUT-005`）与 `hosted-checkout-three-ds`（USD 50.00、`HL-CHECKOUT-050`），均为 `integration=checkout`、`method=all`，不提供伪造收银台或结果保证的本地 simulation。USD 50.00 触发条件由用户在 Issue #8 确认；验收时在托管页选择 Card，由 Provider 承接 Challenge，不新增商户 3DS、risk strategy 补丁或客户端金额输入。选择其他支付方式不构成 Card 3DS 验收。`all` 通过 `0007_checkout` 迁移加入已有 method 约束；新增旅程复用现有 Order / Attempt / Event，无新增数据库字段。
+- Hosted 页与结果页从持久化 Order 的固定商品和金额识别旅程，`threeDSJourney=challenge` 仅表示本次选择的测试旅程，不证明实际发生或通过 Challenge；USD 5.00 使用 `not-selected`，不承诺 Provider 不会要求认证。Hosted 页显式启动独立 Sandbox Order 时保留当前固定旅程，不静默降回 USD 5.00；恢复和 Retry 继续保留原订单关联。
 - 创建继续分为先持久化 intent 并签发 cookie、再认领 Provider create 两步。adapter 由持久化 Attempt 的 integration 决定；Hosted create 只接受空对象，不调用客户端 browser data 采集。页面位于 `/halden/hosted/:order`，展示订单和白名单引用，再由客户点击进入托管收银台；不挂载 SDK、不调用 confirm 或 SDK submission latch。
 - 跳转 URL 仅保留在当前浏览器内存的独立导航引用中，外跳时消费；不进入 Payment session/Event、持久层或 Technical details。刷新、恢复与结果未知时不重放 create、不拼造收银台 URL，只恢复和查询已有交易。
+- `Return to Merchant Page` 的显示由商户开关控制。2026-09-16 用户确认该入口只返回商户页，不立即关闭交易或发送取消通知；交易置为 `N` 及取消通知须等待 Provider 超时关单。点击入口后仍为 `U` 时继续保持 `processing`，不得把返回、关闭页面或点击行为映射为 `cancelled`。验收分别记录同订单返回恢复与超时关单后的 query / Webhook 收敛，不以返回成功替代 `N` 终态证据，也不假设未确认的关单时长。
 - Checkout 查询调用 `POST /v1/txn/list`，按保存的 `merchantTxnId` 唯一匹配，并核对金额、币种及已有 provider IDs；`S → succeeded`、`N → cancelled`、`R → requires_action`、`I/U/P → processing`。交易 `F` 可能对应仍开放的 Payment，因此保守保持 `processing`，不开放新扣款 Retry；存在 Payment 轴时结合 `S/O/N`，未知值拒绝。
 - 无 Payment ID 的取消只允许已验签、商户匹配且 `status=N`、缺 `paymentStatus` 的 Checkout 通知；按唯一 `merchantTxnId`、金额、币种与已存 `transactionId` 核对。它可以早于 create 响应，后续 create 完成不能回退已持久化终态。SDK 和非取消通知不获得此例外。
 - 创建响应丢失后若只有无 Payment ID 的 Checkout 取消事实，恢复响应显式返回 `paymentId=null`、`query=null`；页面按 cookie 恢复既有取消，不能伪造 Payment ID、query capability 或调用 SDK。该情形首版不提供同 Order Retry，用户可回 Demo Hub 启动独立 Sandbox Order；具有 Payment ID 的权威取消继续使用既有唯一 child Retry。
 - `returnUrl` 在服务端 SSR 前丢弃附加 query（303、no-store、no-referrer），使用同源恢复 cookie 并对同一订单 fresh query；Checkout 按交易维度查询，SDK 按 Payment 维度查询。双方终态冲突遵循第 6 节用户确认的调和规则。Production 交易、canonical origin、限流及凭据边界不变。
 
-验收须覆盖创建与外跳、回跳查询、无 Payment ID 取消、header 验签与幂等、终态冲突、刷新不重复 create、跨 integration 恢复、320/390/834/1440 页面与明暗/键盘以及现有 SDK 回归。真实验收还需迁移数据库、部署携带新 header 的 Relay 与应用，并以新鲜 Sandbox 支付验证通知投递和服务端结果；这些未执行前不得将自动化样本写成真实支付完成。
+验收按 Showcase 责任与证据类型分层。自动化覆盖固定旅程、创建认领与 URL 单次消费、回跳查询、无 Payment ID 取消、header 验签与幂等、终态冲突、跨 integration 恢复及 SDK 回归；页面检查覆盖约定的响应式、明暗和键盘交互。真实 Sandbox 验证本次承诺的客户旅程和通知链路，不要求每个防御性测试都有真实交易副本。用户于 2026-09-16 确认按 Demo 目标收尾，不将 Provider 拒付及其内部重试机制作为本次交付必验项；状态映射与安全限制不因此放宽。
+
+一次性支付的执行结果登记在 [Issue #8](https://github.com/abel-wang777-showcase/onerway-payment-showcase/issues/8)，长期验收边界为：
+
+| 范围 | 验收要求 |
+| --- | --- |
+| 当前演示交付 | 保留 USD 5.00 普通入口，交付 USD 50.00 3DS；确认客户可进入托管页、完成约定旅程并由服务端核验。USD 50 的用户人工确认单列，不与其他订单的通知证据拼成同笔全链路 |
+| 商户返回与恢复 | Return to Merchant Page、关闭 / 刷新 / 后退只恢复原订单，不以交互判定终态、不重复创建；超时关单后的 N 由 query / Webhook 收敛 |
+| 通知接收 | 核对真实通知的 Provider 发送与 ACK、同笔持久化和结果；重复回放仅证明接收端幂等，不证明 Provider 自动重试。成功通知重发与自动超时取消分别记录 |
+| 后续按需演示 | Apple Pay、Google Pay 和选定 APM 在商户、US / USD、设备与钱包条件具备且明确安排演示时验证，记录实际方式和网络；本次不提升对应能力状态，不作为当前固定 Card 旅程的交付阻断 |
+| 后续按需诊断 | 3DS 取消 / 失败、Provider 拒付后重试、成功支付首次自动通知，以及通知乱序、缺 Payment ID、创建响应未知等真实异常样本保留未验证范围；仅在明确需求或具体缺陷涉及它们时补验，不为凑齐矩阵制造交易 |
+
+Showcase 对 transaction F 的保守映射、缺 Payment ID 取消的受限关联、未知创建结果禁止重复 create、通知验签 / 幂等 / 终态调和仍是实现要求，继续由相关自动化验证。后续真实样本未验证不等于本次演示未完成，也不得写成已通过。`ALL` 仅表示托管页选择策略，不作为任何具体支付方式已验证的依据；能力改为 Available 仍须满足对应组合条件。
+
+代理执行的真实记录应包含日期、canonical Production 部署 SHA、Sandbox profile、固定旅程、实际方式、设备 / 浏览器、国家 / 币种、观察到的交互及核验来源；未取得的字段明确标为未知。用户人工验收按其明确确认的范围登记，不推定缺失订单或设备信息。受限诊断使用同笔白名单标识关联通知、query 与持久化，公开 Issue / PR 只保留脱敏尾号及证据摘要；不记录完整交易标识、卡数据、导航 URL、query capability 或原始 payload。模拟、自动化、人工确认、真实 Provider 发送与手动回放不得互相替代。
 
 ## 6. 回跳、通知和最终状态
 

@@ -297,13 +297,57 @@ describe('payment intent route', () => {
   })
 })
 
-it('persists the selected Hosted Checkout integration and all-method selection', async () => {
-  vi.stubGlobal('readBody', vi.fn().mockResolvedValue({ journeyId: 'hosted-checkout', restart: true }))
+it.each([
+  ['hosted-checkout', 500, 'HL-CHECKOUT-005'],
+  ['hosted-checkout-three-ds', 5_000, 'HL-CHECKOUT-050'],
+])('persists %s with the server amount and aggregate Checkout integration', async (journeyId, minor, sku) => {
+  vi.stubGlobal('readBody', vi.fn().mockResolvedValue({ journeyId, restart: true }))
   const { default: handler } = await import('../server/api/payment/intent.post')
   await (handler as (event: unknown) => Promise<unknown>)({})
   expect(mocks.createPaymentRecord).toHaveBeenCalledWith(
-    expect.objectContaining({ item: expect.objectContaining({ sku: 'HL-CHECKOUT-005' }) }),
+    expect.objectContaining({
+      amount: { minor, currency: 'USD' },
+      item: expect.objectContaining({ sku, quantity: 1, unitAmount: { minor, currency: 'USD' } }),
+    }),
     expect.objectContaining({ integration: 'checkout', method: 'all' }),
     expect.objectContaining({ merchantCustId: 'Cust-Existing_9' }),
   )
+})
+
+it.each([
+  { journeyId: 'hosted-checkout', amount: 5_000 },
+  { journeyId: 'hosted-checkout-three-ds', amountMinor: 500 },
+  { journeyId: 'hosted-checkout-three-ds', currency: 'EUR' },
+  { journeyId: 'hosted-checkout-three-ds', sku: 'HL-SAMPLE-050' },
+])('rejects browser overrides of Checkout order facts %#', async (input) => {
+  vi.stubGlobal('readBody', vi.fn().mockResolvedValue({ ...input, restart: true }))
+  const { default: handler } = await import('../server/api/payment/intent.post')
+  await expect((handler as (event: unknown) => Promise<unknown>)({}))
+    .rejects.toMatchObject({ statusCode: 400, statusMessage: 'PAYMENT_INPUT_INVALID' })
+  expect(mocks.createPaymentRecord).not.toHaveBeenCalled()
+  expect(mocks.setPaymentRecovery).not.toHaveBeenCalled()
+})
+
+it.each([
+  ['hosted-checkout', 'card'],
+  ['hosted-checkout-three-ds', 'card'],
+  ['hosted-checkout-three-ds', 'google-pay'],
+  ['hosted-checkout-three-ds', 'apple-pay'],
+  ['standard-success', 'all'],
+  ['three-ds-success', 'all'],
+])('rejects the cross-integration method selection %s / %s', async (journeyId, method) => {
+  vi.stubGlobal('readBody', vi.fn().mockResolvedValue({ journeyId, method, restart: true }))
+  const { default: handler } = await import('../server/api/payment/intent.post')
+  await expect((handler as (event: unknown) => Promise<unknown>)({}))
+    .rejects.toMatchObject({ statusCode: 400, statusMessage: 'PAYMENT_JOURNEY_UNAVAILABLE' })
+  expect(mocks.createPaymentRecord).not.toHaveBeenCalled()
+})
+
+it('does not replace an existing non-terminal payment when selecting Checkout 3DS', async () => {
+  vi.stubGlobal('readBody', vi.fn().mockResolvedValue({ journeyId: 'hosted-checkout-three-ds' }))
+  const { default: handler } = await import('../server/api/payment/intent.post')
+  await expect((handler as (event: unknown) => Promise<unknown>)({}))
+    .resolves.toEqual({ orderId: 'order-1', create: false })
+  expect(mocks.createPaymentRecord).not.toHaveBeenCalled()
+  expect(mocks.setPaymentRecovery).not.toHaveBeenCalled()
 })

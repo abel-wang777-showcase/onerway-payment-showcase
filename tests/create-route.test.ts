@@ -46,7 +46,31 @@ describe('Hosted Checkout create route', () => {
     expect(JSON.stringify(result.event)).not.toContain('ephemeral')
   })
 
-  it.each([{ integration: 'checkout' }, { language: 'en-US' }, null])('rejects nonempty browser inputs before claiming creation %#', async (input) => {
+  it.each([
+    [500, 'HL-CHECKOUT-005'],
+    [5_000, 'HL-CHECKOUT-050'],
+  ])('passes the persisted USD %s order unchanged to the Checkout gateway', async (minor, sku) => {
+    const recovery = await mocks.getPaymentRecovery()
+    const order = {
+      id: 'order-1', scene: 'ecommerce', amount: { minor, currency: 'USD' },
+      item: { sku, name: 'Halden sample', variant: minor === 500 ? 'Hosted checkout' : 'Hosted checkout 3DS', quantity: 1, unitAmount: { minor, currency: 'USD' } },
+    }
+    mocks.getPaymentRecovery.mockResolvedValue({ ...recovery, order })
+    const { default: handler } = await import('../server/api/payment/create.post')
+    const result = await (handler as (event: unknown) => Promise<Record<string, unknown>>)({})
+
+    expect(mocks.createCheckoutPayment.mock.calls[0]?.[1].order).toBe(order)
+    expect(result.order).toBe(order)
+    expect(mocks.createCheckoutPayment).toHaveBeenCalledWith(expect.anything(), {
+      order, merchantTxnId: 'merchant-txn-1', returnUrl: 'https://showcase.example/halden/return/order-1',
+    })
+    expect(mocks.createPayment).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    { integration: 'web-js-sdk' }, { language: 'en-US' }, { amountMinor: 500 },
+    { amount: { minor: 5_000, currency: 'USD' } }, { journeyId: 'three-ds-success' }, null,
+  ])('rejects nonempty browser inputs before claiming creation %#', async (input) => {
     vi.stubGlobal('readBody', vi.fn().mockResolvedValue(input))
     const { default: handler } = await import('../server/api/payment/create.post')
     await expect((handler as (event: unknown) => Promise<unknown>)({})).rejects.toMatchObject({ statusCode: 400 })
