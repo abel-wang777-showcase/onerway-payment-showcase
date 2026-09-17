@@ -513,13 +513,13 @@ describe('Hosted Checkout gateway boundary', () => {
   ] as const)('builds %s from its fixed persisted Order', (journeyId, amount) => {
     const order = checkoutFixture(journeyId)
     const payload = buildCheckoutCreatePayload(profile, {
-      merchantTxnId: checkoutContext.merchantTxnId,
+      merchantTxnId: checkoutContext.merchantTxnId, merchantCustId: 'cust_checkout',
       order,
       returnUrl: `https://showcase.example/halden/return/${order.id}`,
     })
 
     expect(payload).toMatchObject({
-      orderAmount: amount, orderCurrency: 'USD', productType: 'ALL', subProductType: 'DIRECT', txnType: 'SALE',
+      merchantCustId: 'cust_checkout', orderAmount: amount, orderCurrency: 'USD', productType: 'ALL', subProductType: 'DIRECT', txnType: 'SALE',
       txnOrderMsg: {
         products: [{ currency: 'USD', name: order.item.name, num: '1', price: amount }],
         returnUrl: `https://showcase.example/halden/return/${order.id}`,
@@ -535,7 +535,7 @@ describe('Hosted Checkout gateway boundary', () => {
     'rejects amount and product mutations of %s even when totals balance', (journeyId) => {
       const order = checkoutFixture(journeyId)
       const otherAmount = order.amount.minor === 500 ? 5_000 : 500
-      const context = { merchantTxnId: checkoutContext.merchantTxnId, returnUrl: 'https://showcase.example' }
+      const context = { merchantTxnId: checkoutContext.merchantTxnId, merchantCustId: 'cust_checkout', returnUrl: 'https://showcase.example' }
       for (const invalid of [
         { ...order, amount: { minor: otherAmount, currency: 'USD' as const }, item: { ...order.item, unitAmount: { minor: otherAmount, currency: 'USD' as const } } },
         { ...order, item: { ...order.item, sku: 'merchant-defined-product' } },
@@ -548,7 +548,7 @@ describe('Hosted Checkout gateway boundary', () => {
 
   it.each([500, 5_000] as const)('does not accept a USD %s SDK order through the Checkout adapter', (amount) => {
     expect(() => buildCheckoutCreatePayload(profile, {
-      merchantTxnId: checkoutContext.merchantTxnId, order: fixtureOrder(amount), returnUrl: 'https://showcase.example',
+      merchantTxnId: checkoutContext.merchantTxnId, merchantCustId: 'cust_checkout', order: fixtureOrder(amount), returnUrl: 'https://showcase.example',
     })).toThrow('PAYMENT_ORDER_INVALID')
   })
 
@@ -564,14 +564,14 @@ describe('Hosted Checkout gateway boundary', () => {
 
   it('builds an aggregate one-time payment with required addresses but without browser, IP or a selected method', () => {
     const payload = buildCheckoutCreatePayload(profile, {
-      merchantTxnId: checkoutContext.merchantTxnId,
+      merchantTxnId: checkoutContext.merchantTxnId, merchantCustId: 'cust_checkout',
       order: checkoutOrder,
       returnUrl: 'https://showcase.example/halden/return/order-500',
     })
     expect(payload).toEqual({
       billingInformation: { country: 'US', email: 'customer@test.com', province: 'CA' },
       shippingInformation: { country: 'US', email: 'customer@test.com', province: 'CA' },
-      merchantNo: profile.merchantNo, merchantTxnId: checkoutContext.merchantTxnId,
+      merchantNo: profile.merchantNo, merchantTxnId: checkoutContext.merchantTxnId, merchantCustId: 'cust_checkout',
       orderAmount: '5.00', orderCurrency: 'USD', productType: 'ALL',
       subProductType: 'DIRECT', txnType: 'SALE',
       txnOrderMsg: {
@@ -580,9 +580,18 @@ describe('Hosted Checkout gateway boundary', () => {
       },
     })
     expect(() => buildCheckoutCreatePayload(profile, {
-      merchantTxnId: checkoutContext.merchantTxnId, order: fixtureOrder(500), returnUrl: 'https://showcase.example',
+      merchantTxnId: checkoutContext.merchantTxnId, merchantCustId: 'cust_checkout', order: fixtureOrder(500), returnUrl: 'https://showcase.example',
     })).toThrow('PAYMENT_ORDER_INVALID')
   })
+
+  it.each(['', 'a'.repeat(64), 'with space', 'with.dot', '客户'])(
+    'rejects an invalid server customer id %s before sending a Checkout request', (merchantCustId) => {
+      expect(() => buildCheckoutCreatePayload(profile, {
+        merchantTxnId: checkoutContext.merchantTxnId, merchantCustId,
+        order: checkoutOrder, returnUrl: 'https://showcase.example/halden/return/order-500',
+      })).toThrow('PAYMENT_ORDER_INVALID')
+    },
+  )
 
   it('requires the confirmed Sandbox redirect boundary before returning a created payment', () => {
     const response = { respCode: '20000', data: {

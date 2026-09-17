@@ -44,7 +44,7 @@ function formatAmount(minor: number): string {
   return `${Math.floor(minor / 100)}.${String(minor % 100).padStart(2, '0')}`
 }
 
-export type CheckoutCreateContext = Pick<CreateContext, 'merchantTxnId' | 'order' | 'returnUrl'>
+export type CheckoutCreateContext = Pick<CreateContext, 'merchantTxnId' | 'merchantCustId' | 'order' | 'returnUrl'>
 
 export interface CreatedPayment {
   readonly transactionId: string
@@ -331,6 +331,7 @@ export function buildCheckoutCreatePayload(
   if (
     journey?.integration !== 'checkout'
     || !journey.modes.includes('sandbox')
+    || !/^[A-Za-z0-9_-]{1,63}$/.test(context.merchantCustId)
     || order.amount.currency !== 'USD'
     || order.item.unitAmount.currency !== order.amount.currency
     || order.item.quantity * order.item.unitAmount.minor !== order.amount.minor
@@ -345,6 +346,7 @@ export function buildCheckoutCreatePayload(
     shippingInformation: address,
     merchantNo: profile.merchantNo,
     merchantTxnId: context.merchantTxnId,
+    merchantCustId: context.merchantCustId,
     orderAmount: formatAmount(order.amount.minor),
     orderCurrency: order.amount.currency,
     productType: 'ALL',

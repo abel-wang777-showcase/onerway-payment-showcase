@@ -95,11 +95,9 @@ export default defineEventHandler(async (event): Promise<CreateSdkPaymentRespons
       catch {
         throw createError({ statusCode: 400, statusMessage: 'PAYMENT_INPUT_INVALID' })
       }
-      const customer = checkout
-        ? null
-        : recovery.customer ?? await ensurePaymentCustomer(recovery.order.id, createMerchantCustomer(profile))
+      const customer = recovery.customer ?? await ensurePaymentCustomer(recovery.order.id, createMerchantCustomer(profile))
 
-      if (customer && !isMerchantCustomerInScope(customer, profile)) {
+      if (!isMerchantCustomerInScope(customer, profile)) {
         throw createError({ statusCode: 409, statusMessage: 'PAYMENT_CUSTOMER_SCOPE_MISMATCH' })
       }
       const transactionIp = checkout ? null : requireIp(profile.transactionIp ?? clientIp)
@@ -127,6 +125,7 @@ export default defineEventHandler(async (event): Promise<CreateSdkPaymentRespons
 
       const context = {
         merchantTxnId,
+        merchantCustId: customer.merchantCustId,
         order: recovery.order,
         returnUrl: `${profile.showcaseOrigin}/halden/return/${recovery.order.id}`,
       }
@@ -134,7 +133,6 @@ export default defineEventHandler(async (event): Promise<CreateSdkPaymentRespons
         ? await createCheckoutPayment(profile, context)
         : await createPayment(profile, {
             ...context,
-            merchantCustId: customer!.merchantCustId,
             transactionIp: transactionIp!,
             accept: getHeader(event, 'accept')?.slice(0, 512) || '*/*',
             userAgent: getHeader(event, 'user-agent')?.slice(0, 512) || 'unknown',
