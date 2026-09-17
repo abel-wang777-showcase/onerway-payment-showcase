@@ -1,7 +1,7 @@
 import { createEvent } from '#shared/payment/event'
 import type { JourneyId } from '#shared/payment/journey'
 import type { PaymentMethodId } from '#shared/payment/capability'
-import type { SubscriptionPlanId, SubscriptionSummary } from '#shared/payment/subscription'
+import type { SubscriptionIntegration, SubscriptionPlanId, SubscriptionSummary } from '#shared/payment/subscription'
 import { getJourney } from '#shared/payment/journey'
 import { paymentPath, readCheckoutRedirectUrl } from '#shared/payment/checkout'
 import {
@@ -119,6 +119,7 @@ async function requestPaymentIntent(
 
 async function requestSubscriptionIntent(
   planId: SubscriptionPlanId,
+  integration: SubscriptionIntegration,
   newTestCustomer: boolean,
   ownsState: () => boolean,
 ): Promise<CreateSubscriptionIntentResponse | null> {
@@ -133,7 +134,7 @@ async function requestSubscriptionIntent(
 
     return $fetch<CreateSubscriptionIntentResponse>('/api/payment/subscription/intent', {
       method: 'POST',
-      body: { planId, ...(newTestCustomer ? { newTestCustomer: true } : {}) },
+      body: { planId, integration, ...(newTestCustomer ? { newTestCustomer: true } : {}) },
     })
   })
 }
@@ -539,6 +540,7 @@ export function useSdk() {
   async function startSubscription(
     planId: SubscriptionPlanId,
     newTestCustomer = false,
+    integration: SubscriptionIntegration = 'web-js-sdk',
   ): Promise<void> {
     if (!ownsState() || createFlight) {
       return createFlight ?? undefined
@@ -550,7 +552,7 @@ export function useSdk() {
     clearFailure()
     createFlight = (async () => {
       try {
-        const intent = await requestSubscriptionIntent(planId, newTestCustomer, ownsState)
+        const intent = await requestSubscriptionIntent(planId, integration, newTestCustomer, ownsState)
 
         if (!intent || !ownsState()) {
           return
@@ -570,7 +572,7 @@ export function useSdk() {
 
         const created = await $fetch<CreateSubscriptionPaymentResponse>('/api/payment/subscription/create', {
           method: 'POST',
-          body: browserData(),
+          body: intent.integration === 'checkout' ? {} : browserData(),
         })
 
         if (ownsState()) {

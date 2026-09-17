@@ -2,7 +2,10 @@ export default defineEventHandler((event) => {
   if (!['GET', 'HEAD'].includes(event.method)) return
 
   const url = getRequestURL(event)
-  if (!/^\/halden\/return\/[A-Za-z0-9-]{1,128}\/?$/.test(url.pathname)) return
+  if (
+    !/^\/halden\/return\/[A-Za-z0-9-]{1,128}\/?$/.test(url.pathname)
+    && !/^\/halden\/subscription\/return\/?$/.test(url.pathname)
+  ) return
 
   setResponseHeader(event, 'Cache-Control', 'no-store')
   setResponseHeader(event, 'Referrer-Policy', 'no-referrer')

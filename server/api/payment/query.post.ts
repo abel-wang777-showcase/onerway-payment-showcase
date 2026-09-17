@@ -7,19 +7,19 @@ import { toSubscriptionSummary } from '../../../shared/payment/subscription'
 import {
   GatewayError,
   queryPayment,
-  querySubscription,
   queryCheckoutPayment,
   verifyQueryToken,
 } from '../../utils/gateway'
 import { withPaymentLimit } from '../../utils/limit'
 import { requireServerProfile } from '../../utils/profile'
 import { enrichDirectPaymentMethod } from '../../utils/method'
+import { refreshSubscription, subscriptionCreationRecoveryError } from '../../utils/subscription'
 import {
   getPaymentQueryContext,
+  getPaymentRecovery,
   getSubscriptionForAttempt,
   PaymentStoreError,
   recordQueryEvent,
-  recordSubscriptionQueryDetails,
 } from '../../utils/store'
 
 interface QueryInput {
@@ -86,8 +86,16 @@ export default defineEventHandler(async (event): Promise<QuerySdkPaymentResponse
       if (!context) {
         throw new PaymentStoreError('PAYMENT_ATTEMPT_NOT_FOUND')
       }
+      const subscription = await getSubscriptionForAttempt(input.attemptId)
+      if (subscription) {
+        const recovery = await getPaymentRecovery(context.order.id, input.attemptId)
+        if (!recovery) throw new PaymentStoreError('PAYMENT_ATTEMPT_NOT_FOUND')
+        const recoveryError = subscriptionCreationRecoveryError(recovery)
+        if (recoveryError) throw createError({ statusCode: 409, statusMessage: recoveryError })
+      }
       const result = context.attempt.integration === 'checkout'
         ? await queryCheckoutPayment(profile, {
+            ...(subscription ? { subscription: true } : {}),
             merchantTxnId: context.attempt.merchantTxnId!,
             amountMinor: context.order.amount.minor,
             currency: context.order.amount.currency,
@@ -112,13 +120,7 @@ export default defineEventHandler(async (event): Promise<QuerySdkPaymentResponse
           )
 
       if (currentContract) {
-        const contract = currentContract.contractId
-          ? await recordSubscriptionQueryDetails(
-              input.attemptId,
-              await querySubscription(profile, currentContract.contractId),
-              new Date().toISOString(),
-            )
-          : currentContract
+        const contract = await refreshSubscription(profile, currentContract, result, new Date().toISOString())
 
         return Object.freeze({
           attempt,

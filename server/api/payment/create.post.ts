@@ -77,7 +77,7 @@ export default defineEventHandler(async (event): Promise<CreateSdkPaymentRespons
       const recovery = await getPaymentRecovery(ref.orderId, ref.attemptId)
       const merchantTxnId = recovery?.attempt.merchantTxnId
 
-      if (!recovery || !merchantTxnId || recovery.attempt.paymentId || recovery.attempt.transactionId) {
+      if (!recovery || recovery.subscription || !merchantTxnId || recovery.attempt.paymentId || recovery.attempt.transactionId) {
         throw createError({ statusCode: 409, statusMessage: 'PAYMENT_ATTEMPT_ACTIVE' })
       }
 

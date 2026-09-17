@@ -3,7 +3,7 @@ import type { PaymentEvent } from './event'
 import type { JourneyId } from './journey'
 import type { PaymentMethodId } from './capability'
 import type { Order } from './order'
-import type { SubscriptionPlanId, SubscriptionSummary } from './subscription'
+import type { SubscriptionIntegration, SubscriptionPlanId, SubscriptionSummary } from './subscription'
 
 export const SDK_STAGES = [
   'creating',
@@ -138,11 +138,13 @@ export interface RecoverSdkPaymentResponse extends SdkSession {
 }
 
 export interface CreateSubscriptionIntentInput {
+  readonly integration?: SubscriptionIntegration
   readonly planId: SubscriptionPlanId
   readonly newTestCustomer?: true
 }
 
 export interface CreateSubscriptionIntentResponse {
+  readonly integration: SubscriptionIntegration
   readonly orderId: string
   readonly create: boolean
   readonly existing: boolean
@@ -161,6 +163,7 @@ export interface RecoverSubscriptionPaymentResponse extends SubscriptionSession 
 }
 
 export interface RecoverRetainedSubscriptionResponse {
+  readonly integration: SubscriptionIntegration
   readonly retained: true
   readonly orderId: string
   readonly paymentStatus: PaymentStatus

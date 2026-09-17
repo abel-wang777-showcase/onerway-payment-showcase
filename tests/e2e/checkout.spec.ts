@@ -3,6 +3,7 @@ import { createAttempt, setAttemptStatus, type PaymentStatus } from '../../share
 import { createEvent } from '../../shared/payment/event'
 import { createOrder } from '../../shared/payment/order'
 import { toPaymentAttemptSummary } from '../../shared/payment/sdk'
+import { createSubscriptionPlaceholder, getSubscriptionPlan, toSubscriptionSummary, type SubscriptionState } from '../../shared/payment/subscription'
 import { expectNoHorizontalOverflow } from './support'
 
 const BASE_URL = 'http://127.0.0.1:4173'
@@ -30,15 +31,24 @@ async function installCheckoutMock(page: Page, options: {
   queryOutcome?: QueryOutcome
   interaction?: 'success' | 'cancelled'
   loseCreateResponse?: boolean
+  subscription?: boolean
 } = {}) {
   const journey = options.journey ?? CHECKOUT_JOURNEYS[0]
   let queryOutcome: QueryOutcome = options.queryOutcome ?? { status: 'succeeded', transactionStatus: 'S' }
+  let subscription = options.subscription ? toSubscriptionSummary(createSubscriptionPlaceholder({
+    id: 'subscription-fixture', plan: getSubscriptionPlan('halden-daily-essentials-v1'),
+    initialOrderId: ORDER_ID, initialAttemptId: ATTEMPT_ID, createdAt: TIMESTAMP,
+  })) : undefined
+  const intentPath = options.subscription ? '/api/payment/subscription/intent' : '/api/payment/intent'
+  const createPath = options.subscription ? '/api/payment/subscription/create' : '/api/payment/create'
+  const returnPath = options.subscription ? '/halden/subscription/return' : RETURN_PATH
 
   const order = createOrder({
     id: ORDER_ID,
     scene: 'ecommerce',
     item: {
-      sku: journey.sku, name: 'Halden sample', variant: journey.variant, quantity: 1,
+      sku: options.subscription ? 'HL-SUB-DAILY-005' : journey.sku,
+      name: subscription?.productName ?? 'Halden sample', variant: options.subscription ? 'Daily subscription' : journey.variant, quantity: 1,
       unitAmount: { minor: journey.amount, currency: 'USD' },
     },
     amount: { minor: journey.amount, currency: 'USD' },
@@ -68,6 +78,7 @@ async function installCheckoutMock(page: Page, options: {
   const session = () => ({
     order, attempt, attempts: [toPaymentAttemptSummary(attempt)], events: [...events],
     paymentId: attempt.paymentId, query, submitted: false,
+    ...(subscription ? { subscription } : {}),
   })
 
   await page.context().route('**/*', async (route) => {
@@ -79,7 +90,7 @@ async function installCheckoutMock(page: Page, options: {
         await route.fulfill({
           status: 200,
           contentType: 'text/html',
-          body: `<!doctype html><html lang="en"><head><title>Mock Hosted Checkout</title></head><body><main><h1>Mock Onerway Checkout</h1><p>Mock interaction: ${options.interaction ?? 'success'}. No payment or real 3DS is submitted.</p><a href="${BASE_URL}${RETURN_PATH}?providerStatus=${options.interaction === 'cancelled' ? 'N' : 'S'}&amp;session=discard-return-parameter">Return to Halden</a></main></body></html>`,
+          body: `<!doctype html><html lang="en"><head><title>Mock Hosted Checkout</title></head><body><main><h1>Mock Onerway Checkout</h1><p>Mock interaction: ${options.interaction ?? 'success'}. No payment or real 3DS is submitted.</p><a href="${BASE_URL}${returnPath}?providerStatus=${options.interaction === 'cancelled' ? 'N' : 'S'}&amp;session=discard-return-parameter">Return to Halden</a></main></body></html>`,
         })
       }
       else {
@@ -101,11 +112,13 @@ async function installCheckoutMock(page: Page, options: {
     if (url.pathname.startsWith('/api/payment/')) {
       const body: unknown = request.postData() ? request.postDataJSON() : null
       calls.push({ path: url.pathname, method: request.method(), body })
-      if (url.pathname === '/api/payment/intent' && request.method() === 'POST') {
-        expect(body).toEqual({ journeyId: journey.id, method: 'all', restart: true })
-        await route.fulfill({ json: { orderId: ORDER_ID, create: true } })
+      if (url.pathname === intentPath && request.method() === 'POST') {
+        expect(body).toEqual(options.subscription
+          ? { planId: 'halden-daily-essentials-v1', integration: 'checkout' }
+          : { journeyId: journey.id, method: 'all', restart: true })
+        await route.fulfill({ json: { orderId: ORDER_ID, integration: 'checkout', create: true } })
       }
-      else if (url.pathname === '/api/payment/create' && request.method() === 'POST') {
+      else if (url.pathname === createPath && request.method() === 'POST') {
         expect(body).toEqual({})
         expect(created, 'a mock order must be created only once').toBe(false)
         created = true
@@ -116,6 +129,7 @@ async function installCheckoutMock(page: Page, options: {
         await route.fulfill({ json: {
           order, attempt, attempts: [toPaymentAttemptSummary(attempt)], event: createdEvent,
           paymentId: attempt.paymentId, query, redirectUrl: HOSTED_URL,
+          ...(subscription ? { subscription } : {}),
         } })
       }
       else if (url.pathname === '/api/payment/recover' && request.method() === 'GET' && !created) {
@@ -123,11 +137,11 @@ async function installCheckoutMock(page: Page, options: {
         await route.fulfill({ status: 401, json: { statusMessage: 'PAYMENT_RECOVERY_UNAUTHORIZED' } })
       }
       else if (url.pathname === '/api/payment/recover' && request.method() === 'GET' && created) {
-        expect(url.searchParams.get('orderId')).toBe(ORDER_ID)
+        if (url.searchParams.has('orderId')) expect(url.searchParams.get('orderId')).toBe(ORDER_ID)
         await route.fulfill({ json: session() })
       }
-      else if (url.pathname === '/api/payment/return' && request.method() === 'POST' && created) {
-        expect(body).toEqual({ orderId: ORDER_ID })
+      else if (url.pathname === (options.subscription ? '/api/payment/subscription/return' : '/api/payment/return') && request.method() === 'POST' && created) {
+        expect(body).toEqual(options.subscription ? null : { orderId: ORDER_ID })
         events.push(createEvent({
           id: 'return-event', attemptId: ATTEMPT_ID, source: 'return', sourceKey: ATTEMPT_ID,
           status: 'processing', occurredAt: TIMESTAMP,
@@ -144,7 +158,7 @@ async function installCheckoutMock(page: Page, options: {
           transactionId: attempt.transactionId, occurredAt: TIMESTAMP,
         })
         events.push(event)
-        await route.fulfill({ json: { attempt, event } })
+        await route.fulfill({ json: { attempt, event, ...(subscription ? { subscription } : {}) } })
       }
       else {
         violations.push(`${request.method()} ${url.pathname}`)
@@ -164,6 +178,10 @@ async function installCheckoutMock(page: Page, options: {
   return {
     calls,
     setQueryOutcome(outcome: QueryOutcome) { queryOutcome = outcome },
+    setSubscriptionState(state: SubscriptionState) {
+      if (!subscription) throw new Error('SUBSCRIPTION_FIXTURE_REQUIRED')
+      subscription = { ...subscription, state, statusSource: 'query' }
+    },
     externalRequests,
     navigations,
     assertClean() {
@@ -441,13 +459,15 @@ test('a restored USD 50 Hosted order keeps its journey when requesting a separat
   mock.assertClean()
 })
 
-test('a USD 50 Checkout deep link excludes subscription mode', async ({ page }) => {
+test('a Checkout subscription deep link keeps the fixed plan independent of the payment journey', async ({ page }) => {
   const mock = await installCheckoutMock(page, { journey: THREE_DS })
   await page.goto(`/?mode=subscription&journey=${THREE_DS.id}`)
-  await expect(page.locator('[role="radio"][value="payment"]')).toBeChecked()
+  await expect(page.locator('[role="radio"][value="subscription"]')).toBeChecked()
   await expect(page.locator('[role="radio"][value="checkout"]')).toBeChecked()
   await expect(page.locator('[role="radio"][value="all"]')).toBeChecked()
-  await expect(page.locator(`[role="radio"][value="${THREE_DS.id}"]`)).toBeChecked()
+  await expect(page.getByRole('heading', { name: 'Halden Daily Essentials', exact: true })).toBeVisible()
+  await expect(page.getByText('$5.00', { exact: true })).toBeVisible()
+  await expect(page.locator(`[role="radio"][value="${THREE_DS.id}"]`)).toHaveCount(0)
   expect(mock.calls.filter(call => call.path === '/api/payment/intent')).toHaveLength(0)
   expect(mock.calls.filter(call => call.path === '/api/payment/create')).toHaveLength(0)
   mock.assertClean()
@@ -475,4 +495,77 @@ for (const colorScheme of ['light', 'dark'] as const) {
       mock.assertClean()
     })
   }
+}
+
+async function startCheckoutSubscription(page: Page, createUnknown = false) {
+  await enterHub(page)
+  const billing = page.locator('[role="radio"][value="subscription"]')
+  await billing.focus()
+  await billing.press('Space')
+  await expect(billing).toBeChecked()
+  await expect(page.getByText(/Conditional · Select Card on Checkout/)).toBeVisible()
+  await page.getByRole('button', { name: 'Start Sandbox subscription', exact: true }).press('Enter')
+  await expect(page).toHaveURL(`${BASE_URL}/halden/hosted/${ORDER_ID}`)
+  await expect(page.getByRole('heading', { name: 'Start your Halden subscription.', exact: true })).toBeFocused()
+  const next = page.getByRole('button', { name: 'Continue to Onerway Checkout', exact: true })
+  if (createUnknown) await expect(next).toBeDisabled()
+  else await expect(next).toBeEnabled()
+  await expect(page.getByText(/Select Card to pay/)).toContainText('Halden Daily Essentials')
+  await expect(page.locator('iframe, input')).toHaveCount(0)
+  await expectNoHorizontalOverflow(page)
+}
+
+test('Checkout initial subscription keeps payment success separate from contract activation after return', async ({ page }) => {
+  test.setTimeout(120_000)
+  const mock = await installCheckoutMock(page, { subscription: true })
+  await startCheckoutSubscription(page)
+  await expectNoPersistedRedirect(page)
+  await page.getByRole('button', { name: 'Continue to Onerway Checkout', exact: true }).press('Enter')
+  await expect(page).toHaveURL(HOSTED_URL)
+  await page.getByRole('link', { name: 'Return to Halden', exact: true }).press('Enter')
+  await expect(page).toHaveURL(`${BASE_URL}/halden/result/${ORDER_ID}`, { timeout: 60_000 })
+  await expect(page.getByRole('heading', { name: 'Payment verified · Subscription pending.', exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Retry payment', exact: true })).toHaveCount(0)
+  mock.setSubscriptionState('active')
+  await page.getByRole('button', { name: 'Verify existing subscription', exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'Subscription active.', exact: true })).toBeVisible()
+  await expectNoPersistedRedirect(page)
+  expect(mock.calls.filter(call => call.path === '/api/payment/subscription/create')).toHaveLength(1)
+  expect(mock.calls.some(call => call.path === '/api/payment/subscription/return')).toBe(true)
+  mock.assertClean()
+})
+
+for (const loseCreateResponse of [false, true]) {
+  test(`Checkout subscription restores the same attempt with create response ${loseCreateResponse ? 'lost' : 'received'}`, async ({ page }) => {
+    const mock = await installCheckoutMock(page, { subscription: true, loseCreateResponse })
+    await startCheckoutSubscription(page, loseCreateResponse)
+    await page.reload()
+    await expect(page.getByRole('heading', { name: 'Start your Halden subscription.', exact: true })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Continue to Onerway Checkout', exact: true })).toBeDisabled()
+    await expect(page.getByRole('button', { name: 'Start a separate Sandbox order', exact: true })).toHaveCount(0)
+    const verify = page.getByRole('button', { name: 'Verify existing payment', exact: true })
+    await expect(verify).toBeEnabled()
+    await verify.click()
+    await expect(page.getByRole('heading', { name: 'Payment verified · Subscription pending.', exact: true })).toBeVisible()
+    expect(mock.calls.filter(call => call.path === '/api/payment/subscription/create')).toHaveLength(1)
+    expect(mock.externalRequests).toEqual([])
+    mock.assertClean()
+  })
+}
+
+for (const [width, colorScheme] of [[1440, 'light'], [390, 'dark']] as const) {
+  test(`Checkout subscription fits ${width}px in ${colorScheme} mode`, async ({ page }) => {
+    const mock = await installCheckoutMock(page, { subscription: true })
+    await page.setViewportSize({ width, height: 900 })
+    await page.emulateMedia({ colorScheme })
+    await startCheckoutSubscription(page)
+    await expect(page.locator('html')).toHaveClass(new RegExp(`(?:^|\\s)${colorScheme}(?:\\s|$)`))
+    await page.screenshot({ path: `/tmp/onerway-issue10-hosted-${width}-${colorScheme}.png`, fullPage: true })
+    await page.reload()
+    await page.getByRole('button', { name: 'Verify existing payment', exact: true }).click()
+    await expect(page.getByRole('heading', { name: 'Payment verified · Subscription pending.', exact: true })).toBeVisible()
+    await expectNoHorizontalOverflow(page)
+    await page.screenshot({ path: `/tmp/onerway-issue10-pending-${width}-${colorScheme}.png`, fullPage: true })
+    mock.assertClean()
+  })
 }

@@ -13,6 +13,7 @@ import { mergeAttempt } from '../../shared/payment/merge'
 import type { Order } from '../../shared/payment/order'
 import {
   isSubscriptionPlanId,
+  isSubscriptionIntegration,
   type SubscriptionContract,
 } from '../../shared/payment/subscription'
 import type {
@@ -126,6 +127,7 @@ interface SubscriptionRow extends QueryResultRow {
   expire_date: Date | string
   initial_order_id: string
   initial_attempt_id: string
+  initial_integration: SubscriptionContract['initialIntegration']
   merchant_txn_id: string
   payment_id: string | null
   initial_webhook_transaction_id: string | null
@@ -154,6 +156,7 @@ export interface PaymentRecovery extends PaymentTimeline {
 }
 
 export interface RetainedSubscriptionRecovery {
+  readonly merchantTxnId: string
   readonly contract: SubscriptionContract
   readonly customer: MerchantCustomer
   readonly orderId: string
@@ -390,7 +393,7 @@ function customerFromRow(row: OrderRow): MerchantCustomer | null {
 }
 
 function subscriptionFromRow(row: SubscriptionRow): SubscriptionContract {
-  if (!isSubscriptionPlanId(row.plan_id)) {
+  if (!isSubscriptionPlanId(row.plan_id) || !isSubscriptionIntegration(row.initial_integration)) {
     throw new PaymentStoreError('PAYMENT_DATABASE_ERROR')
   }
 
@@ -408,6 +411,7 @@ function subscriptionFromRow(row: SubscriptionRow): SubscriptionContract {
     expireDate: dateOnly(row.expire_date),
     initialOrderId: row.initial_order_id,
     initialAttemptId: row.initial_attempt_id,
+    initialIntegration: row.initial_integration,
     state: row.establishment_state,
     statusSource: row.status_source,
     dataStatus: row.data_status,
@@ -604,7 +608,7 @@ async function insertSubscription(
       payment_id, initial_webhook_transaction_id,
       establishment_state, status_source, status_observed_at,
       data_status, subscription_status, contract_id, token_id,
-      terminal_at, cleanup_at, created_at, updated_at
+      terminal_at, cleanup_at, created_at, updated_at, initial_integration
     )
     VALUES (
       $1, $2, $3, $4, $5,
@@ -614,7 +618,7 @@ async function insertSubscription(
       NULL, NULL,
       $17, $18, $19,
       $20, $21, NULL, NULL,
-      NULL, NULL, $19, $19
+      NULL, NULL, $19, $19, $22
     )
   `, [
     contract.id,
@@ -638,6 +642,7 @@ async function insertSubscription(
     contract.createdAt,
     contract.dataStatus,
     contract.subscriptionStatus,
+    contract.initialIntegration,
   ])
 }
 
@@ -666,6 +671,7 @@ export async function createSubscriptionPaymentRecord(
     attempt.orderId !== order.id
     || contract.initialOrderId !== order.id
     || contract.initialAttemptId !== attempt.id
+    || contract.initialIntegration !== attempt.integration
     || contract.amount.minor !== order.amount.minor
     || contract.amount.currency !== order.amount.currency
   ) {
@@ -1179,6 +1185,25 @@ export async function recordQueryEvent(
       throw new PaymentStoreError('PAYMENT_ATTEMPT_MISMATCH')
     }
 
+    // Query can be the first response that discovers a Payment ID. Preserve
+    // that binding on the long-lived contract before Payment audit cleanup.
+    if (result.paymentId) {
+      const contracts = await client.query<SubscriptionRow>(`
+        SELECT * FROM subscription_contracts WHERE initial_attempt_id = $1 FOR UPDATE
+      `, [attemptId])
+      const contract = contracts.rows[0]
+      if (contract?.payment_id && contract.payment_id !== result.paymentId) {
+        throw new PaymentStoreError('PAYMENT_ATTEMPT_MISMATCH')
+      }
+      if (contract && !contract.payment_id) {
+        await client.query(`
+          UPDATE subscription_contracts
+          SET payment_id = $2, updated_at = GREATEST(updated_at, $3::timestamptz)
+          WHERE id = $1
+        `, [contract.id, result.paymentId, occurredAt])
+      }
+    }
+
     const queryKey = [paymentId ?? current.merchantTxnId, result.transactionId ?? '-', result.rawStatus]
 
     if (checkout) {
@@ -1188,8 +1213,16 @@ export async function recordQueryEvent(
     const sourceKey = queryKey.join(':')
     const duplicate = await findEvent(client, 'query', sourceKey)
 
+    const correlated = !current.paymentId && result.paymentId
+      ? Object.freeze({ ...current, paymentId: result.paymentId })
+      : current
+
     if (duplicate) {
-      return Object.freeze({ attempt: current, event: duplicate, duplicate: true })
+      if (duplicate.attemptId !== attemptId) {
+        throw new PaymentStoreError('PAYMENT_ATTEMPT_MISMATCH')
+      }
+      if (correlated !== current) await updateAttempt(client, correlated)
+      return Object.freeze({ attempt: correlated, event: duplicate, duplicate: true })
     }
 
     const paymentStatus = result.paymentStatus ?? (checkout ? undefined : result.rawStatus)
@@ -1205,9 +1238,6 @@ export async function recordQueryEvent(
       ...(result.transactionId ? { transactionId: result.transactionId } : {}),
       occurredAt,
     })
-    const correlated = !current.paymentId && result.paymentId
-      ? Object.freeze({ ...current, paymentId: result.paymentId })
-      : current
     const merged = mergeAttempt(correlated, incoming)
     const event = createEvent({ ...incoming, ...(merged.conflict ? { conflict: true } : {}) })
 
@@ -1217,7 +1247,7 @@ export async function recordQueryEvent(
       await updateAttempt(client, merged.attempt)
     }
 
-    if (merged.attempt.status === 'cancelled') {
+    if (merged.attempt.status === 'cancelled' && !result.subscription?.contractId) {
       await terminalizeSubscriptionPlaceholder(client, attemptId, occurredAt, 'query')
     }
 
@@ -1475,6 +1505,7 @@ export async function getRetainedSubscriptionRecovery(
 
     return Object.freeze({
       contract: subscriptionFromRow(row),
+      merchantTxnId: row.merchant_txn_id,
       customer: restoreMerchantCustomer({
         environment: row.environment,
         merchantNo: row.merchant_no,
@@ -1586,7 +1617,8 @@ function assertSubscriptionWebhookCorrelation(
 ): void {
   if (
     row.merchant_txn_id !== fact.merchantTxnId
-    || (row.payment_id && row.payment_id !== fact.paymentId)
+    || (fact.paymentId && row.payment_id && row.payment_id !== fact.paymentId)
+    || (!fact.paymentId && !(row.initial_integration === 'checkout' && fact.transactionStatus === 'N' && fact.paymentStatus === undefined))
     || Number(row.initial_amount_minor) !== fact.amountMinor
     || row.currency !== fact.currency
     || row.product_name !== fact.productName
@@ -1637,6 +1669,10 @@ export async function recordSubscriptionWebhookEvent(
   readonly duplicate: boolean
 }> {
   return transaction(async (client) => {
+    // Keep the same Attempt -> Contract lock order as create completion/query.
+    const attempts = await client.query<AttemptRow>(`
+      SELECT * FROM payment_attempts WHERE merchant_txn_id = $1 FOR UPDATE
+    `, [fact.merchantTxnId])
     const contracts = await client.query<SubscriptionRow>(`
       SELECT *
       FROM subscription_contracts
@@ -1651,18 +1687,14 @@ export async function recordSubscriptionWebhookEvent(
 
     assertSubscriptionWebhookCorrelation(contractRow, fact)
 
-    const attempts = await client.query<AttemptRow>(`
-      SELECT *
-      FROM payment_attempts
-      WHERE id = $1 AND order_id = $2
-      FOR UPDATE
-    `, [contractRow.initial_attempt_id, contractRow.initial_order_id])
     const attemptRow = attempts.rows[0]
     const current = attemptRow ? attemptFromRow(attemptRow) : null
 
     if (
-      (current && current.merchantTxnId !== fact.merchantTxnId)
-      || (current?.paymentId && current.paymentId !== fact.paymentId)
+      (current && (current.merchantTxnId !== fact.merchantTxnId
+        || current.id !== contractRow.initial_attempt_id || current.orderId !== contractRow.initial_order_id))
+      || (fact.paymentId && current?.paymentId && current.paymentId !== fact.paymentId)
+      || (!fact.paymentId && current?.transactionId && current.transactionId !== fact.transactionId)
     ) {
       throw new PaymentStoreError('PAYMENT_ATTEMPT_MISMATCH')
     }
@@ -1714,7 +1746,7 @@ export async function recordSubscriptionWebhookEvent(
     let event: PaymentEvent | undefined
 
     if (current) {
-      const correlated = current.paymentId
+      const correlated = current.paymentId || !fact.paymentId
         ? current
         : Object.freeze({ ...current, paymentId: fact.paymentId })
       const incoming = createEvent({

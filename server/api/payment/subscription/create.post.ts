@@ -13,6 +13,7 @@ import {
   createQueryExpiry,
   createQueryToken,
   createSubscriptionPayment,
+  createCheckoutSubscriptionPayment,
   GatewayError,
 } from '../../../utils/gateway'
 import { requireCanonicalPaymentOrigin, requireIp, withPaymentLimit } from '../../../utils/limit'
@@ -55,15 +56,8 @@ export default defineEventHandler(async (event): Promise<CreateSubscriptionPayme
   requireCanonicalPaymentOrigin(event, profile.showcaseOrigin)
 
   return withPaymentLimit(event, 'create', async (clientIp) => {
-    let browser
+    const input = await readBody<unknown>(event)
     let claimedAttemptId: string | null = null
-
-    try {
-      browser = readBrowserData(await readBody<unknown>(event))
-    }
-    catch {
-      throw createError({ statusCode: 400, statusMessage: 'PAYMENT_INPUT_INVALID' })
-    }
 
     try {
       const ref = readPaymentRecovery(event, profile.secret)
@@ -83,10 +77,28 @@ export default defineEventHandler(async (event): Promise<CreateSubscriptionPayme
         || !customer
         || !merchantTxnId
         || recovery.attempt.paymentId
+        || recovery.attempt.transactionId
+        || recovery.attempt.integration !== contract.initialIntegration
         || contract.state !== 'pending'
         || !isMerchantCustomerInScope(customer, profile)
       ) {
         throw createError({ statusCode: 409, statusMessage: 'PAYMENT_ATTEMPT_ACTIVE' })
+      }
+
+      const checkout = contract.initialIntegration === 'checkout'
+      let browser
+      try {
+        if (checkout) {
+          if (typeof input !== 'object' || input === null || Array.isArray(input) || Object.keys(input).length !== 0) {
+            throw new TypeError('PAYMENT_INPUT_INVALID')
+          }
+        }
+        else {
+          browser = readBrowserData(input)
+        }
+      }
+      catch {
+        throw createError({ statusCode: 400, statusMessage: 'PAYMENT_INPUT_INVALID' })
       }
 
       const plan = getSubscriptionPlan(contract.planId)
@@ -120,17 +132,22 @@ export default defineEventHandler(async (event): Promise<CreateSubscriptionPayme
 
       claimedAttemptId = recovery.attempt.id
 
-      const created = await createSubscriptionPayment(profile, {
+      const context = {
         merchantTxnId,
         merchantCustId: customer.merchantCustId,
         order: recovery.order,
         plan,
         returnUrl: `${profile.showcaseOrigin}/halden/subscription/return`,
-        transactionIp: requireIp(profile.transactionIp ?? clientIp),
-        accept: getHeader(event, 'accept')?.slice(0, 512) || '*/*',
-        userAgent: getHeader(event, 'user-agent')?.slice(0, 512) || 'unknown',
-        ...browser,
-      })
+      }
+      const created = checkout
+        ? await createCheckoutSubscriptionPayment(profile, context)
+        : await createSubscriptionPayment(profile, {
+            ...context,
+            transactionIp: requireIp(profile.transactionIp ?? clientIp),
+            accept: getHeader(event, 'accept')?.slice(0, 512) || '*/*',
+            userAgent: getHeader(event, 'user-agent')?.slice(0, 512) || 'unknown',
+            ...browser!,
+          })
       await recordSubscriptionCreationRecoveryAllowed(recovery.attempt.id, now)
       const paymentEvent = createEvent({
         id: randomUUID(),
@@ -158,6 +175,7 @@ export default defineEventHandler(async (event): Promise<CreateSubscriptionPayme
         )),
         event: paymentEvent,
         paymentId: created.paymentId,
+        ...(created.redirectUrl ? { redirectUrl: created.redirectUrl } : {}),
         query: Object.freeze({
           token: createQueryToken(profile.secret, recovery.attempt.id, created.paymentId, expiresAt),
           expiresAt,

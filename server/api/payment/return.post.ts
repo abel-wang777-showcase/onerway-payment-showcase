@@ -1,8 +1,9 @@
 import { isTerminalStatus, type ObservePaymentReturnResponse } from '../../../shared/payment/sdk'
-import { GatewayError, queryCheckoutPayment, queryPayment, querySubscription } from '../../utils/gateway'
+import { GatewayError, queryCheckoutPayment, queryPayment } from '../../utils/gateway'
 import { withPaymentLimit } from '../../utils/limit'
 import { requireServerProfile } from '../../utils/profile'
 import { enrichDirectPaymentMethod } from '../../utils/method'
+import { refreshSubscription, subscriptionCreationRecoveryError } from '../../utils/subscription'
 import { readPaymentRecovery } from '../../utils/recovery'
 import {
   getPaymentRecovery,
@@ -10,7 +11,6 @@ import {
   PaymentStoreError,
   recordQueryEvent,
   recordReturnEvent,
-  recordSubscriptionQueryDetails,
 } from '../../utils/store'
 
 function readOrderId(value: unknown): string {
@@ -78,9 +78,15 @@ export default defineEventHandler(async (event): Promise<ObservePaymentReturnRes
         throw createError({ statusCode: 409, statusMessage: 'PAYMENT_RECOVERY_PENDING' })
       }
 
+      const recoveryError = subscriptionCreationRecoveryError(recovery)
+      if (recoveryError) {
+        throw createError({ statusCode: 409, statusMessage: recoveryError })
+      }
+
       const result = await recordReturnEvent(recovery.attempt.id, new Date().toISOString())
       const queried = recovery.attempt.integration === 'checkout'
         ? await queryCheckoutPayment(profile, {
+            ...(recovery.subscription ? { subscription: true } : {}),
             merchantTxnId: recovery.attempt.merchantTxnId!,
             amountMinor: recovery.order.amount.minor,
             currency: recovery.order.amount.currency,
@@ -106,12 +112,8 @@ export default defineEventHandler(async (event): Promise<ObservePaymentReturnRes
         )
       }
 
-      if (contract?.contractId) {
-        await recordSubscriptionQueryDetails(
-          recovery.attempt.id,
-          await querySubscription(profile, contract.contractId),
-          new Date().toISOString(),
-        )
+      if (contract) {
+        await refreshSubscription(profile, contract, queried, new Date().toISOString())
       }
 
       return Object.freeze({ duplicate: result.duplicate })

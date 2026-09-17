@@ -239,7 +239,7 @@ const details = computed(() => {
           }]
         : [{
             label: 'threeDSJourney',
-            value: sdkJourney.value?.id === 'hosted-checkout-three-ds' ? 'challenge' : 'not-selected',
+            value: contract.value || sdkJourney.value?.id === 'hosted-checkout-three-ds' ? 'challenge' : 'not-selected',
           }]),
       { label: 'returnObserved', value: returned.value ? 'yes' : 'no' },
       { label: 'orderId', value: order.value.id },

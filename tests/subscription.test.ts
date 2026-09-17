@@ -234,7 +234,7 @@ const excluded = new Set([
   'sign',
 ])
 
-function signedSubscriptionWebhook(): Record<string, unknown> {
+function signedSubscriptionWebhook(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   const body = {
     notifyType: 'TXN',
     transactionId: '2084000000000000001',
@@ -255,9 +255,10 @@ function signedSubscriptionWebhook(): Record<string, unknown> {
     products: '[{"name":"Halden Daily Essentials","price":"5.00","num":"1","currency":"USD"}]',
     scenarios: 'SUBSCRIPTION_INITIAL',
     paymentMethod: 'VISA',
+    ...overrides,
   }
   const canonical = Object.entries(body)
-    .filter(([key, value]) => !excluded.has(key) && value !== null && value !== '')
+    .filter(([key, value]) => !excluded.has(key) && value !== null && value !== undefined && value !== '')
     .sort(([left], [right]) => left.localeCompare(right))
     .map(([, value]) => String(value))
     .join('')
@@ -293,4 +294,46 @@ describe('subscription webhook', () => {
     expect(readSubscriptionPaymentWebhook({ ...body, sign: 'legacy-other-key' }, 'secret', 'merchant', `v1=${body.sign}`).status)
       .toBe('succeeded')
   })
+})
+
+it('builds hosted initial subscription without merchant browser data or forced 3DS strategy', async () => {
+  const { buildCheckoutSubscriptionCreatePayload, normalizePayload } = await import('../server/utils/gateway')
+  const payload = buildCheckoutSubscriptionCreatePayload(profile, {
+    order, plan, merchantTxnId: 'showcase-subscription-1', merchantCustId: 'customer-1', returnUrl: 'https://showcase.example/halden/subscription/return',
+  })
+  expect(payload).toMatchObject({
+    productType: 'ALL', subProductType: 'SUBSCRIBE', txnType: 'SALE', paymentMode: 'WEB', merchantCustId: 'customer-1',
+    subscription: { merchantCustId: 'customer-1', requestType: '0', selfExecute: '2', mode: '2' },
+  })
+  expect(payload).not.toHaveProperty('risk3dsStrategy')
+  expect(payload.txnOrderMsg).not.toHaveProperty('transactionIp')
+  expect(payload.txnOrderMsg).not.toHaveProperty('userAgent')
+  expect(typeof normalizePayload(payload).subscription).toBe('string')
+})
+
+it.each([undefined, null, ''])('accepts Checkout initial empty credentials %j without importing SDK exact-null assumptions', async (value) => {
+  const { readCheckoutSubscriptionCreateResponse } = await import('../server/utils/gateway')
+  expect(readCheckoutSubscriptionCreateResponse({ respCode: '20000', data: {
+    transactionId: '123', paymentId: '456', status: 'U', paymentStatus: 'U', contractId: value, tokenId: value,
+    redirectUrl: 'https://sandbox-checkout.onerway.com/checkout?session=ephemeral',
+  } })).toMatchObject({ transactionId: '123', paymentId: '456', rawStatus: 'U', rawPaymentStatus: 'U' })
+})
+
+it.each([
+  { contractId: 'already-created' }, { tokenId: 'sensitive-token' }, { paymentStatus: null }, { paymentId: '' },
+  { redirectUrl: 'https://untrusted.example/checkout' }, { status: 'S' },
+])('fails closed on an invalid Checkout initial response %j', async (override) => {
+  const { readCheckoutSubscriptionCreateResponse } = await import('../server/utils/gateway')
+  expect(() => readCheckoutSubscriptionCreateResponse({ respCode: '20000', data: {
+    transactionId: '123', paymentId: '456', status: 'U', paymentStatus: 'U', contractId: '', tokenId: null,
+    redirectUrl: 'https://sandbox-checkout.onerway.com/checkout?session=ephemeral', ...override,
+  } })).toThrow('SUBSCRIPTION_CREATE_RESPONSE_INVALID')
+})
+
+it.each([undefined, null, ''])('parses an initial cancellation with optional Payment fields %j for store-side correlation', (value) => {
+  const body = signedSubscriptionWebhook({ paymentId: value, paymentStatus: value, status: 'N', contractId: null, tokenId: null, dataStatus: '0', subscriptionStatus: 'paymentdue' })
+  const fact = readSubscriptionPaymentWebhook(body, 'secret', 'merchant', `v1=${body.sign}`)
+  expect(fact).toMatchObject({ transactionStatus: 'N', status: 'cancelled', scenario: 'SUBSCRIPTION_INITIAL' })
+  expect(fact).not.toHaveProperty('paymentId')
+  expect(fact).not.toHaveProperty('paymentStatus')
 })
