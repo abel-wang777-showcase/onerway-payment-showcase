@@ -37,6 +37,17 @@ function defineCapability(
   integration: IntegrationId,
   method: PaymentMethodId,
 ): Capability {
+  if (scene === 'ecommerce' && integration === 'checkout' && method === 'card') {
+    return Object.freeze({
+      scene,
+      integration,
+      method,
+      status: 'conditional',
+      runnable: true,
+      condition: 'Card pre-authorization with full capture or release. Sandbox verification required; missing notifications remain awaiting confirmation.',
+    })
+  }
+
   if (scene === 'ecommerce' && integration === 'checkout' && method === 'all') {
     return Object.freeze({
       scene,

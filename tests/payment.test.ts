@@ -47,7 +47,7 @@ describe('capability matrix', () => {
       runnable: true,
     }])
     expect(isAvailable('ecommerce', 'web-js-sdk', 'card')).toBe(true)
-    expect(getCapability('ecommerce', 'checkout', 'card').status).toBe('planned')
+    expect(getCapability('ecommerce', 'checkout', 'card')).toMatchObject({ status: 'conditional', runnable: true })
     expect(getCapability('game', 'web-js-sdk', 'card').status).toBe('planned')
   })
 

@@ -283,6 +283,8 @@ const sdkLabel = computed(() => {
     return 'Real Sandbox unavailable for this fixture'
   }
 
+  if (journey.value.id === 'hosted-authorization') return 'Start a Sandbox card authorization'
+
   if (journey.value.integration === 'checkout') return 'Start a new Sandbox Hosted Checkout'
 
   if (selectedWalletLabel.value) {
@@ -365,7 +367,8 @@ watch(() => selection.value.method, (method) => {
 
   if (method !== selected.method && !supportsSandboxMethod(selected, method)) {
     journeyId.value = JOURNEY_IDS.find(id =>
-      method === JOURNEYS[id].method || supportsSandboxMethod(JOURNEYS[id], method),
+      JOURNEYS[id].integration === selection.value.integration
+      && (method === JOURNEYS[id].method || supportsSandboxMethod(JOURNEYS[id], method)),
     ) ?? 'standard-success'
   }
 }, { immediate: true })
@@ -498,6 +501,12 @@ watch(() => selection.value.method, (method) => {
             @start="startSandboxSubscription"
             @start-new-customer="startNewSandboxSubscriptionCustomer"
           />
+          <p
+            v-if="billingMode === 'payment' && journey.id === 'hosted-authorization'"
+            class="mt-3 text-xs leading-relaxed text-toned"
+          >
+            Conditional · Card authorization in Sandbox. Authorize USD 5.00, then choose full capture or void. Missing confirmation keeps funds actions locked while you refresh the saved status.
+          </p>
           <p
             v-if="billingMode === 'subscription' && selection.integration === 'checkout'"
             class="mt-3 text-xs leading-relaxed text-toned"

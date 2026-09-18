@@ -86,6 +86,9 @@ export default defineEventHandler(async (event): Promise<QuerySdkPaymentResponse
       if (!context) {
         throw new PaymentStoreError('PAYMENT_ATTEMPT_NOT_FOUND')
       }
+      if (context.attempt.authorization) {
+        throw createError({ statusCode: 409, statusMessage: 'AUTHORIZATION_QUERY_UNAVAILABLE' })
+      }
       const subscription = await getSubscriptionForAttempt(input.attemptId)
       if (subscription) {
         const recovery = await getPaymentRecovery(context.order.id, input.attemptId)

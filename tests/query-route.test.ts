@@ -30,6 +30,16 @@ beforeEach(() => {
 })
 
 describe('payment query dispatch', () => {
+  it('keeps AUTH out of ordinary SALE query even with a valid capability', async () => {
+    const context = await mocks.getPaymentQueryContext()
+    mocks.getPaymentQueryContext.mockResolvedValue({ ...context, attempt: { ...context.attempt, authorization: { fundsStatus: 'authorized' } } })
+    const { default: handler } = await import('../server/api/payment/query.post')
+    await expect((handler as (event: unknown) => Promise<unknown>)({})).rejects.toMatchObject({ statusMessage: 'AUTHORIZATION_QUERY_UNAVAILABLE' })
+    expect(mocks.queryCheckoutPayment).not.toHaveBeenCalled()
+    expect(mocks.queryPayment).not.toHaveBeenCalled()
+    expect(mocks.recordQueryEvent).not.toHaveBeenCalled()
+  })
+
   it('uses the authenticated persisted integration and order values for transaction query', async () => {
     const { default: handler } = await import('../server/api/payment/query.post')
     await (handler as (event: unknown) => Promise<unknown>)({})

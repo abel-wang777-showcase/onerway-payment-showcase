@@ -77,6 +77,18 @@ beforeEach(() => {
 })
 
 describe('payment intent route', () => {
+  it('persists a pending AUTH before contacting the Provider', async () => {
+    mocks.readPaymentRecovery.mockReturnValue(null)
+    vi.stubGlobal('readBody', vi.fn().mockResolvedValue({ journeyId: 'hosted-authorization' }))
+    const { default: handler } = await import('../server/api/payment/intent.post')
+    await (handler as (event: unknown) => Promise<unknown>)({})
+    const [order, attempt] = mocks.createPaymentRecord.mock.calls[0]!
+    expect(order.amount).toEqual({ minor: 500, currency: 'USD' })
+    expect(attempt).toMatchObject({ integration: 'checkout', method: 'card', authorization: { fundsStatus: 'pending', authMerchantTxnId: attempt.merchantTxnId } })
+    expect(attempt.authorization.authTransactionId).toBeUndefined()
+    expect(attempt.authorization.paymentId).toBeUndefined()
+  })
+
   it('reuses an existing non-terminal attempt by default', async () => {
     vi.stubGlobal('readBody', vi.fn().mockResolvedValue({ journeyId: 'three-ds-success' }))
 

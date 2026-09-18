@@ -165,7 +165,7 @@ export default defineEventHandler(async (event): Promise<CreateSdkPaymentRespons
         event: paymentEvent,
         paymentId: created.paymentId,
         ...(created.redirectUrl ? { redirectUrl: created.redirectUrl } : {}),
-        query: Object.freeze({
+        query: attempt.authorization ? null : Object.freeze({
           token: createQueryToken(profile.secret, recovery.attempt.id, created.paymentId, expiresAt),
           expiresAt,
         }),
