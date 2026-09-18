@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test'
 import {
   expectNoHorizontalOverflow,
+  gotoHydrated,
   installSimulationGate,
   journeyRadio,
   methodRadio,
@@ -11,7 +12,7 @@ import {
 test('exposes landmarks, keyboard selection and a visible focus indicator', async ({ page }) => {
   const gate = await installSimulationGate(page)
 
-  await page.goto('/', { waitUntil: 'networkidle' })
+  await gotoHydrated(page)
   await expect(page.getByRole('main')).toHaveCount(1)
   await expect(page.getByRole('navigation', { name: 'Primary navigation' })).toBeVisible()
   await expect(page.getByRole('link', { name: 'Demo Hub' })).toHaveAttribute('aria-current', 'page')
@@ -57,7 +58,7 @@ for (const wallet of [
   test(`restores an allowlisted ${wallet.label} target from the canonical query`, async ({ page }) => {
     const gate = await installSimulationGate(page)
 
-    await page.goto(`/?journey=three-ds-success&method=${wallet.method}`, { waitUntil: 'networkidle' })
+    await gotoHydrated(page, `/?journey=three-ds-success&method=${wallet.method}`)
     await expect(methodRadio(page, wallet.method)).toBeChecked()
     await expect(page.getByText('USD 5.00 · Standard success', { exact: true })).toBeVisible()
     await expect(page.getByRole('button', { name: /start simulated checkout/i })).toHaveCount(0)
@@ -70,7 +71,7 @@ for (const wallet of [
       const gate = await installSimulationGate(page)
       await page.setViewportSize({ width, height: 900 })
 
-      await page.goto('/', { waitUntil: 'networkidle' })
+      await gotoHydrated(page)
       const method = methodRadio(page, wallet.method)
 
       await expect(method).toBeEnabled()

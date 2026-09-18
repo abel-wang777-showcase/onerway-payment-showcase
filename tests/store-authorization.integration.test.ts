@@ -6,7 +6,7 @@ import { createAuthorizationState } from '../shared/payment/authorization'
 import { createEvent } from '../shared/payment/event'
 import { createOrder } from '../shared/payment/order'
 import { createMerchantCustomer } from '../server/utils/customer'
-import type { AuthorizationWebhook } from '../server/utils/webhook'
+import type { AuthorizationWebhook, PaymentWebhook } from '../server/utils/webhook'
 import {
   claimStoredAuthorizationOperation,
   completePaymentRecord,
@@ -102,10 +102,22 @@ describe('Neon authorization persistence', () => {
       expect(recovered?.events.filter(event => event.source === 'webhook' && event.transactionId === completion.transactionId)).toHaveLength(1)
       expect((await getPaymentTimeline(operation.merchantTxnId))?.attempt.authorization).toEqual(recovered?.attempt.authorization)
       await expect(createPaymentRetry(data.order.id, data.attempt.id, data.fact.paymentId, data.now)).rejects.toMatchObject({ code: 'PAYMENT_RETRY_NOT_ALLOWED' })
-      await expect(recordWebhookEvent({ ...completion, paymentStatus: 'S', status: 'succeeded' })).rejects.toMatchObject({ code: 'PAYMENT_ATTEMPT_MISMATCH' })
+      // SALE looks up the original merchant request id, independently of which
+      // operation won. Use a new event id so deduplication cannot hide the guard.
+      const sale: PaymentWebhook = {
+        merchantTxnId: data.fact.merchantTxnId, transactionId: `7${data.sequence}`,
+        paymentId: data.fact.paymentId, amountMinor: data.fact.amountMinor, currency: data.fact.currency,
+        transactionStatus: 'S', paymentStatus: 'S', status: 'succeeded', occurredAt: data.now,
+      }
+      await expect(recordWebhookEvent(sale)).rejects.toMatchObject({ code: 'PAYMENT_ATTEMPT_MISMATCH' })
+      await expect(recordWebhookEvent({ ...sale, merchantTxnId: operation.merchantTxnId }))
+        .rejects.toMatchObject({ code: 'PAYMENT_ATTEMPT_NOT_FOUND' })
       await expect(recordQueryEvent(data.attempt.id, data.fact.paymentId, {
         merchantTxnId: data.fact.merchantTxnId, paymentId: data.fact.paymentId, transactionId: data.fact.transactionId, rawStatus: 'S', status: 'succeeded',
       }, data.now)).rejects.toMatchObject({ code: 'PAYMENT_ATTEMPT_MISMATCH' })
+      const afterRejections = await getPaymentRecovery(data.order.id, data.attempt.id)
+      expect(afterRejections?.attempt).toEqual(recovered?.attempt)
+      expect(afterRejections?.events).toEqual(recovered?.events)
     }
     finally {
       await cleanup(data.order.id)

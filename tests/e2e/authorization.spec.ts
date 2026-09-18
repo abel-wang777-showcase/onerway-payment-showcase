@@ -1,7 +1,7 @@
 import { expect, test, type Page } from '@playwright/test'
 import type { AuthorizationOperationType, AuthorizationState } from '../../shared/payment/authorization'
 import { authorizationSession } from '../vue/authorization-fixture'
-import { expectNoHorizontalOverflow } from './support'
+import { expectNoHorizontalOverflow, gotoHydrated } from './support'
 
 const BASE_URL = 'http://127.0.0.1:4173'
 const ORDER_ID = 'order-auth-1'
@@ -147,7 +147,7 @@ test.describe('mock Checkout authorization', () => {
 
   test('restores a lost operation response and keeps both actions locked across reload', async ({ page }) => {
     const mock = await installAuthorizationMock(page, { restored: { fundsStatus: 'authorized' }, loseOperationResponse: true })
-    await page.goto(`/halden/result/${ORDER_ID}`, { waitUntil: 'networkidle' })
+    await gotoHydrated(page, `/halden/result/${ORDER_ID}`)
     await page.getByRole('button', { name: 'Void authorization', exact: true }).click()
     await expect(page.getByText('Void awaiting confirmation.', { exact: true })).toBeVisible()
     await page.reload()

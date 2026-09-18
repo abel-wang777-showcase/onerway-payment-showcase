@@ -1,4 +1,5 @@
 import { expect, type Page } from '@playwright/test'
+import { waitForHydration } from '@nuxt/test-utils/e2e'
 import type { JourneyId } from '../../shared/payment/journey'
 import type { PaymentMethodId } from '../../shared/payment/capability'
 
@@ -42,8 +43,14 @@ export function methodRadio(page: Page, method: PaymentMethodId) {
     .locator(`[role="radio"][value="${method}"]`)
 }
 
+export async function gotoHydrated(page: Page, path = '/'): Promise<void> {
+  await page.goto(path, { waitUntil: 'domcontentloaded' })
+  // Test the hydrated Nuxt page, independently of unrelated network activity.
+  await waitForHydration(page, path, 'hydration')
+}
+
 export async function startJourney(page: Page, journey: JourneyId): Promise<void> {
-  await page.goto('/', { waitUntil: 'networkidle' })
+  await gotoHydrated(page)
   await journeyRadio(page, journey).click()
   await expect(journeyRadio(page, journey)).toBeChecked()
   await page.getByRole('button', { name: /start simulated checkout/i }).click()
