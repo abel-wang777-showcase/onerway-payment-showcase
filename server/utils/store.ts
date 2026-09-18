@@ -74,7 +74,7 @@ interface AttemptRow extends QueryResultRow {
   funding_network: string | null
   attribution_transaction_id: string | null
   submission_started_at: Date | string | null
-  authorization: unknown
+  authorization_state: unknown
   created_at: Date | string
   updated_at: Date | string
 }
@@ -307,7 +307,7 @@ function attemptFromRow(row: AttemptRow): PaymentAttempt {
     ...(row.funding_network ? { fundingNetwork: row.funding_network } : {}),
     ...(row.attribution_transaction_id ? { attributionTransactionId: row.attribution_transaction_id } : {}),
     ...(row.submission_started_at ? { submissionStartedAt: iso(row.submission_started_at) } : {}),
-    ...(row.authorization ? { authorization: authorizationFromJson(row.authorization) } : {}),
+    ...(row.authorization_state ? { authorization: authorizationFromJson(row.authorization_state) } : {}),
     createdAt: iso(row.created_at),
     updatedAt: iso(row.updated_at),
   })
@@ -564,7 +564,7 @@ async function updateAttempt(client: PoolClient, attempt: PaymentAttempt): Promi
         funding_network = $7,
         attribution_transaction_id = $8,
         updated_at = $9,
-        authorization = $10::jsonb
+        authorization_state = $10::jsonb
     WHERE id = $1
   `, [
     attempt.id,
@@ -605,7 +605,7 @@ async function insertAttempt(client: PoolClient, attempt: PaymentAttempt): Promi
     INSERT INTO payment_attempts (
       id, order_id, integration, method, status, status_source, retry_of,
       merchant_txn_id, payment_id, transaction_id, submission_started_at,
-      created_at, updated_at, authorization
+      created_at, updated_at, authorization_state
     )
     VALUES ($1, $2, $3, $4, $5, NULL, $6, $7, NULL, NULL, NULL, $8, $8, $9::jsonb)
   `, [
@@ -1754,7 +1754,7 @@ export async function recordAuthorizationWebhookEvent(
       FROM payment_attempts a
       JOIN payment_orders o ON o.id = a.order_id
       WHERE a.merchant_txn_id = $1
-         OR a.authorization->'operation'->>'merchantTxnId' = $1
+         OR a.authorization_state->'operation'->>'merchantTxnId' = $1
          OR a.payment_id = $2
       FOR UPDATE OF a
     `, [fact.merchantTxnId, fact.paymentId])
@@ -2079,9 +2079,9 @@ export async function getPaymentTimeline(identifier: string): Promise<PaymentTim
       LEFT JOIN payment_events e ON e.attempt_id = a.id
       WHERE a.merchant_txn_id = $1
          OR a.transaction_id = $1
-         OR a.authorization->>'authTransactionId' = $1
-         OR a.authorization->'operation'->>'merchantTxnId' = $1
-         OR a.authorization->'operation'->>'transactionId' = $1
+         OR a.authorization_state->>'authTransactionId' = $1
+         OR a.authorization_state->'operation'->>'merchantTxnId' = $1
+         OR a.authorization_state->'operation'->>'transactionId' = $1
          OR e.transaction_id = $1
       ORDER BY a.created_at DESC
       LIMIT 2
@@ -2211,7 +2211,7 @@ export async function getPaymentRecovery(
       )
       SELECT id, order_id, integration, method, status, status_source, retry_of,
              merchant_txn_id, payment_id, transaction_id, submission_started_at,
-             created_at, updated_at, authorization, topology.chain_count, topology.order_count
+             created_at, updated_at, authorization_state, topology.chain_count, topology.order_count
       FROM selected
       CROSS JOIN topology
       ORDER BY root_created_at ASC, retry_path ASC

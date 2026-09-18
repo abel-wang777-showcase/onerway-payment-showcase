@@ -34,7 +34,7 @@ function row(authorization: AuthorizationState | null = authorized) {
     id: 'attempt-1', order_id: 'order-1', integration: 'checkout', method: 'card',
     merchant_txn_id: merchantTxnId, payment_id: authorization?.paymentId ?? null,
     transaction_id: '1001', status: 'processing', status_source: 'webhook', retry_of: null,
-    authorization, amount_minor: 500, currency: 'USD', created_at: now, updated_at: now,
+    authorization_state: authorization, amount_minor: 500, currency: 'USD', created_at: now, updated_at: now,
   }
 }
 
@@ -47,7 +47,7 @@ function mockRow(authorization: AuthorizationState | null = authorized) {
     if (sql.includes('UPDATE payment_attempts')) Object.assign(saved, {
       status: values[1], status_source: values[2], payment_id: values[3] ?? saved.payment_id,
       transaction_id: values[4] ?? saved.transaction_id, updated_at: values[8],
-      authorization: values[9] ? JSON.parse(values[9] as string) : null,
+      authorization_state: values[9] ? JSON.parse(values[9] as string) : null,
     })
     if (sql.includes('INSERT INTO payment_events')) events.push({
       id: values[0], attempt_id: values[1], source: values[2], source_key: values[3],
@@ -188,7 +188,7 @@ describe('authorization persistence', () => {
   it('records return recovery without projecting any funds status', async () => {
     const { saved } = mockRow()
     await recordReturnEvent('attempt-1', now)
-    expect(saved.authorization).toEqual(authorized)
+    expect(saved.authorization_state).toEqual(authorized)
     expect(database.query.mock.calls.some(([sql]) => sql.includes('UPDATE payment_attempts'))).toBe(false)
   })
 
