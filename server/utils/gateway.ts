@@ -58,6 +58,7 @@ export interface CreatedSubscriptionPayment extends CreatedPayment {
 }
 
 export interface QueriedPayment {
+  readonly subscription?: { readonly contractId: string, readonly tokenId?: string }
   readonly merchantTxnId?: string
   readonly paymentId?: string
   readonly paymentStatus?: string
@@ -244,9 +245,9 @@ export interface SubscriptionCreateContext extends CreateContext {
   readonly plan: SubscriptionPlan
 }
 
-export function buildSubscriptionCreatePayload(
+function buildSubscriptionPayload(
   profile: Extract<ServerProfile, { profile: 'sandbox' }>,
-  context: SubscriptionCreateContext,
+  context: CheckoutCreateContext & { readonly plan: SubscriptionPlan },
 ): Payload {
   const { order, plan } = context
   const itemTotal = order.item.unitAmount.minor * order.item.quantity
@@ -283,7 +284,6 @@ export function buildSubscriptionCreatePayload(
     orderCurrency: order.amount.currency,
     paymentMode: 'WEB',
     productType: 'ALL',
-    risk3dsStrategy: 'DEFAULT',
     shippingInformation: address,
     subProductType: 'SUBSCRIBE',
     subscription: {
@@ -304,8 +304,24 @@ export function buildSubscriptionCreatePayload(
         num: String(order.item.quantity),
         price: formatAmount(order.item.unitAmount.minor),
       }],
-      transactionIp: context.transactionIp,
       appId: profile.appId,
+      notifyUrl: profile.notifyUrl,
+    },
+    txnType: 'SALE',
+  })
+}
+
+export function buildSubscriptionCreatePayload(
+  profile: Extract<ServerProfile, { profile: 'sandbox' }>,
+  context: SubscriptionCreateContext,
+): Payload {
+  const payload = buildSubscriptionPayload(profile, context)
+  return Object.freeze({
+    ...payload,
+    risk3dsStrategy: 'DEFAULT',
+    txnOrderMsg: {
+      ...payload.txnOrderMsg as Record<string, unknown>,
+      transactionIp: context.transactionIp,
       javaEnabled: context.javaEnabled,
       colorDepth: context.colorDepth,
       screenHeight: context.screenHeight,
@@ -315,10 +331,15 @@ export function buildSubscriptionCreatePayload(
       userAgent: context.userAgent,
       contentLength: context.contentLength,
       language: context.language,
-      notifyUrl: profile.notifyUrl,
     },
-    txnType: 'SALE',
   })
+}
+
+export function buildCheckoutSubscriptionCreatePayload(
+  profile: Extract<ServerProfile, { profile: 'sandbox' }>,
+  context: CheckoutCreateContext & { readonly plan: SubscriptionPlan },
+): Payload {
+  return buildSubscriptionPayload(profile, context)
 }
 
 export function buildCheckoutCreatePayload(
@@ -378,7 +399,32 @@ export function readCheckoutCreateResponse(value: unknown): CreatedPayment {
   return Object.freeze({ ...created, redirectUrl })
 }
 
+export function readCheckoutSubscriptionCreateResponse(value: unknown): CreatedSubscriptionPayment {
+  let created: CreatedPayment
+  try {
+    created = readCheckoutCreateResponse(value)
+  }
+  catch (error) {
+    if (error instanceof GatewayError && error.code === 'PAYMENT_CREATE_RESPONSE_INVALID') {
+      throw new GatewayError('SUBSCRIPTION_CREATE_RESPONSE_INVALID')
+    }
+    throw error
+  }
+  const data = (value as Record<string, unknown>).data as Record<string, unknown>
+  // Checkout documents empty or absent initial contract credentials. They are
+  // never contract truth; only the later subscription notification/query is.
+  if (
+    data.paymentStatus !== 'U'
+    || ![undefined, null, ''].includes(data.contractId as undefined | null | string)
+    || ![undefined, null, ''].includes(data.tokenId as undefined | null | string)
+  ) {
+    throw new GatewayError('SUBSCRIPTION_CREATE_RESPONSE_INVALID')
+  }
+  return Object.freeze({ ...created, rawPaymentStatus: 'U' })
+}
+
 export interface CheckoutQueryContext {
+  readonly subscription?: boolean
   readonly merchantTxnId: string
   readonly amountMinor: number
   readonly currency: string
@@ -446,8 +492,26 @@ export function readCheckoutQueryResponse(
     throw new GatewayError('PAYMENT_QUERY_RESPONSE_INVALID')
   }
 
+  let subscription: QueriedPayment['subscription']
+  if (context.subscription) {
+    const contractId = record.contractId
+    const tokenId = record.tokenId
+    const empty = (value: unknown) => value === undefined || value === null || value === ''
+    if (
+      (!empty(contractId) && (typeof contractId !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(contractId)))
+      || (!empty(tokenId) && !readOpaqueToken(tokenId))
+      || (empty(contractId) && !empty(tokenId))
+    ) {
+      throw new GatewayError('PAYMENT_QUERY_RESPONSE_INVALID')
+    }
+    if (typeof contractId === 'string' && contractId) {
+      subscription = Object.freeze({ contractId, ...(!empty(tokenId) ? { tokenId: tokenId as string } : {}) })
+    }
+  }
+
   try {
     return Object.freeze({
+      ...(subscription ? { subscription } : {}),
       ...(paymentId ? { paymentId } : {}),
       merchantTxnId: context.merchantTxnId,
       transactionId,
@@ -922,6 +986,14 @@ export async function createSubscriptionPayment(
 ): Promise<CreatedSubscriptionPayment> {
   const response = await post(profile, '/v1/sdkTxn/doTransaction', buildSubscriptionCreatePayload(profile, context))
   return readSubscriptionCreateResponse(response)
+}
+
+export async function createCheckoutSubscriptionPayment(
+  profile: Extract<ServerProfile, { profile: 'sandbox' }>,
+  context: CheckoutCreateContext & { readonly plan: SubscriptionPlan },
+): Promise<CreatedSubscriptionPayment> {
+  const response = await post(profile, '/txn/payment', buildCheckoutSubscriptionCreatePayload(profile, context))
+  return readCheckoutSubscriptionCreateResponse(response)
 }
 
 export async function queryPayment(profile: Extract<ServerProfile, { profile: 'sandbox' }>, paymentId: string): Promise<QueriedPayment & { readonly paymentId: string }> {

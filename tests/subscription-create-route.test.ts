@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => {
     claimPaymentCreation: vi.fn(),
     completePaymentRecord: vi.fn(),
     createSubscriptionPayment: vi.fn(),
+    createCheckoutSubscriptionPayment: vi.fn(),
     GatewayError,
     getPaymentRecovery: vi.fn(),
     readBrowserData: vi.fn(),
@@ -30,6 +31,7 @@ vi.mock('../server/utils/gateway', () => ({
   createQueryExpiry: vi.fn(),
   createQueryToken: vi.fn(),
   createSubscriptionPayment: mocks.createSubscriptionPayment,
+  createCheckoutSubscriptionPayment: mocks.createCheckoutSubscriptionPayment,
   GatewayError: mocks.GatewayError,
 }))
 vi.mock('../server/utils/limit', () => ({
@@ -95,6 +97,7 @@ beforeEach(() => {
       id: 'attempt-1',
       orderId: 'order-1',
       status: 'created',
+      integration: 'web-js-sdk',
       merchantTxnId: 'showcase-subscription-1',
     },
     attempts: [],
@@ -106,6 +109,7 @@ beforeEach(() => {
     },
     subscription: {
       planId: 'halden-daily-essentials-v1',
+      initialIntegration: 'web-js-sdk',
       planVersion: 1,
       productName: 'Halden Daily Essentials',
       amount: { minor: 500, currency: 'USD' },
@@ -154,4 +158,52 @@ describe('subscription create route', () => {
       expect.any(String),
     )
   })
+})
+
+it('creates Checkout subscription from persisted integration using only the hosted context', async () => {
+  const existing = await mocks.getPaymentRecovery()
+  existing.attempt.integration = 'checkout'
+  existing.subscription.initialIntegration = 'checkout'
+  mocks.getPaymentRecovery.mockResolvedValue(existing)
+  mocks.createCheckoutSubscriptionPayment.mockResolvedValue({
+    paymentId: '9000000000000000001', transactionId: '9000000000000000002', rawStatus: 'U', rawPaymentStatus: 'U',
+    redirectUrl: 'https://sandbox-checkout.onerway.com/checkout?session=ephemeral',
+  })
+  mocks.completePaymentRecord.mockResolvedValue({ ...existing.attempt, status: 'processing' })
+  const { default: handler } = await import('../server/api/payment/subscription/create.post')
+  const result = await (handler as (event: unknown) => Promise<Record<string, unknown>>)({})
+
+  expect(mocks.createCheckoutSubscriptionPayment).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+    merchantCustId: 'Customer_1', merchantTxnId: 'showcase-subscription-1', order: existing.order,
+    returnUrl: 'https://showcase.example/halden/subscription/return',
+  }))
+  expect(mocks.createCheckoutSubscriptionPayment.mock.calls[0]?.[1]).not.toHaveProperty('transactionIp')
+  expect(mocks.readBrowserData).not.toHaveBeenCalled()
+  expect(mocks.createSubscriptionPayment).not.toHaveBeenCalled()
+  expect(result.redirectUrl).toContain('https://sandbox-checkout.onerway.com/')
+  expect(result.subscription).toMatchObject({ state: 'pending' })
+  expect(JSON.stringify(mocks.completePaymentRecord.mock.calls)).not.toContain('ephemeral')
+})
+
+it.each([{ browser: {} }, { merchantCustId: 'client-override' }, null])('rejects Checkout create input %j before claiming creation', async (input) => {
+  const existing = await mocks.getPaymentRecovery()
+  existing.attempt.integration = 'checkout'
+  existing.subscription.initialIntegration = 'checkout'
+  mocks.getPaymentRecovery.mockResolvedValue(existing)
+  vi.stubGlobal('readBody', vi.fn().mockResolvedValue(input))
+  const { default: handler } = await import('../server/api/payment/subscription/create.post')
+  await expect((handler as (event: unknown) => Promise<unknown>)({})).rejects.toMatchObject({ statusMessage: 'PAYMENT_INPUT_INVALID' })
+  expect(mocks.claimPaymentCreation).not.toHaveBeenCalled()
+  expect(mocks.createCheckoutSubscriptionPayment).not.toHaveBeenCalled()
+})
+
+it('never resends Checkout create when another request already claimed the Attempt', async () => {
+  const existing = await mocks.getPaymentRecovery()
+  existing.attempt.integration = 'checkout'
+  existing.subscription.initialIntegration = 'checkout'
+  mocks.getPaymentRecovery.mockResolvedValue(existing)
+  mocks.claimPaymentCreation.mockResolvedValue({ outcome: 'existing' })
+  const { default: handler } = await import('../server/api/payment/subscription/create.post')
+  await expect((handler as (event: unknown) => Promise<unknown>)({})).rejects.toMatchObject({ statusMessage: 'PAYMENT_CREATE_IN_PROGRESS' })
+  expect(mocks.createCheckoutSubscriptionPayment).not.toHaveBeenCalled()
 })

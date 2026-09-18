@@ -2,7 +2,7 @@
 
 > 状态：M0 Web JS SDK Card、订阅与钱包；Sandbox Hosted Checkout 已有真实演示证据，逐方式能力保持条件限制
 >
-> 更新日期：2026-09-17
+> 更新日期：2026-09-18
 > 作用：这是项目长期有效的产品、架构、状态和安全边界。GitHub Issues 负责交付顺序，不替代本文件。
 
 ## 1. 产品目标、受众和非目标
@@ -59,7 +59,7 @@ Demo Hub 是公开演示入口，不是第二套后台。它负责：
 - `E-commerce × Web JS SDK × Card` 为 Available。`USD 5.00 · Standard success` 同时开放确定性 simulation 与真实 Sandbox SDK；`USD 50.00 · 3DS Challenge` 同时开放 simulation 与仅 Sandbox profile 可见的真实验收入口。两条真实 Sandbox Card 黄金路径均已在 canonical Production 域名完成服务端核验，其中 USD 50.00 覆盖 `R → 3DS Challenge → configured returnUrl → same-payment fresh query`。同一能力下另有独立、仅 Sandbox 的 `Halden Daily Essentials` 初始订阅旅程；它没有伪 simulation，也不把订阅计划建模为新的 Integration。
 - Card simulation 额外开放 processing recovery、cancelled retry、deterministic failure 与 form load recovery 四条异常旅程；它们不含 Sandbox mode、不产生 provider 标识，也不扩张真实 create allowlist。deterministic failure 只形成 `source=simulation / status=failed` 的本地事实，不能作为 Payment-level `failed` 原始状态证据。
 - `E-commerce × Web JS SDK × Google Pay` 与 `E-commerce × Web JS SDK × Apple Pay` 均保持 Conditional，并复用 USD 5.00 `standard-success` 的真实 Sandbox 入口；Showcase 只记录用户选择的预期方式，是否渲染对应钱包按钮及其资格由同一个 Onerway SDK Element 决定。两者都不渲染伪钱包按钮，也没有钱包专属 simulation。Apple Pay 的最终真实设备 / Safari / Wallet canary 仍需单独授权与用户设备配合，不能由桌面浏览器或历史支付替代。
-- `E-commerce × Checkout × All` 为 Conditional，并提供 USD 5.00 普通支付与 USD 50.00 3DS 的 Sandbox 一次性支付入口。`All` 是支付方式选择策略，不代表最终使用某张卡或钱包；具体可选项由商户启用、国家、币种和设备条件决定。USD 50.00 真实 3DS 已获用户人工验收确认，返回恢复、超时取消与通知链路已有独立 Sandbox 证据，执行范围见 Issue #8；这些证据不代表所有设备或具体支付方式均已验证，不宣称任一具体收银台支付方式为 Available。
+- `E-commerce × Checkout × All` 为 Conditional，并提供 USD 5.00 普通支付与 USD 50.00 3DS 的 Sandbox 一次性支付入口。`All` 是支付方式选择策略，不代表最终使用某张卡或钱包；具体可选项由商户启用、国家、币种和设备条件决定。USD 50.00 真实 3DS 已获用户人工验收确认，返回恢复、超时取消与通知链路已有独立 Sandbox 证据，执行范围见 Issue #8；这些证据不代表所有设备或具体支付方式均已验证，不宣称任一具体收银台支付方式为 Available。同一入口另有 Card 初始订阅选项，沿用固定 USD 5.00 计划且保持 Conditional，范围及证据边界见 Issue #10 章节。
 - Checkout 的具体支付方式直达、Direct API、其余 APM 和 Game / Live / AI 场景当前为 Planned。
 - Unavailable 保留为明确证实不支持时使用的状态；当前不为凑齐 UI 而制造无证据的 Unavailable 组合。
 
@@ -140,7 +140,7 @@ Demo Hub 继续提供两条同结果、可重复的本地模拟旅程。模拟�
 
 ### Checkout 接入决定与验收边界（2026-09-14）
 
-用户已确认首版沿用 Halden 电商场景，接入 Sandbox 托管收银台的一次性支付、回跳与服务端核验，由收银台展示商户在当前交易条件下已启用的全部支付方式。首版不含保存卡；后续保存卡与复购按下方 Issue #9 边界接入。Checkout 订阅、预授权和 Production 交易仍不属于此范围。以下记录当天发布文档与用户确认的实施边界；模拟、自动化测试不替代真实 Sandbox 验收。
+用户已确认首版沿用 Halden 电商场景，接入 Sandbox 托管收银台的一次性支付、回跳与服务端核验，由收银台展示商户在当前交易条件下已启用的全部支付方式。首版不含保存卡；后续保存卡与复购按下方 Issue #9 边界接入。Checkout 初始订阅按下方 Issue #10 边界接入；预授权和 Production 交易仍不属于此范围。以下记录当天发布文档与用户确认的实施边界；模拟、自动化测试不替代真实 Sandbox 验收。
 
 已确认的官方输入与跳转契约：
 
@@ -197,7 +197,23 @@ SDK → Checkout 与 Checkout → SDK 切换沿用同 scope 身份，但实际�
 
 2026-09-17 核对的官方保存支付方式指南描述独立保存结果通知；2026-08-13 SDK 历史验收则记录未收到第二笔绑卡通知。两者不能直接推定为当前 Checkout 行为，本次真实验收须单列是否观察到该通知及其关联证据。当前托管复购不依赖商户 token 消费，不新增 List saved tokens 或绑卡 Webhook 消费；若出现需要改变处理方式的契约冲突，先保留脱敏证据并停止依赖该事实的实现。
 
-执行与证据登记在 [Issue #9](https://github.com/abel-wang777-showcase/onerway-payment-showcase/issues/9)：自动化验证客户传递、scope 隔离、并发补齐、公开响应不泄露与 SDK 回归；真实 Sandbox 按“不保存对照 → 主动保存支付 → 同客户新订单回显并选卡复购 → 双向跨入口对照”验证，并分别记录托管交互、每笔支付服务端核验和通知观察。历史 SDK 证据与本次自动化均不替代本次真实保存、回显及复购证据；完成前这些子场景保持未验证，Checkout 能力继续为 Conditional。无关渠道或设备异常不扩展为本次交付阻断。
+执行与证据登记在 [Issue #9](https://github.com/abel-wang777-showcase/onerway-payment-showcase/issues/9)：自动化验证客户传递、scope 隔离、并发补齐、公开响应不泄露与 SDK 回归；真实 Sandbox 按“不保存对照 → 主动保存支付 → 同客户新订单回显并选卡复购 → 双向跨入口对照”验证，并分别记录托管交互、每笔支付服务端核验和通知观察。2026-09-17 Issue #9 已关闭：真实 Sandbox 已取得主动保存、同客户复购、SDK → Checkout 与 Checkout → SDK 双向卡回显/复购及客户隔离证据；PR #13 合并为 `74d6617`，合并后 CI、Payment DB 与 canonical 部署通过。独立保存通知及 Provider 发送/ACK 逐单观察仍未验证，不作为初始订阅前置。上述历史保存卡证据不替代 Checkout 订阅验收；Checkout 能力继续为 Conditional。无关渠道或设备异常不扩展为交付阻断。
+
+### Checkout Card 初始订阅（Issue #10）
+
+Checkout 复用第 6.1 节固定 `halden-daily-essentials-v1` 计划、服务端匿名客户、`SubscriptionContract` 与 `Order → PaymentAttempt → PaymentEvent`。Demo Hub 在 Checkout 下提供初始订阅入口，保持 **Conditional**；`ALL` 仅表示托管页选择方式，本期演示要求选择 **Card** 并完成首次 3DS。其他 LPM 可能采用独立授权通知或省略 `scenarios` 的首次扣款通知，不在本次接入承诺内；保存卡成功及独立保存通知均不是订阅前置。续费、后续扣款、调度、取消、升降级和计划管理不在本期。
+
+- 按当前[创建收银台支付](https://developers.onerway.com/payments/api-reference/endpoints/create-checkout-payment)与[订阅指南](https://developers.onerway.com/payments/online-payments/scenarios/subscriptions)，Checkout 调用 `POST /txn/payment`，固定 `ALL + SUBSCRIBE + SALE + WEB`，JSON string `subscription` 使用 `requestType=0`、`selfExecute=2`、`mode=2` 和既有固定计划。内外 `merchantCustId` 同传且一致，覆盖指南与字段表对必填位置的差异；不接收客户端客户、金额、周期或 Provider routing，不传 SDK browser/device/IP、`lpmsInfo`、`risk3dsStrategy` 或 Provider-managed cycle/trial/bindCard 字段。
+- Checkout create 采用独立解析器：要求同笔非空 `paymentId` / `transactionId`、`status=U`、`paymentStatus=U` 与受限 `redirectUrl`。尚未建立的 `contractId` / `tokenId` 可为缺省、null 或空串；不能套用 SDK 受控响应的精确 null 假设。同步响应不建立 active，不消费生命周期状态；已收到的无效响应持久化 stop-gate，结果未知只查原 creation，不重发 create。
+- 同 scope + plan 的 duplicate guard 跨 SDK/Checkout 生效，不把 integration 加入防重键。intent 回传持久化 integration；仅已原子建立但尚未认领、无 Provider evidence 的 placeholder 可继续首次 create，已认领或结果未知只能恢复。切换入口不得改变已存在 Attempt 的 adapter；显式新测试客户继续受第 6.1 节限制。
+- 回跳使用既有 `/halden/subscription/return` 与 HttpOnly recovery cookie；进入 SSR 前清除附加 query。刷新、关闭或返回仅恢复原 Order/Attempt/Contract，导航 URL 只使用一次且不持久化。Hosted 页和结果页均分开展示 Payment 与 Subscription；订阅不提供普通支付的独立订单/Retry 捷径。
+- Checkout 按[交易查询](https://developers.onerway.com/payments/api-reference/endpoints/query-transactions)核对原 `merchantTxnId`、商户、金额币种与已有 Provider IDs。该查询没有合约生命周期字段；发现非空 `contractId` 后必须另行执行严格关联的[订阅详情查询](https://developers.onerway.com/payments/api-reference/endpoints/query-subscription-details)，才可收敛合约状态。支付成功、回跳及合同标识本身均不能推断 active；token 冲突与未知状态保持拒绝。
+- 合约持久化 `initialIntegration`，旧记录回填 `web-js-sdk`，确保 Payment 30 天清理后仍可使用正确的查询协议。原有 token 终态擦除、首次 `terminalAt` 和合约独立保留规则不变。
+- Card 初始通知复用 `SUBSCRIPTION_INITIAL`、header 验签、事务写入、幂等 ACK 与续费隔离。当前公开[订阅通知](https://developers.onerway.com/payments/api-reference/webhooks/subscription-payment)允许 `paymentId` / `paymentStatus` 为空，本项目仅为已验签、精确关联到 Checkout initial Attempt 的 `status=N` 且无 Payment 级状态通知提供受限无 ID 取消处理；其他缺失关联保持 fail closed。2026-09-18 已观察到一笔初始取消通知持久化为 `status=N`、Payment cancelled 与 Subscription ended；Payment 级状态缺失，未保存原始 payload，因此不据此推断其他原始字段形态。该样本不代表每次取消均有通知，也不替代首次成功订阅验收。
+
+2026-09-18 用户确认：Checkout Card 自主管理初始订阅允许使用 `selfExecute=2`、`mode=2`、`frequencyType=D`、`frequencyPoint=1`、`expireDate=2099-12-31`，本项目据此沿用既有固定计划；此前公开文档中“最多 99 周期”与远期示例的冲突不再阻断本组合的实施。该确认不推广为其他支付方式或 Onerway 托管订阅的到期日、周期规则，也不构成本次真实 Checkout 订阅验收证据，能力继续保持 Conditional。真实初始支付仍会建立可用于后续扣款的授权，执行前须单独明确授权范围。`selfExecute=2` 的后续扣款由商户管理，本项目不发起续费 API 或新增调度。
+
+[Issue #10](https://github.com/abel-wang777-showcase/onerway-payment-showcase/issues/10) 分开记录本次自动化、历史 SDK/保存卡证据和本次真实 Checkout 订阅证据。本次实现不能替代首次托管 Card/3DS、回跳、通知与查询真实验收；未授权时不部署、不执行真实订阅交易、不合并，也不将能力提升为 Available。
 
 ## 6. 回跳、通知和最终状态
 
@@ -210,7 +226,7 @@ SDK → Checkout 与 Checkout → SDK 切换沿用同 scope 身份，但实际�
 5. `processing` 必须可刷新恢复和后续收敛；重复回调不得重复创建业务结果或触发重复扣款。
 6. 浏览器一旦调用 `confirmPayment()`，除当前仍存活的 v4 Checkout 明确返回顶层 `paymentStatus=O` 或 `reason.type=canceled` 外，不得把同一 PaymentAttempt 恢复为可再次提交；`R`、`P`、`A`、离页或客户端结果未知时只允许查询该 attempt，直到服务端真值收敛。刷新会丢失该临时 SDK 交互许可，因此 provider-created Attempt 仍恢复为 query-only。
 
-### 6.1 Web JS SDK Card 初始订阅
+### 6.1 Card 初始订阅与独立合约状态
 
 初始订阅继续使用同一个 `Order → PaymentAttempt → PaymentEvent` 支付模型承载首次扣款，并新增相邻的服务端 `SubscriptionContract` 承载合约生命周期。二者通过不可变的 initial Order / Attempt 审计快照关联，但 SubscriptionContract 不受 Payment 30 天级联清理控制；Payment succeeded、SDK callback、configured `returnUrl`、Provider result page 或同步 `respCode=20000` 都不能单独证明合约 active。
 
@@ -218,13 +234,13 @@ SDK → Checkout 与 Checkout → SDK 切换沿用同 scope 身份，但实际�
 
 Sandbox create 固定使用 `paymentMode=WEB`、`productType=ALL`、`subProductType=SUBSCRIBE`、`txnType=SALE`、`subscription.requestType=0`、`subscription.selfExecute=2`、`subscription.mode=2`，并让 top-level 与 subscription 内的 `merchantCustId` 精确相同。当前官方 SDK 字段表仍把 SDK scope 写成 `productType=CARD`，但 controlled Sandbox 已确认 `ALL + SUBSCRIBE`；Showcase 不实现 `CARD` fallback、双请求或自动兼容。`selfExecute=2` 不发送 Onerway-managed 专用的 cycle、trial、notification 或 `bindCard` 字段。
 
-Provider 同步 create 的受控响应为 `status=U + paymentStatus=U + contractId=null + tokenId=null`，且不返回 `dataStatus` / `subscriptionStatus`。服务端在 Provider create 前原子建立 contract placeholder，并以本地、已确认的 `dataStatus=0 + subscriptionStatus=paymentdue` 投影为 `pending`；SDK 只用 response 的同笔 `paymentId` 初始化。Card 初始订阅固定进入 3DS，不提供绕过 3DS 的成功路径。
+Web JS SDK 同步 create 的受控响应为 `status=U + paymentStatus=U + contractId=null + tokenId=null`，且不返回 `dataStatus` / `subscriptionStatus`。服务端在 Provider create 前原子建立 contract placeholder，并以本地、已确认的 `dataStatus=0 + subscriptionStatus=paymentdue` 投影为 `pending`；SDK 只用 response 的同笔 `paymentId` 初始化。Card 初始订阅固定进入 3DS，不提供绕过 3DS 的成功路径。
 
 已收到但不符合上述精确契约的 create response 是不可恢复的 runtime drift：服务端必须为该 Attempt 持久化 stop-gate，通用 merchant transaction recovery 不得绕过 parser 后继续打开 SDK。只有网络结果未知、尚未确认收到何种 Provider response 时，才允许用既有 `merchantTxnId` 查找同一 creation。
 
-同一 `merchantNo + appId + environment + merchantCustId` customer scope 与相同 `planId` 下，任何未进入终态的 SubscriptionContract 都禁止再次创建同一 product。该规则由数据库唯一约束与事务串行化执行；Provider Create 已实证会接受重复 customer + product，因此 Provider duplicate error 不能替代本地 gate，普通订阅入口也不能通过随机 productName、随机 plan、新 customer 或自动取消绕过。为保持公开 Showcase 可重复演示，Sandbox profile 可在当前签名 recovery 已恢复相同 plan 的非终态合约、且该合约已有 `paymentId` 或 `contractId` Provider evidence 后，由用户显式选择“新的 Sandbox 测试客户”；服务端据此生成全新的 `merchantCustId` 与独立 Order，替换当前浏览器 recovery 绑定，但不取消、覆盖或修改旧客户的 Order、Attempt 或 SubscriptionContract。该入口不接受客户端 customer id、不自动触发、不属于同一 customer 的 Retry，并且不在 Production profile 开放；每个新测试客户仍独立受相同 duplicate guard 约束。尚未取得任何 Provider identifier 的本地 placeholder 不开放该入口，避免 intent 响应未知时重复生成测试身份。
+同一 `merchantNo + appId + environment + merchantCustId` customer scope 与相同 `planId` 下，任何未进入终态的 SubscriptionContract 都禁止再次创建同一 product。该规则由数据库唯一约束与事务串行化执行；Provider Create 已实证会接受重复 customer + product，因此 Provider duplicate error 不能替代本地 gate，普通订阅入口也不能通过随机 productName、随机 plan、新 customer 或自动取消绕过。已恢复的终态合约不再占用该入口：Demo Hub 显示正常初始订阅按钮，沿用原客户创建新的 Order/Attempt；终态不提供仅限非终态的“新的 Sandbox 测试客户”按钮。为保持公开 Showcase 可重复演示，Sandbox profile 可在当前签名 recovery 已恢复相同 plan 的非终态合约、且该合约已有 `paymentId` 或 `contractId` Provider evidence 后，由用户显式选择“新的 Sandbox 测试客户”；服务端据此生成全新的 `merchantCustId` 与独立 Order，替换当前浏览器 recovery 绑定，但不取消、覆盖或修改旧客户的 Order、Attempt 或 SubscriptionContract。该入口不接受客户端 customer id、不自动触发、不属于同一 customer 的 Retry，并且不在 Production profile 开放；每个新测试客户仍独立受相同 duplicate guard 约束。尚未取得任何 Provider identifier 的本地 placeholder 不开放该入口，避免 intent 响应未知时重复生成测试身份。
 
-SUBSCRIBE 只接收一条 `scenarios=SUBSCRIPTION_INITIAL` 的 Subscription payment Webhook，不等待 ordinary Payment Webhook。该通知在同一事务内写入 PaymentEvent、收敛 PaymentAttempt、发现并保存非空 `contractId` / opaque `tokenId`、更新 SubscriptionContract；全部关联和写入成功后才返回 HTTP 200、`text/plain`、原 `transactionId`。`SUBSCRIPTION_RENEWAL` 不得误写 initial Attempt。普通通知的 `scenarios` 缺省或为 `null` 时进入 ordinary Payment 校验；不能仅因存在空字段而误入订阅路径。其他非空值以及空字符串继续交给订阅校验并拒绝未知场景，不兜底为普通支付。Webhook 复用 ordinary Payment 的唯一显式签名 exclusion contract；不得增加“只排除 sign”的第二套验签或 fallback。
+本项目 Card 初始 SUBSCRIBE 路径接收一条 `scenarios=SUBSCRIPTION_INITIAL` 的 Subscription payment Webhook，不等待 ordinary Payment Webhook。该通知在同一事务内写入 PaymentEvent、收敛 PaymentAttempt、发现并保存非空 `contractId` / opaque `tokenId`、更新 SubscriptionContract；全部关联和写入成功后才返回 HTTP 200、`text/plain`、原 `transactionId`。`SUBSCRIPTION_RENEWAL` 不得误写 initial Attempt。普通通知的 `scenarios` 缺省或为 `null` 时进入 ordinary Payment 校验；不能仅因存在空字段而误入订阅路径。其他非空值以及空字符串继续交给订阅校验并拒绝未知场景，不兜底为普通支付。Webhook 复用 ordinary Payment 的唯一显式签名 exclusion contract；不得增加“只排除 sign”的第二套验签或 fallback。
 
 SubscriptionContract 自持久化初始 `merchantTxnId`、create 后的 `paymentId` 与首次 Subscription Webhook `transactionId` 幂等键；这些字段只用于服务端关联，不进入公开 DTO。Payment 记录 30 天后删除，迟到或重复 initial Webhook 仍能直接关联长期合约。已成功处理的相同 Webhook 重试必须先用本地幂等事实 ACK，不得因 Provider 当前 Query 状态变化或暂时不可用而拒绝重复通知。
 
@@ -232,7 +248,7 @@ SubscriptionContract 自持久化初始 `merchantTxnId`、create 后的 `payment
 
 结果页始终显示 Payment 与 Subscription 两条状态轴。至少区分 `Payment pending`、`Payment succeeded + Subscription pending`、`Subscription active`、`Subscription needs attention` 和终态；Payment success 不会提前激活 Subscription。`tokenId` 永远不进入客户端 DTO、URL、日志、Issue、截图或 Technical details；`contractId` 也不进入公开页面或 URL。
 
-configured `returnUrl` 始终发送，Provider 自动导航到 canonical merchant return/result 是首选 UX，但只用于恢复。自动回跳成功时，页面通过 HttpOnly recovery cookie 恢复同一 Order / Attempt 并无条件 fresh Query 同一 `paymentId`；自动回跳缺席、浏览器停在 Provider result page 时，Webhook 仍可在服务端收敛，用户手动返回、刷新或重新打开 Showcase 后以同一 cookie 恢复并执行相同 Query。降级路径不得创建新 Order / Attempt、不得再次 Provider Create 或 `confirmPayment()`，不得把 provider identifier 或 recovery capability 放进 URL；cookie 已失效时 fail closed。
+configured `returnUrl` 始终发送，Provider 自动导航到 canonical merchant return/result 是首选 UX，但只用于恢复。自动回跳成功时，页面通过 HttpOnly recovery cookie 恢复同一 Order / Attempt 并按持久化接入方式无条件 fresh query：SDK 查询同一 `paymentId`，Checkout 查询同一 `merchantTxnId`；自动回跳缺席、浏览器停在 Provider result page 时，Webhook 仍可在服务端收敛，用户手动返回、刷新或重新打开 Showcase 后以同一 cookie 恢复并执行相同 Query。降级路径不得创建新 Order / Attempt、不得再次 Provider Create 或 `confirmPayment()`，不得把 provider identifier 或 recovery capability 放进 URL；cookie 已失效时 fail closed。
 
 SubscriptionContract 自有 customer scope、plan projection、初始审计标识、标准状态、白名单 Provider 状态、可空唯一 `contractId`、server-only `tokenId` 与生命周期时间戳。`initialAttemptId` 唯一；Payment Order 30 天删除后，非终态合约仍可独立执行 duplicate guard、Webhook 关联和 known-contract query。合约明确进入 `dataStatus=3`、`canceled` 或 `ended` 时立即擦除 token，只保留最小 contract/customer/plan tombstone 与首次 `terminalAt`，30 天后删除；重复终态事实不得刷新 `terminalAt`。Payment 最终失败/取消且 `contractId` 仍为空时，placeholder 同样进入 30 天清理；已有 contract 且仍为 `0 + paymentdue` 时保持并等待 query，`dataStatus=2` 在 Provider 明确不可恢复前保持 needs-attention，不自动删除。
 

@@ -4,6 +4,7 @@ import { createOrder } from '../../../../shared/payment/order'
 import {
   getSubscriptionPlan,
   isSubscriptionPlanId,
+  isSubscriptionIntegration,
   createSubscriptionPlaceholder,
 } from '../../../../shared/payment/subscription'
 import type {
@@ -23,6 +24,7 @@ import {
   getPaymentRecovery,
   getRetainedSubscriptionRecovery,
   PaymentStoreError,
+  type PaymentRecovery,
 } from '../../../utils/store'
 
 function readInput(value: unknown): CreateSubscriptionIntentInput {
@@ -33,11 +35,11 @@ function readInput(value: unknown): CreateSubscriptionIntentInput {
 
   if (
     !input
-    || !(
-      keys.length === 1
-      || (keys.length === 2 && input.newTestCustomer === true)
-    )
-    || keys.some(key => key !== 'planId' && key !== 'newTestCustomer')
+    || keys.length < 1
+    || keys.length > 3
+    || keys.some(key => !['planId', 'integration', 'newTestCustomer'].includes(key))
+    || (input.integration !== undefined && !isSubscriptionIntegration(input.integration))
+    || (input.newTestCustomer !== undefined && input.newTestCustomer !== true)
     || !isSubscriptionPlanId(input.planId)
   ) {
     throw createError({ statusCode: 400, statusMessage: 'PAYMENT_INPUT_INVALID' })
@@ -45,7 +47,26 @@ function readInput(value: unknown): CreateSubscriptionIntentInput {
 
   return Object.freeze({
     planId: input.planId,
+    integration: input.integration ?? 'web-js-sdk',
     ...(input.newTestCustomer === true ? { newTestCustomer: true as const } : {}),
+  })
+}
+
+function existingIntent(recovery: PaymentRecovery): CreateSubscriptionIntentResponse {
+  const integration = recovery.subscription?.initialIntegration
+  if (!integration || recovery.attempt.integration !== integration) {
+    throw new PaymentStoreError('PAYMENT_ATTEMPT_MISMATCH')
+  }
+
+  const claimed = recovery.events.some(item =>
+    item.source === 'server' && item.sourceKey === `create-claim:${recovery.attempt.id}`,
+  )
+  return Object.freeze({
+    orderId: recovery.order.id,
+    integration,
+    create: recovery.subscription?.state === 'pending' && !recovery.subscription.contractId
+      && !recovery.attempt.paymentId && !recovery.attempt.transactionId && !claimed,
+    existing: true,
   })
 }
 
@@ -112,17 +133,14 @@ export default defineEventHandler(async (event): Promise<CreateSubscriptionInten
       }
 
       if (!input.newTestCustomer && previousHasPlan) {
-        return Object.freeze({
-          orderId: previous!.order.id,
-          create: false,
-          existing: true,
-        })
+        return existingIntent(previous!)
       }
 
       if (!input.newTestCustomer && retainedHasPlan) {
         setPaymentRecovery(event, profile.secret, retained!.orderId, retained!.attemptId)
         return Object.freeze({
           orderId: retained!.orderId,
+          integration: retained!.contract.initialIntegration,
           create: false,
           existing: true,
         })
@@ -161,8 +179,8 @@ export default defineEventHandler(async (event): Promise<CreateSubscriptionInten
       const attempt = createAttempt({
         id: attemptId,
         orderId,
-        integration: 'web-js-sdk',
-        method: 'card',
+        integration: input.integration!,
+        method: input.integration === 'checkout' ? 'all' : 'card',
         merchantTxnId: `showcase-${randomUUID()}`,
         createdAt: now,
       })
@@ -171,17 +189,21 @@ export default defineEventHandler(async (event): Promise<CreateSubscriptionInten
         plan,
         initialOrderId: orderId,
         initialAttemptId: attemptId,
+        initialIntegration: input.integration!,
         createdAt: now,
       })
       const record = await createSubscriptionPaymentRecord(order, attempt, customer, contract)
 
       if (!record.created) {
         setPaymentRecovery(event, profile.secret, record.orderId, record.attemptId)
-        return Object.freeze({ orderId: record.orderId, create: false, existing: true })
+        const existing = await getPaymentRecovery(record.orderId, record.attemptId)
+        return existing
+          ? existingIntent(existing)
+          : Object.freeze({ orderId: record.orderId, integration: record.contract.initialIntegration, create: false, existing: true })
       }
 
       setPaymentRecovery(event, profile.secret, orderId, attemptId)
-      return Object.freeze({ orderId, create: true, existing: false })
+      return Object.freeze({ orderId, integration: contract.initialIntegration, create: true, existing: false })
     }
     catch (error) {
       fail(error)

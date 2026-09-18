@@ -5,6 +5,12 @@ export const SUBSCRIPTION_PLAN_IDS = [
 ] as const
 export type SubscriptionPlanId = typeof SUBSCRIPTION_PLAN_IDS[number]
 
+export type SubscriptionIntegration = 'web-js-sdk' | 'checkout'
+
+export function isSubscriptionIntegration(value: unknown): value is SubscriptionIntegration {
+  return value === 'web-js-sdk' || value === 'checkout'
+}
+
 export type SubscriptionFrequencyType = 'D' | 'M' | 'Y'
 
 export interface SubscriptionPlan {
@@ -82,6 +88,7 @@ export interface SubscriptionContract {
   readonly expireDate: string
   readonly initialOrderId: string
   readonly initialAttemptId: string
+  readonly initialIntegration: SubscriptionIntegration
   readonly state: SubscriptionState
   readonly statusSource: SubscriptionStatusSource
   readonly dataStatus: SubscriptionDataStatus
@@ -128,6 +135,7 @@ export function createSubscriptionPlaceholder(input: {
   readonly plan: SubscriptionPlan
   readonly initialOrderId: string
   readonly initialAttemptId: string
+  readonly initialIntegration?: SubscriptionIntegration
   readonly createdAt: string
 }): SubscriptionContract {
   return Object.freeze({
@@ -141,6 +149,7 @@ export function createSubscriptionPlaceholder(input: {
     expireDate: input.plan.expireDate,
     initialOrderId: input.initialOrderId,
     initialAttemptId: input.initialAttemptId,
+    initialIntegration: input.initialIntegration ?? 'web-js-sdk',
     state: 'pending',
     statusSource: 'placeholder',
     dataStatus: '0',

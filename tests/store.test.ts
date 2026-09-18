@@ -11,6 +11,7 @@ import {
   getPaymentQueryContext,
   recordQueryEvent,
   recordWebhookEvent,
+  recordSubscriptionWebhookEvent,
 } from '../server/utils/store'
 import { createEvent } from '../shared/payment/event'
 
@@ -232,6 +233,7 @@ describe('payment persistence contract', () => {
       '../server/db/migrations/0006_payment_method_attribution.sql',
       import.meta.url,
     ), 'utf8')
+    const subscriptionIntegration = await readFile(new URL('../server/db/migrations/0008_subscription_integration.sql', import.meta.url), 'utf8')
     const runner = await readFile(new URL(
       '../scripts/migrate.mjs',
       import.meta.url,
@@ -259,6 +261,8 @@ describe('payment persistence contract', () => {
     expect(subscriptionStatusSource).toContain("WHERE version = '0005_subscription_status_source'")
     expect(subscriptionStatusSource).toContain("VALUES ('0005_subscription_status_source')")
     expect(subscriptionStatusSource).toContain("'placeholder', 'query', 'webhook'")
+    expect(subscriptionIntegration).toContain("initial_integration text NOT NULL DEFAULT 'web-js-sdk'")
+    expect(subscriptionIntegration).toContain("initial_integration IN ('web-js-sdk', 'checkout')")
     expect(paymentMethodAttribution).toContain('actual_wallet text')
     expect(paymentMethodAttribution).toContain('funding_network text')
     expect(paymentMethodAttribution).toContain('attribution_transaction_id text')
@@ -269,5 +273,108 @@ describe('payment persistence contract', () => {
     expect(runner).toContain('readdir(directory)')
     expect(runner).toContain('.sort()')
     expect(sql).not.toMatch(/raw_payload|\bsign\b|\bsecret\b|\bpan\b|\bcvv\b|payment_method_details|\breason\b/i)
+  })
+})
+
+describe('subscription query payment association', () => {
+  beforeEach(() => {
+    vi.stubEnv('DATABASE_URL', 'postgres://mock-only.invalid/test')
+    database.query.mockReset()
+  })
+  afterEach(() => vi.unstubAllEnvs())
+
+  it('persists a first queried Payment ID on both Attempt and long-lived contract', async () => {
+    database.query.mockImplementation(async (sql: string) => ({ rows:
+      sql.includes('SELECT') && sql.includes('payment_attempts') ? [attemptRow({ payment_id: null, transaction_id: null })]
+        : sql.includes('SELECT') && sql.includes('subscription_contracts') ? [{ id: 'local-contract', payment_id: null }]
+          : [],
+    }))
+    const result = await recordQueryEvent('attempt-1', undefined, {
+      merchantTxnId: 'merchant-attempt-1', paymentId: '1000', transactionId: '1001', transactionStatus: 'S', rawStatus: 'S', status: 'succeeded',
+    }, now)
+    expect(result.attempt.paymentId).toBe('1000')
+    expect(database.query.mock.calls.some(([sql, values]) => sql.includes('UPDATE subscription_contracts') && values[0] === 'local-contract' && values[1] === '1000')).toBe(true)
+  })
+
+  it('binds the first Payment ID on a duplicate N query without inserting another event', async () => {
+    const existingEvent = {
+      id: 'query-existing', attempt_id: 'attempt-1', source: 'query', source_key: 'merchant-attempt-1:1001:N:-',
+      status: 'cancelled', raw_status: 'N', transaction_id: '1001', transaction_status: 'N', payment_status: null,
+      conflict: false, occurred_at: now,
+    }
+    database.query.mockImplementation(async (sql: string) => ({ rows:
+      sql.includes('SELECT') && sql.includes('payment_attempts') ? [attemptRow({ payment_id: null, status: 'cancelled', status_source: 'query' })]
+        : sql.includes('SELECT') && sql.includes('subscription_contracts') ? [{ id: 'local-contract', payment_id: null }]
+          : sql.includes('SELECT') && sql.includes('payment_events') ? [existingEvent]
+            : [],
+    }))
+    const result = await recordQueryEvent('attempt-1', undefined, {
+      merchantTxnId: 'merchant-attempt-1', paymentId: '1000', transactionId: '1001', transactionStatus: 'N', rawStatus: 'N', status: 'cancelled',
+    }, now)
+    expect(result).toMatchObject({ duplicate: true, attempt: { paymentId: '1000', status: 'cancelled' }, event: { id: 'query-existing' } })
+    expect(database.query.mock.calls.some(([sql, values]) => sql.includes('UPDATE subscription_contracts') && values[1] === '1000')).toBe(true)
+    expect(database.query.mock.calls.some(([sql, values]) => sql.includes('UPDATE payment_attempts') && values[3] === '1000')).toBe(true)
+    expect(database.query.mock.calls.some(([sql]) => sql.includes('INSERT INTO payment_events'))).toBe(false)
+  })
+
+  it('rejects an existing contract Payment ID mismatch atomically', async () => {
+    database.query.mockImplementation(async (sql: string) => ({ rows:
+      sql.includes('SELECT') && sql.includes('payment_attempts') ? [attemptRow()]
+        : sql.includes('SELECT') && sql.includes('subscription_contracts') ? [{ id: 'local-contract', payment_id: 'other-payment' }]
+          : [],
+    }))
+    await expect(recordQueryEvent('attempt-1', '1000', {
+      merchantTxnId: 'merchant-attempt-1', paymentId: '1000', transactionId: '1001', transactionStatus: 'S', rawStatus: 'S', status: 'succeeded',
+    }, now)).rejects.toMatchObject({ code: 'PAYMENT_ATTEMPT_MISMATCH' })
+    expect(database.query.mock.calls.some(([sql]) => /^\s*UPDATE/.test(sql))).toBe(false)
+  })
+})
+
+describe('subscription cancellation without Payment ID', () => {
+  const fact = {
+    ...cancellation, kind: 'subscription' as const, scenario: 'SUBSCRIPTION_INITIAL' as const,
+    productName: 'Halden Daily Essentials', productAmountMinor: 500, productCurrency: 'USD' as const,
+    dataStatus: '0' as const, subscriptionStatus: 'paymentdue' as const, subscriptionState: 'pending' as const,
+  }
+  function mockContract(integration = 'checkout', transactionId: string | null = '1001') {
+    const row: Record<string, unknown> = {
+      id: 'contract-local', environment: 'sandbox', merchant_no: 'merchant', app_id: 'app', merchant_cust_id: 'customer',
+      plan_id: 'halden-daily-essentials-v1', plan_version: 1, product_name: 'Halden Daily Essentials', initial_amount_minor: 500, currency: 'USD',
+      frequency_type: 'D', frequency_point: 1, expire_date: '2099-12-31', initial_order_id: 'order-1', initial_attempt_id: 'attempt-1', initial_integration: integration,
+      merchant_txn_id: 'merchant-attempt-1', payment_id: null, initial_webhook_transaction_id: null,
+      establishment_state: 'pending', status_source: 'placeholder', data_status: '0', subscription_status: 'paymentdue',
+      contract_id: null, token_id: null, terminal_at: null, cleanup_at: null, created_at: now, updated_at: now,
+    }
+    database.query.mockImplementation(async (sql: string) => {
+      if (sql.includes("SET establishment_state = 'terminal'")) Object.assign(row, { establishment_state: 'terminal', status_source: 'webhook', terminal_at: now })
+      if (sql.includes('SELECT') && sql.includes('payment_attempts')) return { rows: [attemptRow({ integration, payment_id: null, transaction_id: transactionId })] }
+      if (sql.includes('subscription_contracts')) return { rows: [row] }
+      return { rows: [] }
+    })
+  }
+  beforeEach(() => {
+    vi.stubEnv('DATABASE_URL', 'postgres://mock-only.invalid/test')
+    database.query.mockReset()
+    mockContract()
+  })
+  afterEach(() => vi.unstubAllEnvs())
+
+  it('correlates an early signed Checkout cancellation by its immutable merchant transaction and plan', async () => {
+    mockContract('checkout', null)
+    const result = await recordSubscriptionWebhookEvent(fact, null, now)
+    expect(result.attempt).toMatchObject({ status: 'cancelled', transactionId: '1001' })
+    expect(result.attempt).not.toHaveProperty('paymentId')
+    expect(result.contract).toMatchObject({ state: 'terminal', initialIntegration: 'checkout' })
+    expect(result.contract).not.toHaveProperty('tokenId')
+  })
+
+  it.each([
+    ['web-js-sdk', {}], ['checkout', { transactionStatus: 'S' }], ['checkout', { paymentStatus: 'N' }],
+    ['checkout', { transactionId: 'different-transaction' }], ['checkout', { amountMinor: 600 }],
+  ])('rejects unsafe no-ID subscription correlation %s %j', async (integration, override) => {
+    mockContract(integration)
+    await expect(recordSubscriptionWebhookEvent({ ...fact, ...override } as typeof fact, null, now))
+      .rejects.toMatchObject({ code: 'PAYMENT_ATTEMPT_MISMATCH' })
+    expect(database.query.mock.calls.some(([sql]) => sql.includes('INSERT INTO'))).toBe(false)
   })
 })

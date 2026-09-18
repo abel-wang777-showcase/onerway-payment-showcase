@@ -50,7 +50,7 @@ const {
 
 const initialJourney = getJourney(isJourneyId(route.query.journey) ? route.query.journey : 'standard-success')
 const billingMode = shallowRef<'payment' | 'subscription'>(
-  route.query.mode === 'subscription' && initialJourney.integration === 'web-js-sdk' ? 'subscription' : 'payment',
+  route.query.mode === 'subscription' ? 'subscription' : 'payment',
 )
 const subscriptionPlanId = shallowRef<SubscriptionPlanId>(
   isSubscriptionPlanId(route.query.plan) ? route.query.plan : 'halden-daily-essentials-v1',
@@ -58,7 +58,7 @@ const subscriptionPlanId = shallowRef<SubscriptionPlanId>(
 const subscriptionPlan = computed(() => getSubscriptionPlan(subscriptionPlanId.value))
 const billingItems = computed<RadioGroupItem[]>(() => [
   { value: 'payment', label: 'One-time payment', description: 'Run a payment simulation or a real Sandbox journey.' },
-  { value: 'subscription', label: 'Subscription', description: 'Create one merchant-managed daily Sandbox subscription with Web JS SDK.', disabled: selection.value.integration !== 'web-js-sdk' },
+  { value: 'subscription', label: 'Subscription', description: 'Create one merchant-managed daily Sandbox subscription with the selected integration.', disabled: selection.value.integration === 'direct-api' },
 ])
 
 function readRoutePaymentMethod(value: unknown): PaymentMethodId {
@@ -148,7 +148,7 @@ const methods = computed<RadioGroupItem[]>(() => PAYMENT_METHODS.map((method) =>
 }))
 
 watch(() => selection.value.integration, (integration) => {
-  if (integration !== 'web-js-sdk') billingMode.value = 'payment'
+  if (integration === 'direct-api') billingMode.value = 'payment'
   selection.value.method = integration === 'checkout' ? 'all' : 'card'
   journeyId.value = integration === 'checkout' ? 'hosted-checkout' : 'standard-success'
 })
@@ -183,7 +183,7 @@ const passportFacts = computed(() => [
   {
     label: billingMode.value === 'subscription' ? 'Initial checkout' : 'Expected method',
     value: billingMode.value === 'subscription'
-      ? 'SDK available methods'
+      ? selection.value.integration === 'checkout' ? 'Choose on Checkout' : 'SDK available methods'
       : methodLabels[selection.value.method],
   },
   { label: 'Country / currency', value: `${journey.value.country} / ${journey.value.currency}` },
@@ -213,6 +213,7 @@ const canonicalSandboxHref = computed(() => {
   if (billingMode.value === 'subscription') {
     url.searchParams.set('mode', 'subscription')
     url.searchParams.set('plan', subscriptionPlanId.value)
+    url.searchParams.set('journey', journeyId.value)
   }
   else {
     url.searchParams.set('journey', journeyId.value)
@@ -240,7 +241,7 @@ const canStartSimulation = computed(() =>
 )
 const canStartSdk = computed(() =>
   profile.value?.profile === 'sandbox'
-  && (billingMode.value === 'payment' && journey.value.integration === 'checkout' || profile.value.sdk?.release === 'v4/latest')
+  && (journey.value.integration === 'checkout' || profile.value.sdk?.release === 'v4/latest')
   && (
     restoringSdk.value
     || billingMode.value === 'subscription'
@@ -323,7 +324,7 @@ async function startSeparateSandboxOrder(): Promise<void> {
 
 async function startSandboxSubscription(): Promise<void> {
   if (canStartSdk.value && !launching.value && !canonicalSandboxHref.value) {
-    await startSubscription(subscriptionPlanId.value)
+    await startSubscription(subscriptionPlanId.value, false, selection.value.integration === 'checkout' ? 'checkout' : 'web-js-sdk')
   }
 }
 
@@ -331,7 +332,7 @@ async function startNewSandboxSubscriptionCustomer(): Promise<void> {
   if (canStartSdk.value && !launching.value && !canonicalSandboxHref.value) {
     startingNewSubscriptionCustomer.value = true
     try {
-      await startSubscription(subscriptionPlanId.value, true)
+      await startSubscription(subscriptionPlanId.value, true, selection.value.integration === 'checkout' ? 'checkout' : 'web-js-sdk')
     }
     finally {
       startingNewSubscriptionCustomer.value = false
@@ -342,7 +343,7 @@ async function startNewSandboxSubscriptionCustomer(): Promise<void> {
 const resumableSubscription = computed(() => {
   const orderId = sdkSession.value?.order.id ?? retainedSubscriptionOrderId.value
 
-  return recoveredSubscription.value && orderId
+  return recoveredSubscription.value && recoveredSubscription.value.state !== 'terminal' && orderId
     ? {
         orderId,
         state: recoveredSubscription.value.state,
@@ -497,6 +498,12 @@ watch(() => selection.value.method, (method) => {
             @start="startSandboxSubscription"
             @start-new-customer="startNewSandboxSubscriptionCustomer"
           />
+          <p
+            v-if="billingMode === 'subscription' && selection.integration === 'checkout'"
+            class="mt-3 text-xs leading-relaxed text-toned"
+          >
+            Conditional · Select Card on Checkout for this initial subscription demonstration. Merchant enablement and Sandbox verification are required. This showcase only completes the first payment and does not schedule later charges.
+          </p>
           <p
             v-if="canonicalSandboxHref"
             class="mt-3 text-xs leading-relaxed text-toned"

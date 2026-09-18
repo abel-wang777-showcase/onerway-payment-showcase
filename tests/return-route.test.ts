@@ -38,6 +38,8 @@ vi.mock('../server/utils/recovery', () => ({
 }))
 
 vi.mock('../server/utils/store', () => ({
+  subscriptionCreationRejectionKey: (attemptId: string) => `subscription-create-contract-rejected:${attemptId}`,
+  subscriptionCreationRecoveryAllowedKey: (attemptId: string) => `subscription-create-recovery-allowed:${attemptId}`,
   PaymentStoreError: class PaymentStoreError extends Error {},
   getPaymentRecovery: mocks.getPaymentRecovery,
   getSubscriptionForAttempt: mocks.getSubscriptionForAttempt,

@@ -387,7 +387,7 @@ export function readSubscriptionPaymentWebhook(
   }
 
   const transactionId = readText(body, 'transactionId', /^\d{1,20}$/)!
-  const paymentId = readText(body, 'paymentId', /^\d{1,20}$/)!
+  const paymentId = readText(body, 'paymentId', /^\d{1,20}$/, true)
   const merchantTxnId = readText(body, 'merchantTxnId', /^[A-Za-z0-9_-]{1,64}$/)!
   const amount = readText(body, 'orderAmount', /^(?:0|[1-9]\d{0,13})\.\d{2}$/)!
   const currency = readText(body, 'orderCurrency', /^USD$/) as 'USD'
@@ -416,7 +416,7 @@ export function readSubscriptionPaymentWebhook(
     kind: 'subscription',
     scenario: 'SUBSCRIPTION_INITIAL',
     transactionId,
-    paymentId,
+    ...(paymentId ? { paymentId } : {}),
     merchantTxnId,
     amountMinor: readMinorAmount(amount),
     currency,

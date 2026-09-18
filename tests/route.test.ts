@@ -81,11 +81,12 @@ describe('application routes', () => {
     }
   })
 
-  it('strips provider return parameters before rendering Nuxt hydration data', async () => {
-    const path = '/halden/return/HLD-SANDBOX?providerStatus=S&session=discarded-fixture'
+  it.each(['/halden/return/HLD-SANDBOX', '/halden/subscription/return'])(
+    'strips provider return parameters before rendering Nuxt hydration data at %s', async (returnPath) => {
+    const path = `${returnPath}?providerStatus=S&session=discarded-fixture`
     const redirect = await fetch(path, { redirect: 'manual' })
     expect(redirect.status).toBe(303)
-    expect(redirect.headers.get('location')).toBe('/halden/return/HLD-SANDBOX')
+    expect(redirect.headers.get('location')).toBe(returnPath)
     expect(redirect.headers.get('referrer-policy')).toBe('no-referrer')
     expect(redirect.headers.get('cache-control')).toBe('no-store')
 

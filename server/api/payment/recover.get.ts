@@ -16,8 +16,8 @@ import {
   GatewayError,
   queryPayment,
   queryPaymentCreation,
-  querySubscription,
   queryCheckoutPayment,
+  type QueriedPayment,
 } from '../../utils/gateway'
 import { withPaymentLimit } from '../../utils/limit'
 import { requireServerProfile } from '../../utils/profile'
@@ -28,11 +28,10 @@ import {
   getRetainedSubscriptionRecovery,
   paymentRetryRejectionKey,
   PaymentStoreError,
-  recordSubscriptionQueryDetails,
-  subscriptionCreationRejectionKey,
-  subscriptionCreationRecoveryAllowedKey,
+  recordQueryEvent,
 } from '../../utils/store'
 import { isMerchantCustomerInScope } from '../../utils/customer'
+import { refreshSubscription, subscriptionCreationRecoveryError } from '../../utils/subscription'
 
 function readOrderId(value: unknown): string {
   if (typeof value !== 'string' || !/^[A-Za-z0-9-]{1,128}$/.test(value)) {
@@ -94,6 +93,7 @@ export default defineEventHandler(async (event): Promise<
 
   return withPaymentLimit(event, 'query', async () => {
     try {
+      let queriedSubscriptionPayment: QueriedPayment | undefined
       let recovery = await getPaymentRecovery(ref.orderId, ref.attemptId)
 
       if (!recovery) {
@@ -107,50 +107,36 @@ export default defineEventHandler(async (event): Promise<
           throw createError({ statusCode: 404, statusMessage: 'PAYMENT_RECOVERY_NOT_FOUND' })
         }
 
-        const payment = await queryPayment(profile, retained.paymentId)
-        const contract = retained.contract.contractId
-          ? await recordSubscriptionQueryDetails(
-              retained.attemptId,
-              await querySubscription(profile, retained.contract.contractId),
-              new Date().toISOString(),
-            )
-          : retained.contract
+        const payment = retained.contract.initialIntegration === 'checkout'
+          ? await queryCheckoutPayment(profile, {
+              subscription: true,
+              merchantTxnId: retained.merchantTxnId,
+              amountMinor: retained.contract.amount.minor,
+              currency: retained.contract.amount.currency,
+              paymentId: retained.paymentId,
+            })
+          : await queryPayment(profile, retained.paymentId)
+        const contract = await refreshSubscription(profile, retained.contract, payment, new Date().toISOString())
 
         return Object.freeze({
           retained: true,
+          integration: contract.initialIntegration,
           orderId: retained.orderId,
           paymentStatus: payment.status,
           subscription: toSubscriptionSummary(contract),
         })
       }
 
-      if (!recovery.attempt.paymentId) {
-        if (
-          recovery.subscription
-          && recovery.events.some(item =>
-            item.source === 'server'
-            && item.sourceKey === subscriptionCreationRejectionKey(recovery!.attempt.id),
-          )
-        ) {
-          throw createError({
-            statusCode: 409,
-            statusMessage: 'SUBSCRIPTION_CREATE_CONTRACT_REJECTED',
-          })
-        }
+      const recoveryError = subscriptionCreationRecoveryError(recovery)
+      const knownCheckoutCancellation = recovery.attempt.integration === 'checkout'
+        && recovery.attempt.transactionId && recovery.attempt.status === 'cancelled'
+      // A persisted cancellation may be restored without discovering a Payment.
+      // It never overrides an explicit runtime-contract rejection.
+      if (recoveryError && !(recoveryError === 'SUBSCRIPTION_CREATE_RECOVERY_NOT_ALLOWED' && knownCheckoutCancellation)) {
+        throw createError({ statusCode: 409, statusMessage: recoveryError })
+      }
 
-        if (
-          recovery.subscription
-          && !recovery.events.some(item =>
-            item.source === 'server'
-            && item.sourceKey === subscriptionCreationRecoveryAllowedKey(recovery!.attempt.id),
-          )
-        ) {
-          throw createError({
-            statusCode: 409,
-            statusMessage: 'SUBSCRIPTION_CREATE_RECOVERY_NOT_ALLOWED',
-          })
-        }
-
+      if (!recovery.attempt.paymentId && !knownCheckoutCancellation) {
         const retryOf = recovery.attempt.retryOf
         const rejected = recovery.events.some(item =>
           item.source === 'server'
@@ -194,6 +180,7 @@ export default defineEventHandler(async (event): Promise<
         const checkout = recovery.attempt.integration === 'checkout'
         const found = checkout
           ? await queryCheckoutPayment(profile, {
+              ...(recovery.subscription ? { subscription: true } : {}),
               merchantTxnId,
               amountMinor: recovery.order.amount.minor,
               currency: recovery.order.amount.currency,
@@ -205,6 +192,7 @@ export default defineEventHandler(async (event): Promise<
               recovery.order.amount.minor,
               recovery.order.amount.currency,
             )
+        if (checkout && recovery.subscription) queriedSubscriptionPayment = found
         const occurredAt = new Date().toISOString()
 
         await completePaymentRecord(
@@ -229,10 +217,26 @@ export default defineEventHandler(async (event): Promise<
         recovery = await getPaymentRecovery(ref.orderId, ref.attemptId)
       }
 
-      const paymentId = recovery?.attempt.paymentId
+      let paymentId = recovery?.attempt.paymentId
 
       if (!recovery || (!paymentId && !(recovery.attempt.integration === 'checkout' && recovery.attempt.transactionId && recovery.attempt.status === 'cancelled'))) {
         throw new PaymentStoreError('PAYMENT_ATTEMPT_MISMATCH')
+      }
+
+      if (recovery.subscription?.initialIntegration === 'checkout' && !recoveryError) {
+        const queried = queriedSubscriptionPayment ?? await queryCheckoutPayment(profile, {
+          subscription: true,
+          merchantTxnId: recovery.attempt.merchantTxnId!,
+          amountMinor: recovery.order.amount.minor,
+          currency: recovery.order.amount.currency,
+          transactionId: recovery.attempt.transactionId,
+          paymentId,
+        })
+        await recordQueryEvent(recovery.attempt.id, paymentId, queried, new Date().toISOString())
+        await refreshSubscription(profile, recovery.subscription, queried, new Date().toISOString())
+        recovery = (await getPaymentRecovery(ref.orderId, ref.attemptId))!
+        if (!recovery) throw new PaymentStoreError('PAYMENT_ATTEMPT_NOT_FOUND')
+        paymentId = recovery.attempt.paymentId
       }
 
       const expiresAt = createQueryExpiry()

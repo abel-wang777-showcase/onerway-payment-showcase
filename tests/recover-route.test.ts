@@ -10,8 +10,10 @@ const mocks = vi.hoisted(() => ({
   completePaymentRecord: vi.fn(),
   getPaymentRecovery: vi.fn(),
   getRetainedSubscriptionRecovery: vi.fn(),
+  getSubscriptionForAttempt: vi.fn(),
   readPaymentRecovery: vi.fn(),
   recordSubscriptionQueryDetails: vi.fn(),
+  recordQueryEvent: vi.fn(),
   requireServerProfile: vi.fn(),
   setPaymentRecovery: vi.fn(),
 }))
@@ -43,6 +45,7 @@ vi.mock('../server/utils/store', () => ({
   completePaymentRecord: mocks.completePaymentRecord,
   getPaymentRecovery: mocks.getPaymentRecovery,
   getRetainedSubscriptionRecovery: mocks.getRetainedSubscriptionRecovery,
+  getSubscriptionForAttempt: mocks.getSubscriptionForAttempt,
   paymentRetryRejectionKey: (attemptId: string) => `retry-create-rejected:${attemptId}`,
   subscriptionCreationRejectionKey: (attemptId: string) => `subscription-create-contract-rejected:${attemptId}`,
   subscriptionCreationRecoveryAllowedKey: (attemptId: string) => `subscription-create-recovery-allowed:${attemptId}`,
@@ -55,6 +58,7 @@ vi.mock('../server/utils/store', () => ({
     }
   },
   recordSubscriptionQueryDetails: mocks.recordSubscriptionQueryDetails,
+  recordQueryEvent: mocks.recordQueryEvent,
 }))
 
 function recovery(submissionStartedAt?: string) {
@@ -112,6 +116,8 @@ describe('payment recovery route', () => {
         merchantCustId: 'Private_Customer-9',
       },
       contract: {
+        initialAttemptId: 'attempt-1',
+        initialIntegration: 'web-js-sdk',
         planId: 'halden-daily-essentials-v1',
         productName: 'Halden Daily Essentials',
         amount: { minor: 500, currency: 'USD' },
@@ -162,13 +168,14 @@ describe('payment recovery route', () => {
     )
   })
 
-  it('does not recover a subscription after a durable create contract rejection', async () => {
+  it.each([undefined, '1000'])('does not recover a subscription after a durable create rejection, paymentId=%s', async (paymentId) => {
     mocks.getPaymentRecovery.mockResolvedValue({
       order: { id: 'order-1', amount: { minor: 500, currency: 'USD' } },
       attempt: {
         id: 'attempt-1',
         orderId: 'order-1',
         status: 'created',
+        ...(paymentId ? { paymentId } : {}),
         merchantTxnId: 'showcase-subscription-1',
       },
       attempts: [],
@@ -373,4 +380,53 @@ it('recovers an unknown Checkout creation with transaction query without ever re
   expect(mocks.queryPaymentCreation).not.toHaveBeenCalled()
   expect(result.paymentId).toBeNull()
   expect(result.query).toBeNull()
+})
+
+it('recovers retained Checkout through transaction query and keeps contract discovery private', async () => {
+  const contract = {
+    initialAttemptId: 'attempt-1', initialIntegration: 'checkout',
+    planId: 'halden-daily-essentials-v1', productName: 'Halden Daily Essentials',
+    amount: { minor: 500, currency: 'USD' }, frequencyType: 'D', frequencyPoint: 1, expireDate: '2099-12-31', state: 'pending', statusSource: 'placeholder',
+  }
+  mocks.requireServerProfile.mockReturnValue({ profile: 'sandbox', secret: 'secret', merchantNo: 'merchant', appId: 'app' })
+  mocks.getPaymentRecovery.mockResolvedValue(null)
+  mocks.getRetainedSubscriptionRecovery.mockResolvedValue({
+    orderId: 'order-1', attemptId: 'attempt-1', paymentId: '123', merchantTxnId: 'txn-private', contract,
+    customer: { environment: 'sandbox', merchantNo: 'merchant', appId: 'app', merchantCustId: 'customer-private' },
+  })
+  mocks.queryCheckoutPayment.mockResolvedValue({ rawStatus: 'S', status: 'succeeded', subscription: { contractId: 'provider-contract', tokenId: 'provider-token' } })
+  mocks.querySubscription.mockResolvedValue({ contractId: 'provider-contract', tokenId: 'provider-token', state: 'active' })
+  mocks.recordSubscriptionQueryDetails.mockResolvedValue({ ...contract, state: 'active', statusSource: 'query' })
+  const { default: handler } = await import('../server/api/payment/recover.get')
+  const result = await (handler as (event: unknown) => Promise<Record<string, unknown>>)({})
+  expect(result).toMatchObject({ retained: true, integration: 'checkout', paymentStatus: 'succeeded', subscription: { state: 'active' } })
+  expect(mocks.queryCheckoutPayment).toHaveBeenCalledWith(expect.anything(), {
+    subscription: true, merchantTxnId: 'txn-private', amountMinor: 500, currency: 'USD', paymentId: '123',
+  })
+  expect(mocks.queryPayment).not.toHaveBeenCalled()
+  expect(JSON.stringify(result)).not.toMatch(/provider-contract|provider-token|txn-private|customer-private/)
+})
+
+it.each([false, true])('restores an existing no-ID subscription cancellation without permitting discovery, rejection=%s', async (rejected) => {
+  const current = recovery()
+  const attempt = { id: 'attempt-1', orderId: 'order-1', integration: 'checkout', merchantTxnId: 'merchant-txn-1', transactionId: '222', status: 'cancelled' }
+  mocks.getPaymentRecovery.mockResolvedValue({
+    ...current, attempt, attempts: [attempt],
+    events: rejected ? [{ source: 'server', sourceKey: 'subscription-create-contract-rejected:attempt-1' }] : [],
+    subscription: {
+      initialIntegration: 'checkout', initialAttemptId: 'attempt-1', planId: 'halden-daily-essentials-v1', productName: 'Halden Daily Essentials',
+      amount: { minor: 500, currency: 'USD' }, frequencyType: 'D', frequencyPoint: 1, expireDate: '2099-12-31', state: 'terminal', statusSource: 'webhook',
+    },
+  })
+  const { default: handler } = await import('../server/api/payment/recover.get')
+  const result = (handler as (event: unknown) => Promise<Record<string, unknown>>)({})
+  if (rejected) {
+    await expect(result).rejects.toMatchObject({ statusMessage: 'SUBSCRIPTION_CREATE_CONTRACT_REJECTED' })
+  }
+  else {
+    await expect(result).resolves.toMatchObject({ paymentId: null, query: null, subscription: { state: 'terminal' } })
+  }
+  expect(mocks.queryCheckoutPayment).not.toHaveBeenCalled()
+  expect(mocks.queryPaymentCreation).not.toHaveBeenCalled()
+  expect(mocks.recordQueryEvent).not.toHaveBeenCalled()
 })

@@ -63,7 +63,7 @@ async function deleteTestOrder(id: string): Promise<void> {
   }
 }
 
-function recoveryFixture(label: string) {
+function recoveryFixture(label: string, integration: 'web-js-sdk' | 'checkout' = 'web-js-sdk') {
   const suffix = randomUUID().replaceAll('-', '').slice(0, 12)
   const orderId = `HLD-TEST-${suffix}`
   const attemptId = `${orderId}-attempt-000`
@@ -84,8 +84,8 @@ function recoveryFixture(label: string) {
   const attempt = createAttempt({
     id: attemptId,
     orderId,
-    integration: 'web-js-sdk',
-    method: 'card',
+    integration,
+    method: integration === 'checkout' ? 'all' : 'card',
     merchantTxnId: `showcase-test-${suffix}`,
     createdAt: now,
   })
@@ -121,16 +121,17 @@ async function insertRecoveryAttempt(
 }
 
 describe('Neon payment persistence integration', () => {
-  it('serializes duplicate subscriptions and preserves contract ownership past Payment cleanup', async () => {
+  it.each(['web-js-sdk', 'checkout'] as const)('serializes %s subscriptions and preserves contract ownership past Payment cleanup', async (integration) => {
     const plan = getSubscriptionPlan('halden-daily-essentials-v1')
     const sharedCustomer = customer()
-    const first = recoveryFixture('Subscription first')
-    const second = recoveryFixture('Subscription concurrent')
-    const third = recoveryFixture('Subscription after payment cleanup')
+    const first = recoveryFixture('Subscription first', integration)
+    const second = recoveryFixture('Subscription concurrent', integration)
+    const third = recoveryFixture('Subscription after payment cleanup', integration)
     const firstContract = createSubscriptionPlaceholder({
       id: `subscription-${randomUUID()}`,
       plan,
       initialOrderId: first.orderId,
+      initialIntegration: integration,
       initialAttemptId: first.attemptId,
       createdAt: first.now,
     })
@@ -138,6 +139,7 @@ describe('Neon payment persistence integration', () => {
       id: `subscription-${randomUUID()}`,
       plan,
       initialOrderId: second.orderId,
+      initialIntegration: integration,
       initialAttemptId: second.attemptId,
       createdAt: second.now,
     })
@@ -145,6 +147,7 @@ describe('Neon payment persistence integration', () => {
       id: `subscription-${randomUUID()}`,
       plan,
       initialOrderId: third.orderId,
+      initialIntegration: integration,
       initialAttemptId: third.attemptId,
       createdAt: third.now,
     })
@@ -168,16 +171,30 @@ describe('Neon payment persistence integration', () => {
       const paymentId = `9084${Date.now()}`.slice(0, 20)
       const createTransactionId = `9184${Date.now()}`.slice(0, 20)
       const webhookTransactionId = `9284${Date.now()}`.slice(0, 20)
-      await completePaymentRecord(created.attemptId, paymentId, createTransactionId, createEvent({
-        id: randomUUID(),
-        attemptId: created.attemptId,
-        source: 'server',
-        sourceKey: `create:${created.attemptId}`,
-        status: 'processing',
-        rawStatus: 'U',
-        transactionId: createTransactionId,
-        occurredAt: created.now,
-      }))
+      if (integration === 'checkout') {
+        await recordQueryEvent(created.attemptId, undefined, {
+          merchantTxnId: created.attempt.merchantTxnId,
+          paymentId,
+          transactionId: createTransactionId,
+          rawStatus: 'U',
+          transactionStatus: 'U',
+          status: 'processing',
+        }, created.now)
+        expect(await getRetainedSubscriptionRecovery(created.orderId, created.attemptId))
+          .toMatchObject({ paymentId, contract: { initialIntegration: 'checkout' } })
+      }
+      else {
+        await completePaymentRecord(created.attemptId, paymentId, createTransactionId, createEvent({
+          id: randomUUID(),
+          attemptId: created.attemptId,
+          source: 'server',
+          sourceKey: `create:${created.attemptId}`,
+          status: 'processing',
+          rawStatus: 'U',
+          transactionId: createTransactionId,
+          occurredAt: created.now,
+        }))
+      }
 
       const tokenId = 'opaque.subscription-token/value'
       const details = {
@@ -244,7 +261,8 @@ describe('Neon payment persistence integration', () => {
           attemptId: created.attemptId,
           paymentId,
           customer: sharedCustomer,
-          contract: { state: 'active', tokenId },
+          merchantTxnId: created.attempt.merchantTxnId,
+          contract: { state: 'active', tokenId, initialIntegration: integration },
         })
       expect(await getSubscriptionForAttempt(created.attemptId)).toMatchObject({
         id: createdResult.contract.id,

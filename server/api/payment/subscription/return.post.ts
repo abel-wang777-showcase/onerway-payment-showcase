@@ -1,6 +1,7 @@
 import type { ObservePaymentReturnResponse } from '../../../../shared/payment/sdk'
-import { GatewayError, queryPayment, querySubscription } from '../../../utils/gateway'
+import { GatewayError, queryCheckoutPayment, queryPayment } from '../../../utils/gateway'
 import { isMerchantCustomerInScope } from '../../../utils/customer'
+import { refreshSubscription, subscriptionCreationRecoveryError } from '../../../utils/subscription'
 import { withPaymentLimit } from '../../../utils/limit'
 import { requireServerProfile } from '../../../utils/profile'
 import { readPaymentRecovery } from '../../../utils/recovery'
@@ -11,7 +12,6 @@ import {
   PaymentStoreError,
   recordQueryEvent,
   recordReturnEvent,
-  recordSubscriptionQueryDetails,
 } from '../../../utils/store'
 
 function fail(error: unknown): never {
@@ -62,15 +62,16 @@ export default defineEventHandler(async (event): Promise<ObservePaymentReturnRes
           throw createError({ statusCode: 404, statusMessage: 'PAYMENT_RECOVERY_NOT_FOUND' })
         }
 
-        await queryPayment(profile, retained.paymentId)
-
-        if (retained.contract.contractId) {
-          await recordSubscriptionQueryDetails(
-            retained.attemptId,
-            await querySubscription(profile, retained.contract.contractId),
-            new Date().toISOString(),
-          )
-        }
+        const payment = retained.contract.initialIntegration === 'checkout'
+          ? await queryCheckoutPayment(profile, {
+              subscription: true,
+              merchantTxnId: retained.merchantTxnId,
+              amountMinor: retained.contract.amount.minor,
+              currency: retained.contract.amount.currency,
+              paymentId: retained.paymentId,
+            })
+          : await queryPayment(profile, retained.paymentId)
+        await refreshSubscription(profile, retained.contract, payment, new Date().toISOString())
 
         return Object.freeze({ duplicate: false })
       }
@@ -81,26 +82,32 @@ export default defineEventHandler(async (event): Promise<ObservePaymentReturnRes
 
       const paymentId = recovery.attempt.paymentId
 
-      if (!paymentId) {
+      if (!paymentId && recovery.attempt.integration !== 'checkout') {
         throw createError({ statusCode: 409, statusMessage: 'PAYMENT_RECOVERY_PENDING' })
       }
 
+      const recoveryError = subscriptionCreationRecoveryError(recovery)
+      if (recoveryError) {
+        throw createError({ statusCode: 409, statusMessage: recoveryError })
+      }
+
       const returned = await recordReturnEvent(recovery.attempt.id, new Date().toISOString())
-      await recordQueryEvent(
-        recovery.attempt.id,
-        paymentId,
-        await queryPayment(profile, paymentId),
-        new Date().toISOString(),
-      )
+      const payment = recovery.attempt.integration === 'checkout'
+        ? await queryCheckoutPayment(profile, {
+            subscription: true,
+            merchantTxnId: recovery.attempt.merchantTxnId!,
+            amountMinor: recovery.order.amount.minor,
+            currency: recovery.order.amount.currency,
+            transactionId: recovery.attempt.transactionId,
+            paymentId,
+          })
+        : await queryPayment(profile, paymentId!)
+      await recordQueryEvent(recovery.attempt.id, paymentId, payment, new Date().toISOString())
 
       const contract = await getSubscriptionForAttempt(recovery.attempt.id)
 
-      if (contract?.contractId) {
-        await recordSubscriptionQueryDetails(
-          recovery.attempt.id,
-          await querySubscription(profile, contract.contractId),
-          new Date().toISOString(),
-        )
+      if (contract) {
+        await refreshSubscription(profile, contract, payment, new Date().toISOString())
       }
 
       return Object.freeze({ duplicate: returned.duplicate })

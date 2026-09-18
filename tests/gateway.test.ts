@@ -656,3 +656,14 @@ it('fails closed before sending a Checkout query with a missing merchant transac
     fetch.mockRestore()
   }
 })
+
+it('discovers only bounded subscription references after exact Checkout transaction correlation', () => {
+  const response = checkoutQuery({ contractId: 'contract-1', tokenId: 'opaque.subscription/token' })
+  expect(readCheckoutQueryResponse(response, profile.merchantNo, { ...checkoutContext, subscription: true }))
+    .toMatchObject({ status: 'succeeded', subscription: { contractId: 'contract-1', tokenId: 'opaque.subscription/token' } })
+  expect(readCheckoutQueryResponse(response, profile.merchantNo, checkoutContext)).not.toHaveProperty('subscription')
+  expect(() => readCheckoutQueryResponse(checkoutQuery({ contractId: 'bad contract' }), profile.merchantNo, { ...checkoutContext, subscription: true }))
+    .toThrow('PAYMENT_QUERY_RESPONSE_INVALID')
+  expect(() => readCheckoutQueryResponse(checkoutQuery({ tokenId: 'orphan-token' }), profile.merchantNo, { ...checkoutContext, subscription: true }))
+    .toThrow('PAYMENT_QUERY_RESPONSE_INVALID')
+})

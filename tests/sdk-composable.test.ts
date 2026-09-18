@@ -2086,7 +2086,7 @@ describe('SDK composable lifecycle', () => {
 
     expect(fetch).toHaveBeenNthCalledWith(1, '/api/payment/subscription/intent', {
       method: 'POST',
-      body: { planId: 'halden-daily-essentials-v1' },
+      body: { planId: 'halden-daily-essentials-v1', integration: 'web-js-sdk' },
     })
     expect(fetch).toHaveBeenNthCalledWith(2, '/api/payment/recover', {
       query: { orderId: 'order-1' },
@@ -2149,7 +2149,7 @@ describe('SDK composable lifecycle', () => {
       statusSource: 'placeholder' as const,
     }
     const fetch = vi.fn()
-      .mockResolvedValueOnce({ orderId: 'order-1', create: true, existing: false })
+      .mockResolvedValueOnce({ orderId: 'order-1', integration: 'web-js-sdk', create: true, existing: false })
       .mockResolvedValueOnce({ ...created(), subscription })
     const navigate = vi.fn()
 
@@ -2169,6 +2169,7 @@ describe('SDK composable lifecycle', () => {
       method: 'POST',
       body: {
         planId: 'halden-daily-essentials-v1',
+        integration: 'web-js-sdk',
         newTestCustomer: true,
       },
     })
@@ -2255,5 +2256,47 @@ describe('Hosted Checkout through the shared payment session', () => {
     await payment.verify()
     await payment.retry()
     expect(fetch).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('Hosted initial subscription', () => {
+  it.each(['checkout', 'web-js-sdk'] as const)('uses the persisted Checkout integration when the selected entry is %s', async (selectedIntegration) => {
+    const response = created()
+    const attempt = { ...response.attempt, integration: 'checkout' as const, method: 'all' as const }
+    const subscription = {
+      planId: 'halden-daily-essentials-v1' as const,
+      productName: 'Halden Daily Essentials', amount: { minor: 500, currency: 'USD' as const },
+      frequencyType: 'D' as const, frequencyPoint: 1, expireDate: '2099-12-31',
+      state: 'pending' as const, statusSource: 'placeholder' as const,
+    }
+    const redirectUrl = 'https://sandbox-checkout.onerway.com/aggregate?key=subscription-fixture'
+    const state = new Map<string, { value: unknown }>()
+    const fetch = vi.fn()
+      .mockResolvedValueOnce({ orderId: 'order-1', create: true, existing: true, integration: 'checkout' })
+      .mockResolvedValueOnce({ ...response, attempt, attempts: [attempt], redirectUrl, subscription })
+    const navigate = vi.fn()
+    stubState(state)
+    vi.stubGlobal('onScopeDispose', vi.fn())
+    vi.stubGlobal('$fetch', fetch)
+    vi.stubGlobal('navigateTo', navigate)
+    vi.stubGlobal('navigator', browserNavigator())
+    // No screen/document/browser-data fixture: Hosted create must not collect it.
+    const { useSdk } = await import('../app/composables/useSdk')
+    const payment = useSdk()
+    await payment.startSubscription('halden-daily-essentials-v1', false, selectedIntegration)
+    expect(fetch).toHaveBeenNthCalledWith(1, '/api/payment/subscription/intent', {
+      method: 'POST', body: { planId: 'halden-daily-essentials-v1', integration: selectedIntegration },
+    })
+    expect(fetch).toHaveBeenNthCalledWith(2, '/api/payment/subscription/create', { method: 'POST', body: {} })
+    expect(navigate).toHaveBeenCalledWith('/halden/hosted/order-1')
+    expect(payment.subscription.value).toEqual(subscription)
+    expect(JSON.stringify(payment.session.value)).not.toContain('subscription-fixture')
+    expect(payment.canOpenCheckout.value).toBe(true)
+    await payment.openCheckout()
+    expect(navigate).toHaveBeenLastCalledWith(redirectUrl, { external: true })
+    expect(payment.canOpenCheckout.value).toBe(false)
+    await payment.openCheckout()
+    expect(fetch).toHaveBeenCalledTimes(2)
+    expect(navigate).toHaveBeenCalledTimes(2)
   })
 })
