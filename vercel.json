@@ -2,7 +2,8 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "git": {
     "deploymentEnabled": {
-      "abel/issue-10-checkout-subscription": false
+      "abel/issue-10-checkout-subscription": false,
+      "abel/issue-11-checkout-authorization": false
     }
   },
   "buildCommand": "pnpm build:vercel",

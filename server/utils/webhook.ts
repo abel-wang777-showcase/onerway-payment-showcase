@@ -2,6 +2,11 @@ import { createHash, timingSafeEqual } from 'node:crypto'
 import { mapWebhookStatus } from '../../shared/payment/merge'
 import type { PaymentStatus } from '../../shared/payment/attempt'
 import {
+  mapAuthorizationStatus,
+  type AuthorizationFact,
+  type AuthorizationProjection,
+} from '../../shared/payment/authorization'
+import {
   projectSubscriptionState,
   SUBSCRIPTION_DATA_STATUSES,
   SUBSCRIPTION_STATUSES,
@@ -49,6 +54,10 @@ export interface SubscriptionPaymentWebhook extends PaymentWebhook {
   readonly subscriptionState: SubscriptionState
 }
 
+export interface AuthorizationWebhook extends AuthorizationFact, AuthorizationProjection {
+  readonly kind: 'authorization'
+}
+
 export type WebhookErrorCode
   = | 'PAYMENT_WEBHOOK_BODY_INVALID'
     | 'PAYMENT_WEBHOOK_SIGNATURE_INVALID'
@@ -85,6 +94,7 @@ type WebhookDiagnosticCode
     | 'S08' // Opaque subscription text.
     | 'S09' // Subscription product structure.
     | 'S10' // Subscription state/identifier consistency.
+    | 'A01' // Unconfirmed authorization status combination.
 
 export class WebhookError extends Error {
   readonly code: WebhookErrorCode
@@ -432,5 +442,60 @@ export function readSubscriptionPaymentWebhook(
     dataStatus,
     subscriptionStatus,
     subscriptionState: projectSubscriptionState(dataStatus, subscriptionStatus),
+  })
+}
+
+export function readAuthorizationWebhook(
+  body: Record<string, unknown>,
+  secret: string,
+  merchantNo: string,
+  signatureHeader: string | undefined,
+): AuthorizationWebhook {
+  if (!verifyWebhookSignature(body, secret, signatureHeader)) {
+    throw new WebhookError('PAYMENT_WEBHOOK_SIGNATURE_INVALID')
+  }
+
+  if (body.notifyType !== 'TXN') {
+    throw new WebhookError('PAYMENT_WEBHOOK_FIELDS_INVALID', 'E01')
+  }
+
+  if (!['AUTH', 'CAPTURE', 'VOID'].includes(body.txnType as string)) {
+    throw new WebhookError('PAYMENT_WEBHOOK_FIELDS_INVALID', 'E02')
+  }
+
+  if (body.merchantNo !== merchantNo) {
+    throw new WebhookError('PAYMENT_WEBHOOK_FIELDS_INVALID', 'E03')
+  }
+
+  const txnType = body.txnType as AuthorizationFact['txnType']
+  const transactionId = readText(body, 'transactionId', /^\d{1,20}$/)!
+  const paymentId = readText(body, 'paymentId', /^\d{1,20}$/)!
+  const merchantTxnId = readText(body, 'merchantTxnId', /^[A-Za-z0-9_-]{1,64}$/)!
+  const amount = readText(body, 'orderAmount', /^(?:0|[1-9]\d{0,13})\.\d{2}$/)!
+  const currency = readText(body, 'orderCurrency', /^USD$/) as 'USD'
+  const transactionStatus = readText(body, 'status', /^[SFN]$/) as AuthorizationFact['transactionStatus']
+  const paymentStatus = readText(body, 'paymentStatus', /^[ASON]$/) as AuthorizationFact['paymentStatus']
+  let projection: AuthorizationProjection
+
+  try {
+    projection = mapAuthorizationStatus(txnType, transactionStatus, paymentStatus)
+  }
+  catch {
+    throw new WebhookError('PAYMENT_WEBHOOK_FIELDS_INVALID', 'A01')
+  }
+
+  return Object.freeze({
+    kind: 'authorization',
+    source: 'webhook',
+    txnType,
+    transactionId,
+    paymentId,
+    merchantTxnId,
+    amountMinor: readMinorAmount(amount),
+    currency,
+    transactionStatus,
+    paymentStatus,
+    ...projection,
+    occurredAt: readOccurredAt(body),
   })
 }

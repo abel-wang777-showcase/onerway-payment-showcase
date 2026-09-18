@@ -2,6 +2,7 @@ import { createHash, createHmac, timingSafeEqual } from 'node:crypto'
 import { mapCheckoutTransactionStatus, readCheckoutRedirectUrl } from '../../shared/payment/checkout'
 import { mapQueryStatus } from '../../shared/payment/sdk'
 import type { PaymentStatus } from '../../shared/payment/attempt'
+import type { AuthorizationOperationType } from '../../shared/payment/authorization'
 import type { WalletPaymentMethodId } from '../../shared/payment/capability'
 import { findOrderJourney } from '../../shared/payment/journey'
 import type { Order } from '../../shared/payment/order'
@@ -114,6 +115,9 @@ export type GatewayErrorCode
     | 'SUBSCRIPTION_CREATE_RESPONSE_INVALID'
     | 'SUBSCRIPTION_QUERY_REJECTED'
     | 'SUBSCRIPTION_QUERY_RESPONSE_INVALID'
+    | 'AUTHORIZATION_OPERATION_INVALID'
+    | 'AUTHORIZATION_OPERATION_REJECTED'
+    | 'AUTHORIZATION_OPERATION_RESPONSE_INVALID'
 
 export class GatewayError extends Error {
   readonly code: GatewayErrorCode
@@ -178,6 +182,90 @@ export function signPayload(payload: Payload, secret: string): WirePayload {
     .digest('hex')
 
   return Object.freeze({ ...normalized, sign })
+}
+
+export interface AuthorizationOperationContext {
+  readonly type: AuthorizationOperationType
+  readonly merchantTxnId: string
+  readonly originTransactionId: string
+  readonly paymentId: string
+  readonly amountMinor: number
+  readonly currency: 'USD'
+}
+
+function validateAuthorizationOperation(context: AuthorizationOperationContext): void {
+  if (
+    !['CAPTURE', 'VOID'].includes(context.type)
+    || !/^[A-Za-z0-9_-]{1,64}$/.test(context.merchantTxnId)
+    || !isProviderId(context.originTransactionId)
+    || !isProviderId(context.paymentId)
+    || !Number.isSafeInteger(context.amountMinor)
+    || context.amountMinor <= 0
+    || context.currency !== 'USD'
+  ) {
+    throw new GatewayError('AUTHORIZATION_OPERATION_INVALID')
+  }
+}
+
+/** Full-amount operation protocol. Callers must first persist an exclusive claim. */
+export function buildAuthorizationOperationPayload(
+  profile: Extract<ServerProfile, { profile: 'sandbox' }>,
+  context: AuthorizationOperationContext,
+): Payload {
+  validateAuthorizationOperation(context)
+  return Object.freeze({
+    merchantNo: profile.merchantNo,
+    merchantTxnId: context.merchantTxnId,
+    originTransactionId: context.originTransactionId,
+    txnType: context.type,
+  })
+}
+
+export interface AuthorizationOperationResponse {
+  readonly transactionId: string
+  readonly paymentId: string
+  readonly transactionStatus: string
+  readonly paymentStatus?: string
+}
+
+/** A synchronous operation result is an observation, never final funds truth. */
+export function readAuthorizationOperationResponse(
+  value: unknown,
+  context: AuthorizationOperationContext,
+): AuthorizationOperationResponse {
+  validateAuthorizationOperation(context)
+  const response = readResponse(value, 'AUTHORIZATION_OPERATION_REJECTED')
+  const data = response.data
+  if (!isRecord(data)) throw new GatewayError('AUTHORIZATION_OPERATION_RESPONSE_INVALID')
+
+  const transactionId = readText(data, 'transactionId')
+  const paymentId = readText(data, 'paymentId')
+  const transactionStatus = readText(data, 'status')
+  const paymentStatus = readText(data, 'paymentStatus')
+  const present = (field: string) => data[field] !== undefined && data[field] !== null
+
+  // IDs and operation status are required by Showcase to correlate a response;
+  // the published schema does not guarantee every field. Missing correlation
+  // leaves the persisted claim unresolved and never permits another submission.
+  if (
+    !isProviderId(transactionId)
+    || transactionId === context.originTransactionId
+    || paymentId !== context.paymentId
+    || !transactionStatus
+    || !['S', 'F', 'P', 'R', 'N', 'I', 'U'].includes(transactionStatus)
+    || (present('paymentStatus') && (!paymentStatus || !['I', 'U', 'P', 'R', 'A', 'O', 'S', 'N'].includes(paymentStatus)))
+    || (present('orderAmount') && readUsdMinor(readText(data, 'orderAmount')) !== context.amountMinor)
+    || (present('orderCurrency') && data.orderCurrency !== context.currency)
+  ) {
+    throw new GatewayError('AUTHORIZATION_OPERATION_RESPONSE_INVALID')
+  }
+
+  return Object.freeze({
+    transactionId,
+    paymentId,
+    transactionStatus,
+    ...(paymentStatus ? { paymentStatus } : {}),
+  })
 }
 
 export function buildCreatePayload(profile: Extract<ServerProfile, { profile: 'sandbox' }>, context: CreateContext): Payload {

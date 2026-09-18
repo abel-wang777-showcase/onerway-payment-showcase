@@ -215,6 +215,31 @@ Checkout 复用第 6.1 节固定 `halden-daily-essentials-v1` 计划、服务端
 
 [Issue #10](https://github.com/abel-wang777-showcase/onerway-payment-showcase/issues/10) 分开记录本次自动化、历史 SDK/保存卡证据和本次真实 Checkout 订阅证据。本次实现不能替代首次托管 Card/3DS、回跳、通知与查询真实验收；未授权时不部署、不执行真实订阅交易、不合并，也不将能力提升为 Available。
 
+### Checkout 预授权、请款与撤销（Issue #11）
+
+本期范围是 Card 的标准全额 `AUTH → CAPTURE` 与 `AUTH → VOID`，继续使用 `Order → PaymentAttempt → PaymentEvent`、服务端 customer scope 和现有恢复权限。部分或多次请款、增量授权、退款、APM 预授权、分期与 Production 交易不在范围内。当前仅完成已确认协议的领域与解析基础；Demo Hub、交易路由和持久化尚未开放预授权，不能据此宣称能力可用。
+
+[Checkout 指南](https://developers.onerway.com/payments/online-payments/checkout#pre-authorization)与[创建接口](https://developers.onerway.com/payments/api-reference/endpoints/create-checkout-payment)规定通过 `POST /txn/payment`、`subProductType=DIRECT`、`txnType=AUTH` 创建授权。官方 AUTH 示例使用 `productType=ALL`，字段表的 `CARD` 表示仅显示卡；本项目 Card-only 组合及商户开通条件仍须确认后才能开放入口。3DS、卡信息与设备信息由托管页承接。
+
+资金状态与交易结果分开表达。已验签的[预授权通知](https://developers.onerway.com/payments/api-reference/webhooks/authorization-capture)当前可确认的组合为：
+
+| txnType | status / paymentStatus | 资金语义 | PaymentAttempt 投影 |
+| --- | --- | --- | --- |
+| AUTH | S / A | 已授权冻结，尚未扣款 | processing |
+| AUTH | F / O | 本次授权尝试失败，Payment 仍开放 | processing |
+| CAPTURE | S / S | 已全额扣款 | succeeded |
+| VOID | S / N | 授权已撤销并释放 | cancelled；不开放普通付款 Retry |
+
+AUTH 成功不形成已扣款或可履约事实。独立资金投影只区分 `pending / authorized / captured / voided`；操作的 `pending / unknown / confirmed` 与资金状态分开。迟到或重复的 AUTH 事实不得回退已授权或已完成资金状态；相互矛盾的资金终态保留冲突，不能按到达顺序覆盖。CAPTURE/VOID 失败组合、AUTH 取消缺 ID 的例外和授权自然过期均不得自行推导；不使用本地时钟宣告冻结已释放。普通 Checkout 无 Payment ID 取消规则不自动适用于 AUTH。
+
+[请款或撤销接口](https://developers.onerway.com/payments/api-reference/endpoints/capture-or-void-authorization)为 `POST /v1/txn/authPayment`。请求只使用服务端保存的原 AUTH `originTransactionId`，以及稳定且独立的操作 `merchantTxnId`、`txnType=CAPTURE|VOID` 和商户签名；接口无请款金额字段，仅支持全额。原授权 transactionId 永久保留，返回的新 transactionId 属于本次操作，paymentId 必须关联同一授权。`respCode=20000` 不代表资金成功；同步 `data.status` 可记录操作处理结果，但不能代替已验签通知或经确认的查询资金事实。解析器缺少必要关联时拒绝推进，即使 Provider schema 没有声明这些字段必返。
+
+最终接入须在数据库事务中锁定同一 Attempt，验证资金已授权且尚无操作，再原子保存互斥的 CAPTURE/VOID claim 后请求 Provider；纯领域 claim 判定不构成跨请求并发保护。已认领、响应未知或已确认的操作都不得重新提交，相反动作也不得并发执行。网络错误、HTTP 错误、业务拒绝或响应无法解析均不自动解除 claim；恢复只读取原操作。前端只提交动作选择，不能提供金额、客户、paymentId 或其他交易标识；服务端重新校验 cookie、customer scope、Sandbox 与 canonical origin。
+
+通知继续验证公共 `X-Rh-Signature`，只投影白名单字段。CAPTURE 通知可能使用原 AUTH merchantTxnId，VOID 可能使用本次操作 merchantTxnId；因此关联必须结合 paymentId、已保存的授权和操作 ID、操作类型、金额币种与已认领操作。`originTransactionId / originMerchantTxnId` 不参与现有签名，不作为单独授权依据。通知早于同步响应时，仅在签名 merchantTxnId 命中已保存允许集合、同一 Payment 且同类型操作已认领后绑定新操作 transactionId；后续同步响应不能覆盖通知真值。落库与事件须在同一事务提交后再 ACK。
+
+2026-09-18 官方查询契约核对仍有缺口：[交易查询](https://developers.onerway.com/payments/api-reference/endpoints/query-transactions)响应未列 `paymentStatus`，`txnType` 枚举未列 CAPTURE/VOID；`userPaymentStatus` 仅用于 Sofort。[Payment 查询](https://developers.onerway.com/payments/api-reference/endpoints/query-payments)包含 `A` 资金状态，但没有明确 Hosted AUTH 的查询支持，且通用规则指定 Checkout 使用交易查询。确认前不编造补偿 adapter，不把原 AUTH 交易仍为 S 当作资金当前可操作的证明，不开放资金操作路由。查询补偿、失败/取消/过期事实与商户支持的待确认内容、实施进度及分层验收证据统一记录在 [Issue #11](https://github.com/abel-wang777-showcase/onerway-payment-showcase/issues/11)。
+
 ## 6. 回跳、通知和最终状态
 
 支付结果采用多来源收敛，不采用“最后到达者覆盖”：
