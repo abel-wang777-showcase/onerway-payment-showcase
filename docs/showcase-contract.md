@@ -2,7 +2,7 @@
 
 > 状态：M0 Web JS SDK Card、订阅与钱包；Sandbox Hosted Checkout 已有真实演示证据，逐方式能力保持条件限制
 >
-> 更新日期：2026-09-17
+> 更新日期：2026-09-18
 > 作用：这是项目长期有效的产品、架构、状态和安全边界。GitHub Issues 负责交付顺序，不替代本文件。
 
 ## 1. 产品目标、受众和非目标
@@ -211,7 +211,7 @@ Checkout 复用第 6.1 节固定 `halden-daily-essentials-v1` 计划、服务端
 - 合约持久化 `initialIntegration`，旧记录回填 `web-js-sdk`，确保 Payment 30 天清理后仍可使用正确的查询协议。原有 token 终态擦除、首次 `terminalAt` 和合约独立保留规则不变。
 - Card 初始通知复用 `SUBSCRIPTION_INITIAL`、header 验签、事务写入、幂等 ACK 与续费隔离。当前公开[订阅通知](https://developers.onerway.com/payments/api-reference/webhooks/subscription-payment)允许 `paymentId` / `paymentStatus` 为空，本项目仅为已验签、精确关联到 Checkout initial Attempt 的 `status=N` 且无 Payment 级状态通知提供受限无 ID 取消处理；其他缺失关联保持 fail closed。该处理不代表 Provider 必然发送取消通知，真实缺字段样本仍未验证。
 
-当前公开 `expireDate` 字段存在“最多 99 周期”与官方自主管理远期到期日示例的文字冲突。沿用既有固定计划不代表 Checkout 已接受该请求；首次真实验收需核实此边界，不通过改 product/plan/customer 绕过。`selfExecute=2` 按文档由商户管理后续扣款，本项目不发起续费 API 或新增调度；真实初始支付仍会建立可用于后续扣款的授权，执行前须单独明确授权范围。
+2026-09-18 用户确认：Checkout Card 自主管理初始订阅允许使用 `selfExecute=2`、`mode=2`、`frequencyType=D`、`frequencyPoint=1`、`expireDate=2099-12-31`，本项目据此沿用既有固定计划；此前公开文档中“最多 99 周期”与远期示例的冲突不再阻断本组合的实施。该确认不推广为其他支付方式或 Onerway 托管订阅的到期日、周期规则，也不构成本次真实 Checkout 订阅验收证据，能力继续保持 Conditional。真实初始支付仍会建立可用于后续扣款的授权，执行前须单独明确授权范围。`selfExecute=2` 的后续扣款由商户管理，本项目不发起续费 API 或新增调度。
 
 [Issue #10](https://github.com/abel-wang777-showcase/onerway-payment-showcase/issues/10) 分开记录本次自动化、历史 SDK/保存卡证据和本次真实 Checkout 订阅证据。本次实现不能替代首次托管 Card/3DS、回跳、通知与查询真实验收；未授权时不部署、不执行真实订阅交易、不合并，也不将能力提升为 Available。
 
