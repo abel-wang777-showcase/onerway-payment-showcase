@@ -5,6 +5,8 @@ const mocks = vi.hoisted(() => ({
   isSubscriptionWebhookProcessed: vi.fn(),
   querySubscription: vi.fn(),
   readPaymentWebhook: vi.fn(),
+  readAuthorizationWebhook: vi.fn(),
+  recordAuthorizationWebhookEvent: vi.fn(),
   readSubscriptionPaymentWebhook: vi.fn(),
   readWebhookBody: vi.fn(),
   recordSubscriptionWebhookEvent: vi.fn(),
@@ -23,13 +25,15 @@ vi.mock('../server/utils/profile', () => ({
 
 vi.mock('../server/utils/store', () => ({
   isSubscriptionWebhookProcessed: mocks.isSubscriptionWebhookProcessed,
-  PaymentStoreError: class PaymentStoreError extends Error {},
+  PaymentStoreError: class PaymentStoreError extends Error { readonly code: string; constructor(code: string) { super(code); this.code = code } },
+  recordAuthorizationWebhookEvent: mocks.recordAuthorizationWebhookEvent,
   recordSubscriptionWebhookEvent: mocks.recordSubscriptionWebhookEvent,
   recordWebhookEvent: mocks.recordWebhookEvent,
 }))
 
 vi.mock('../server/utils/webhook', async (importOriginal) => ({
   readPaymentWebhook: mocks.readPaymentWebhook,
+  readAuthorizationWebhook: mocks.readAuthorizationWebhook,
   readSubscriptionPaymentWebhook: mocks.readSubscriptionPaymentWebhook,
   readWebhookBody: mocks.readWebhookBody,
   WebhookError: (await importOriginal<typeof import('../server/utils/webhook')>()).WebhookError,
@@ -70,6 +74,29 @@ afterEach(() => {
 })
 
 describe('subscription webhook route', () => {
+  it.each(['AUTH', 'CAPTURE', 'VOID'])('ACKs %s only after its verified notification has been stored', async (txnType) => {
+    mocks.readWebhookBody.mockResolvedValue({ txnType })
+    const authorization = { transactionId: '10001', txnType }
+    mocks.readAuthorizationWebhook.mockReturnValue(authorization)
+    mocks.recordAuthorizationWebhookEvent.mockResolvedValue({ correlated: true, duplicate: false })
+    const { default: handler } = await import('../server/api/webhooks/onerway/payment.post')
+    await expect((handler as (event: unknown) => Promise<string>)({ node: { req: {} } })).resolves.toBe('10001')
+    expect(mocks.readAuthorizationWebhook).toHaveBeenCalledWith({ txnType }, 'secret', 'merchant', 'v1=test-header')
+    expect(mocks.recordAuthorizationWebhookEvent).toHaveBeenCalledWith(authorization, expect.any(String))
+    expect(mocks.recordAuthorizationWebhookEvent.mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(setResponseStatus).mock.invocationCallOrder[0]!)
+    expect(mocks.recordWebhookEvent).not.toHaveBeenCalled()
+    expect(mocks.querySubscription).not.toHaveBeenCalled()
+  })
+
+  it('does not ACK an uncorrelated authorization notification', async () => {
+    mocks.readWebhookBody.mockResolvedValue({ txnType: 'AUTH' })
+    mocks.readAuthorizationWebhook.mockReturnValue({ transactionId: '10001' })
+    mocks.recordAuthorizationWebhookEvent.mockResolvedValue({ correlated: false, duplicate: false })
+    const { default: handler } = await import('../server/api/webhooks/onerway/payment.post')
+    await expect((handler as (event: unknown) => Promise<string>)({ node: { req: {} } })).rejects.toMatchObject({ statusCode: 409 })
+    expect(setResponseStatus).not.toHaveBeenCalled()
+  })
+
   it.each([undefined, null])('processes a signed ordinary notification with scenario %s through the payment boundary', async (scenarios) => {
     const body = {
       notifyType: 'TXN', txnType: 'SALE', merchantNo: 'merchant',

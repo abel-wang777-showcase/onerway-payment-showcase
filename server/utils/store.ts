@@ -10,6 +10,14 @@ import {
 import type { PaymentEvent, PaymentEventSource } from '../../shared/payment/event'
 import { createEvent } from '../../shared/payment/event'
 import { mergeAttempt } from '../../shared/payment/merge'
+import {
+  canClaimAuthorizationOperation,
+  claimAuthorizationOperation,
+  mapAuthorizationStatus,
+  mergeAuthorization,
+  type AuthorizationOperationType,
+  type AuthorizationState,
+} from '../../shared/payment/authorization'
 import type { Order } from '../../shared/payment/order'
 import {
   isSubscriptionPlanId,
@@ -20,8 +28,9 @@ import type {
   QueriedPayment,
   QueriedPaymentMethod,
   SubscriptionDetails,
+  AuthorizationOperationResponse,
 } from './gateway'
-import type { PaymentWebhook, SubscriptionPaymentWebhook } from './webhook'
+import type { AuthorizationWebhook, PaymentWebhook, SubscriptionPaymentWebhook } from './webhook'
 import {
   restoreMerchantCustomer,
   type MerchantCustomer,
@@ -65,6 +74,7 @@ interface AttemptRow extends QueryResultRow {
   funding_network: string | null
   attribution_transaction_id: string | null
   submission_started_at: Date | string | null
+  authorization: unknown
   created_at: Date | string
   updated_at: Date | string
 }
@@ -297,8 +307,60 @@ function attemptFromRow(row: AttemptRow): PaymentAttempt {
     ...(row.funding_network ? { fundingNetwork: row.funding_network } : {}),
     ...(row.attribution_transaction_id ? { attributionTransactionId: row.attribution_transaction_id } : {}),
     ...(row.submission_started_at ? { submissionStartedAt: iso(row.submission_started_at) } : {}),
+    ...(row.authorization ? { authorization: authorizationFromJson(row.authorization) } : {}),
     createdAt: iso(row.created_at),
     updatedAt: iso(row.updated_at),
+  })
+}
+
+function authorizationFromJson(value: unknown): AuthorizationState {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new PaymentStoreError('PAYMENT_ATTEMPT_MISMATCH')
+  }
+  const data = value as Record<string, unknown>
+  const providerId = (value: unknown) => typeof value === 'string' && /^\d{1,20}$/.test(value)
+  const merchantId = (value: unknown) => typeof value === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(value)
+  const operation = data.operation as Record<string, unknown> | undefined
+  if (
+    !merchantId(data.authMerchantTxnId)
+    || !Number.isSafeInteger(data.amountMinor) || Number(data.amountMinor) <= 0
+    || data.currency !== 'USD'
+    || !['pending', 'authorized', 'captured', 'voided'].includes(data.fundsStatus as string)
+    || typeof data.updatedAt !== 'string'
+    || (data.paymentId !== undefined && !providerId(data.paymentId))
+    || (data.authTransactionId !== undefined && !providerId(data.authTransactionId))
+    || (data.fundsStatus !== 'pending' && (!providerId(data.paymentId) || !providerId(data.authTransactionId)))
+    || (data.conflict !== undefined && typeof data.conflict !== 'boolean')
+    || (operation !== undefined && (
+      !operation || typeof operation !== 'object' || Array.isArray(operation)
+      || !['CAPTURE', 'VOID'].includes(operation.type as string)
+      || !['pending', 'unknown', 'confirmed'].includes(operation.status as string)
+      || !merchantId(operation.merchantTxnId)
+      || operation.merchantTxnId === data.authMerchantTxnId
+      || (operation.transactionId !== undefined && !providerId(operation.transactionId))
+      || (operation.status === 'confirmed' && !providerId(operation.transactionId))
+      || !data.authTransactionId || !data.paymentId
+    ))
+  ) {
+    throw new PaymentStoreError('PAYMENT_ATTEMPT_MISMATCH')
+  }
+  // Reconstruct the persisted projection; unknown caller/JSON properties never
+  // enter storage, recovery or diagnostics.
+  return Object.freeze({
+    authMerchantTxnId: data.authMerchantTxnId as string,
+    amountMinor: data.amountMinor as number,
+    currency: 'USD',
+    fundsStatus: data.fundsStatus as AuthorizationState['fundsStatus'],
+    ...(data.paymentId ? { paymentId: data.paymentId as string } : {}),
+    ...(data.authTransactionId ? { authTransactionId: data.authTransactionId as string } : {}),
+    ...(data.conflict ? { conflict: true } : {}),
+    ...(operation ? { operation: Object.freeze({
+      type: operation.type as AuthorizationOperationType,
+      merchantTxnId: operation.merchantTxnId as string,
+      status: operation.status as 'pending' | 'unknown' | 'confirmed',
+      ...(operation.transactionId ? { transactionId: operation.transactionId as string } : {}),
+    }) } : {}),
+    updatedAt: iso(data.updatedAt as string),
   })
 }
 
@@ -501,7 +563,8 @@ async function updateAttempt(client: PoolClient, attempt: PaymentAttempt): Promi
         actual_wallet = $6,
         funding_network = $7,
         attribution_transaction_id = $8,
-        updated_at = $9
+        updated_at = $9,
+        authorization = $10::jsonb
     WHERE id = $1
   `, [
     attempt.id,
@@ -513,10 +576,12 @@ async function updateAttempt(client: PoolClient, attempt: PaymentAttempt): Promi
     attempt.fundingNetwork ?? null,
     attempt.attributionTransactionId ?? null,
     attempt.updatedAt,
+    attempt.authorization ? JSON.stringify(authorizationFromJson(attempt.authorization)) : null,
   ])
 }
 
 async function insertAttempt(client: PoolClient, attempt: PaymentAttempt): Promise<void> {
+  const authorization = attempt.authorization ? authorizationFromJson(attempt.authorization) : undefined
   if (
     !attempt.merchantTxnId
     || attempt.paymentId
@@ -526,6 +591,12 @@ async function insertAttempt(client: PoolClient, attempt: PaymentAttempt): Promi
     || attempt.attributionTransactionId
     || attempt.submissionStartedAt
     || attempt.status !== 'created'
+    || (authorization && (
+      attempt.integration !== 'checkout' || attempt.method !== 'card' || attempt.retryOf
+      || authorization.authMerchantTxnId !== attempt.merchantTxnId
+      || authorization.fundsStatus !== 'pending' || authorization.paymentId
+      || authorization.authTransactionId || authorization.operation || authorization.conflict
+    ))
   ) {
     throw new PaymentStoreError('PAYMENT_ATTEMPT_MISMATCH')
   }
@@ -534,9 +605,9 @@ async function insertAttempt(client: PoolClient, attempt: PaymentAttempt): Promi
     INSERT INTO payment_attempts (
       id, order_id, integration, method, status, status_source, retry_of,
       merchant_txn_id, payment_id, transaction_id, submission_started_at,
-      created_at, updated_at
+      created_at, updated_at, authorization
     )
-    VALUES ($1, $2, $3, $4, $5, NULL, $6, $7, NULL, NULL, NULL, $8, $8)
+    VALUES ($1, $2, $3, $4, $5, NULL, $6, $7, NULL, NULL, NULL, $8, $8, $9::jsonb)
   `, [
     attempt.id,
     attempt.orderId,
@@ -546,6 +617,7 @@ async function insertAttempt(client: PoolClient, attempt: PaymentAttempt): Promi
     attempt.retryOf ?? null,
     attempt.merchantTxnId,
     attempt.createdAt,
+    authorization ? JSON.stringify(authorization) : null,
   ])
 }
 
@@ -651,7 +723,10 @@ export async function createPaymentRecord(
   attempt: PaymentAttempt,
   customer: MerchantCustomer,
 ): Promise<void> {
-  if (!attempt.merchantTxnId) {
+  if (!attempt.merchantTxnId || (attempt.authorization && (
+    attempt.authorization.amountMinor !== order.amount.minor
+    || attempt.authorization.currency !== order.amount.currency
+  ))) {
     throw new PaymentStoreError('PAYMENT_ATTEMPT_MISMATCH')
   }
 
@@ -668,7 +743,8 @@ export async function createSubscriptionPaymentRecord(
   contract: SubscriptionContract,
 ): Promise<SubscriptionPaymentRecord> {
   if (
-    attempt.orderId !== order.id
+    Boolean(attempt.authorization)
+    || attempt.orderId !== order.id
     || contract.initialOrderId !== order.id
     || contract.initialAttemptId !== attempt.id
     || contract.initialIntegration !== attempt.integration
@@ -850,6 +926,7 @@ export async function createPaymentRetry(
     }
 
     const previous = attemptFromRow(row)
+    if (previous.authorization) throw new PaymentStoreError('PAYMENT_RETRY_NOT_ALLOWED')
     const decision = getRetryDecision(previous)
 
     const existing = await client.query<AttemptRow>(`
@@ -1088,6 +1165,34 @@ export async function completePaymentRecord(
 
     const current = attemptFromRow(row)
 
+    if (current.authorization) {
+      if (!paymentId || event.source !== 'server' || event.status !== 'processing'
+        || (current.paymentId && current.paymentId !== paymentId)
+        || (current.authorization.paymentId && current.authorization.paymentId !== paymentId)) {
+        throw new PaymentStoreError('PAYMENT_ATTEMPT_MISMATCH')
+      }
+      const duplicate = await findEvent(client, event.source, sourceKey)
+      if (duplicate) {
+        if (duplicate.attemptId !== attemptId) throw new PaymentStoreError('PAYMENT_ATTEMPT_MISMATCH')
+        return current
+      }
+      // Create only supplies the Payment binding; it never establishes or
+      // overwrites the successful AUTH anchor received from a notification.
+      const attempt = Object.freeze({
+        ...current,
+        paymentId,
+        transactionId: current.transactionId ?? transactionId,
+        status: current.status === 'created' ? 'processing' as const : current.status,
+        statusSource: current.statusSource ?? 'server' as const,
+        authorization: Object.freeze({ ...current.authorization, paymentId }),
+        updatedAt: Date.parse(current.updatedAt) >= Date.parse(event.occurredAt)
+          ? current.updatedAt : event.occurredAt,
+      })
+      await insertEvent(client, event)
+      await updateAttempt(client, attempt)
+      return attempt
+    }
+
     if (
       (current.paymentId && paymentId && current.paymentId !== paymentId)
       || (!paymentId && (
@@ -1165,6 +1270,8 @@ export async function recordQueryEvent(
     }
 
     const current = attemptFromRow(row)
+
+    if (current.authorization) throw new PaymentStoreError('PAYMENT_ATTEMPT_MISMATCH')
 
     const checkout = current.integration === 'checkout'
 
@@ -1272,6 +1379,8 @@ export async function recordPaymentMethodDetails(
     }
 
     const current = attemptFromRow(row)
+
+    if (current.authorization) throw new PaymentStoreError('PAYMENT_ATTEMPT_MISMATCH')
 
     if (
       current.paymentId !== paymentId
@@ -1541,6 +1650,160 @@ export async function recordSubscriptionQueryDetails(
   })
 }
 
+export async function claimStoredAuthorizationOperation(
+  attemptId: string,
+  type: AuthorizationOperationType,
+  merchantTxnId: string,
+  occurredAt: string,
+): Promise<{ readonly claimed: boolean, readonly attempt: PaymentAttempt, readonly event?: PaymentEvent }> {
+  return transaction(async (client) => {
+    const found = await client.query<AttemptRow>(`
+      SELECT * FROM payment_attempts WHERE id = $1 FOR UPDATE
+    `, [attemptId])
+    if (!found.rows[0]) throw new PaymentStoreError('PAYMENT_ATTEMPT_NOT_FOUND')
+    const current = attemptFromRow(found.rows[0])
+    if (!current.authorization) throw new PaymentStoreError('PAYMENT_ATTEMPT_MISMATCH')
+    if (!canClaimAuthorizationOperation(current.authorization)) {
+      return Object.freeze({ claimed: false, attempt: current })
+    }
+    const authorization = claimAuthorizationOperation(current.authorization, { type, merchantTxnId, occurredAt })
+    const attempt = Object.freeze({ ...current, authorization, updatedAt: authorization.updatedAt })
+    const event = createEvent({
+      id: randomUUID(), attemptId, source: 'server',
+      sourceKey: `authorization-claim:${attemptId}`, status: 'processing',
+      rawStatus: type, occurredAt,
+    })
+    await insertEvent(client, event)
+    await updateAttempt(client, attempt)
+    return Object.freeze({ claimed: true, attempt, event })
+  })
+}
+
+export async function recordAuthorizationOperationResponse(
+  attemptId: string,
+  merchantTxnId: string,
+  response: AuthorizationOperationResponse | null,
+  occurredAt: string,
+): Promise<{ readonly attempt: PaymentAttempt, readonly event?: PaymentEvent, readonly duplicate: boolean }> {
+  return transaction(async (client) => {
+    const found = await client.query<AttemptRow>(`
+      SELECT * FROM payment_attempts WHERE id = $1 FOR UPDATE
+    `, [attemptId])
+    if (!found.rows[0]) throw new PaymentStoreError('PAYMENT_ATTEMPT_NOT_FOUND')
+    const current = attemptFromRow(found.rows[0])
+    const authorization = current.authorization
+    const operation = authorization?.operation
+    if (!authorization || !operation || operation.merchantTxnId !== merchantTxnId
+      || (response && (
+        response.paymentId !== authorization.paymentId
+        || !/^\d{1,20}$/.test(response.transactionId)
+        || response.transactionId === authorization.authTransactionId
+        || !['S', 'F', 'P', 'R', 'N', 'I', 'U'].includes(response.transactionStatus)
+        || (response.paymentStatus !== undefined && !['I', 'U', 'P', 'R', 'A', 'O', 'S', 'N'].includes(response.paymentStatus))
+      ))) {
+      throw new PaymentStoreError('PAYMENT_ATTEMPT_MISMATCH')
+    }
+    const sourceKey = `authorization-response:${attemptId}:${merchantTxnId}`
+    const duplicate = await findEvent(client, 'server', sourceKey)
+    if (duplicate) {
+      if (duplicate.attemptId !== attemptId) throw new PaymentStoreError('PAYMENT_ATTEMPT_MISMATCH')
+      return Object.freeze({ attempt: current, event: duplicate, duplicate: true })
+    }
+    const conflict = Boolean(response && operation.transactionId && operation.transactionId !== response.transactionId)
+    const nextAuthorization = Object.freeze({
+      ...authorization,
+      ...(conflict ? { conflict: true } : {}),
+      operation: operation.status === 'confirmed' ? operation : Object.freeze({
+        ...operation,
+        ...(response && !conflict ? { transactionId: response.transactionId } : {}),
+        status: 'unknown' as const,
+      }),
+      updatedAt: Date.parse(authorization.updatedAt) >= Date.parse(occurredAt) ? authorization.updatedAt : occurredAt,
+    })
+    const attempt = Object.freeze({ ...current, authorization: nextAuthorization, updatedAt: nextAuthorization.updatedAt })
+    const event = createEvent({
+      id: randomUUID(), attemptId, source: 'server', sourceKey,
+      status: 'processing',
+      ...(response ? {
+        rawStatus: response.transactionStatus,
+        transactionId: response.transactionId,
+        transactionStatus: response.transactionStatus,
+        ...(response.paymentStatus ? { paymentStatus: response.paymentStatus } : {}),
+      } : {}),
+      ...(conflict ? { conflict: true } : {}),
+      occurredAt,
+    })
+    await insertEvent(client, event)
+    await updateAttempt(client, attempt)
+    return Object.freeze({ attempt, event, duplicate: false })
+  })
+}
+
+export async function recordAuthorizationWebhookEvent(
+  fact: AuthorizationWebhook,
+  observedAt: string,
+): Promise<{
+  readonly correlated: boolean
+  readonly duplicate: boolean
+  readonly attempt?: PaymentAttempt
+  readonly event?: PaymentEvent
+}> {
+  return transaction(async (client) => {
+    const found = await client.query<CorrelatedAttemptRow>(`
+      SELECT a.*, o.amount_minor, o.currency
+      FROM payment_attempts a
+      JOIN payment_orders o ON o.id = a.order_id
+      WHERE a.merchant_txn_id = $1
+         OR a.authorization->'operation'->>'merchantTxnId' = $1
+         OR a.payment_id = $2
+      FOR UPDATE OF a
+    `, [fact.merchantTxnId, fact.paymentId])
+    if (found.rows.length > 1) throw new PaymentStoreError('PAYMENT_ATTEMPT_MISMATCH')
+    const row = found.rows[0]
+    if (!row) return Object.freeze({ correlated: false, duplicate: false })
+    const current = attemptFromRow(row)
+    if (!current.authorization || fact.kind !== 'authorization'
+      || Number(row.amount_minor) !== fact.amountMinor || row.currency !== fact.currency
+      || (current.paymentId && current.paymentId !== fact.paymentId)) {
+      throw new PaymentStoreError('PAYMENT_ATTEMPT_MISMATCH')
+    }
+    const merged = mergeAuthorization(current.authorization, fact)
+    if (!merged.accepted && !merged.conflict) throw new PaymentStoreError('PAYMENT_ATTEMPT_MISMATCH')
+    const rawStatus = `${fact.txnType}:${fact.transactionStatus}:${fact.paymentStatus}`
+    const duplicate = await findEvent(client, 'webhook', fact.transactionId)
+    if (duplicate) {
+      if (duplicate.attemptId !== current.id || duplicate.rawStatus !== rawStatus) {
+        throw new PaymentStoreError('PAYMENT_ATTEMPT_MISMATCH')
+      }
+      return Object.freeze({ correlated: true, duplicate: true, attempt: current, event: duplicate })
+    }
+    const authorization = merged.authorization
+    const status: PaymentStatus = authorization.fundsStatus === 'captured' ? 'succeeded'
+      : authorization.fundsStatus === 'voided' ? 'cancelled' : 'processing'
+    const attempt = Object.freeze({
+      ...current,
+      authorization,
+      ...(authorization.paymentId ? { paymentId: authorization.paymentId } : {}),
+      // Keep the ordinary transaction field on the AUTH/create axis. Operation
+      // ids live only in the separate operation record and audit events.
+      ...(!current.transactionId && authorization.authTransactionId ? { transactionId: authorization.authTransactionId } : {}),
+      status,
+      statusSource: 'webhook' as const,
+      updatedAt: Date.parse(current.updatedAt) >= Date.parse(observedAt) ? current.updatedAt : observedAt,
+    })
+    const event = createEvent({
+      id: randomUUID(), attemptId: current.id, source: 'webhook', sourceKey: fact.transactionId,
+      status: mapAuthorizationStatus(fact.txnType, fact.transactionStatus, fact.paymentStatus).status,
+      rawStatus, transactionId: fact.transactionId, transactionStatus: fact.transactionStatus,
+      paymentStatus: fact.paymentStatus, ...(merged.conflict ? { conflict: true } : {}),
+      occurredAt: fact.occurredAt,
+    })
+    await insertEvent(client, event)
+    await updateAttempt(client, attempt)
+    return Object.freeze({ correlated: true, duplicate: false, attempt, event })
+  })
+}
+
 export async function recordWebhookEvent(
   fact: PaymentWebhook,
 ): Promise<{ readonly attempt: PaymentAttempt, readonly event: PaymentEvent, readonly duplicate: boolean }> {
@@ -1559,6 +1822,8 @@ export async function recordWebhookEvent(
     }
 
     const current = attemptFromRow(row)
+
+    if (current.authorization) throw new PaymentStoreError('PAYMENT_ATTEMPT_MISMATCH')
     const checkoutCancellation = current.integration === 'checkout'
       && fact.transactionStatus === 'N'
       && fact.paymentStatus === undefined
@@ -1689,6 +1954,7 @@ export async function recordSubscriptionWebhookEvent(
 
     const attemptRow = attempts.rows[0]
     const current = attemptRow ? attemptFromRow(attemptRow) : null
+    if (current?.authorization) throw new PaymentStoreError('PAYMENT_ATTEMPT_MISMATCH')
 
     if (
       (current && (current.merchantTxnId !== fact.merchantTxnId
@@ -1813,6 +2079,9 @@ export async function getPaymentTimeline(identifier: string): Promise<PaymentTim
       LEFT JOIN payment_events e ON e.attempt_id = a.id
       WHERE a.merchant_txn_id = $1
          OR a.transaction_id = $1
+         OR a.authorization->>'authTransactionId' = $1
+         OR a.authorization->'operation'->>'merchantTxnId' = $1
+         OR a.authorization->'operation'->>'transactionId' = $1
          OR e.transaction_id = $1
       ORDER BY a.created_at DESC
       LIMIT 2
@@ -1942,7 +2211,7 @@ export async function getPaymentRecovery(
       )
       SELECT id, order_id, integration, method, status, status_source, retry_of,
              merchant_txn_id, payment_id, transaction_id, submission_started_at,
-             created_at, updated_at, topology.chain_count, topology.order_count
+             created_at, updated_at, authorization, topology.chain_count, topology.order_count
       FROM selected
       CROSS JOIN topology
       ORDER BY root_created_at ASC, retry_path ASC

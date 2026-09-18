@@ -1,10 +1,13 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   buildAuthorizationOperationPayload,
+  buildCheckoutCreatePayload,
+  executeAuthorizationOperation,
   readAuthorizationOperationResponse,
   signPayload,
   type AuthorizationOperationContext,
 } from '../server/utils/gateway'
+import { getJourney } from '../shared/payment/journey'
 import type { ServerProfile } from '../server/utils/profile'
 
 const profile = {
@@ -40,6 +43,30 @@ const response = (data: Record<string, unknown> = {}) => ({
     paymentStatus: 'S',
     ...data,
   },
+})
+
+afterEach(() => vi.unstubAllGlobals())
+
+it('creates only the fixed hosted authorization journey as CARD DIRECT AUTH', () => {
+  const journey = getJourney('hosted-authorization')
+  const payload = buildCheckoutCreatePayload(profile, {
+    merchantTxnId: 'auth-1', merchantCustId: 'customer-1', returnUrl: `${profile.showcaseOrigin}/halden/return/order-1`,
+    order: {
+      id: 'order-1', scene: 'ecommerce', createdAt: '2026-09-18T00:00:00.000Z', fulfillment: 'pending',
+      amount: { minor: 500, currency: 'USD' },
+      item: { sku: journey.sku, name: journey.item, variant: journey.variant, quantity: 1, unitAmount: { minor: 500, currency: 'USD' } },
+    },
+  })
+  expect(payload).toMatchObject({ productType: 'CARD', subProductType: 'DIRECT', txnType: 'AUTH', orderAmount: '5.00' })
+})
+
+it('signs and sends the persisted authorization operation exactly once', async () => {
+  const fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => response() })
+  vi.stubGlobal('fetch', fetch)
+  await executeAuthorizationOperation(profile, context)
+  expect(fetch).toHaveBeenCalledTimes(1)
+  expect(fetch.mock.calls[0]?.[0]).toBe(`${profile.apiBaseUrl}/v1/txn/authPayment`)
+  expect(JSON.parse(fetch.mock.calls[0]?.[1].body)).toEqual(signPayload(buildAuthorizationOperationPayload(profile, context), profile.secret))
 })
 
 describe('full-amount authorization operation protocol', () => {

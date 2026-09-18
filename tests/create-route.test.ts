@@ -35,6 +35,17 @@ beforeEach(() => {
 })
 
 describe('Hosted Checkout create route', () => {
+  it('creates AUTH without granting a SALE query capability', async () => {
+    const recovery = await mocks.getPaymentRecovery()
+    const attempt = { ...recovery.attempt, method: 'card', authorization: { fundsStatus: 'pending' } }
+    mocks.getPaymentRecovery.mockResolvedValue({ ...recovery, attempt })
+    mocks.completePaymentRecord.mockResolvedValue({ ...attempt, paymentId: '111', transactionId: '222' })
+    const { default: handler } = await import('../server/api/payment/create.post')
+    const result = await (handler as (event: unknown) => Promise<Record<string, unknown>>)({})
+    expect(result.query).toBeNull()
+    expect(result.attempt).toMatchObject({ authorization: { fundsStatus: 'pending' } })
+  })
+
   it('dispatches from persisted integration, returns the URL only to this request, and omits device collection', async () => {
     const { default: handler } = await import('../server/api/payment/create.post')
     const result = await (handler as (event: unknown) => Promise<Record<string, unknown>>)({})

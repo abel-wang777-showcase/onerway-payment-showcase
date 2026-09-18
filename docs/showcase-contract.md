@@ -60,7 +60,8 @@ Demo Hub 是公开演示入口，不是第二套后台。它负责：
 - Card simulation 额外开放 processing recovery、cancelled retry、deterministic failure 与 form load recovery 四条异常旅程；它们不含 Sandbox mode、不产生 provider 标识，也不扩张真实 create allowlist。deterministic failure 只形成 `source=simulation / status=failed` 的本地事实，不能作为 Payment-level `failed` 原始状态证据。
 - `E-commerce × Web JS SDK × Google Pay` 与 `E-commerce × Web JS SDK × Apple Pay` 均保持 Conditional，并复用 USD 5.00 `standard-success` 的真实 Sandbox 入口；Showcase 只记录用户选择的预期方式，是否渲染对应钱包按钮及其资格由同一个 Onerway SDK Element 决定。两者都不渲染伪钱包按钮，也没有钱包专属 simulation。Apple Pay 的最终真实设备 / Safari / Wallet canary 仍需单独授权与用户设备配合，不能由桌面浏览器或历史支付替代。
 - `E-commerce × Checkout × All` 为 Conditional，并提供 USD 5.00 普通支付与 USD 50.00 3DS 的 Sandbox 一次性支付入口。`All` 是支付方式选择策略，不代表最终使用某张卡或钱包；具体可选项由商户启用、国家、币种和设备条件决定。USD 50.00 真实 3DS 已获用户人工验收确认，返回恢复、超时取消与通知链路已有独立 Sandbox 证据，执行范围见 Issue #8；这些证据不代表所有设备或具体支付方式均已验证，不宣称任一具体收银台支付方式为 Available。同一入口另有 Card 初始订阅选项，沿用固定 USD 5.00 计划且保持 Conditional，范围及证据边界见 Issue #10 章节。
-- Checkout 的具体支付方式直达、Direct API、其余 APM 和 Game / Live / AI 场景当前为 Planned。
+- `E-commerce × Checkout × Card` 提供 USD 5.00 预授权旅程及全额请款或撤销操作，保持 Conditional；当前 Draft 实现及通知恢复边界见 Issue #11 章节，真实 Sandbox 验收尚未完成。
+- Checkout 的其余具体支付方式直达、Direct API、其余 APM 和 Game / Live / AI 场景当前为 Planned。
 - Unavailable 保留为明确证实不支持时使用的状态；当前不为凑齐 UI 而制造无证据的 Unavailable 组合。
 
 ## 4. 统一支付模型
@@ -217,7 +218,7 @@ Checkout 复用第 6.1 节固定 `halden-daily-essentials-v1` 计划、服务端
 
 ### Checkout 预授权、请款与撤销（Issue #11）
 
-本期范围是 Card 的标准全额 `AUTH → CAPTURE` 与 `AUTH → VOID`，继续使用 `Order → PaymentAttempt → PaymentEvent`、服务端 customer scope 和现有恢复权限。部分或多次请款、增量授权、退款、APM 预授权、分期与 Production 交易不在范围内。当前仅完成已确认协议的领域与解析基础；Demo Hub、交易路由和持久化尚未开放预授权，不能据此宣称能力可用。
+本期范围是 Card 的标准全额 `AUTH → CAPTURE` 与 `AUTH → VOID`，继续使用 `Order → PaymentAttempt → PaymentEvent`、服务端 customer scope 和现有恢复权限。部分或多次请款、增量授权、退款、APM 预授权、分期与 Production 交易不在范围内。Draft 实现接入固定 USD 5.00 旅程、交易路由、资金操作与通知持久化；主体实施不等待主动查询补偿契约，能力仍保持 Conditional。真实 Sandbox 验收和主动查询补偿仍为未完成项，不因本地或 mock 闭环通过而宣称整个 Issue 已交付。
 
 [Checkout 指南](https://developers.onerway.com/payments/online-payments/checkout#pre-authorization)与[创建接口](https://developers.onerway.com/payments/api-reference/endpoints/create-checkout-payment)规定通过 `POST /txn/payment`、`subProductType=DIRECT`、`txnType=AUTH` 创建授权。用户已于 2026-09-18 确认当前 Sandbox 商户支持 `CARD + DIRECT + AUTH`，本期固定使用该组合；商户支持已确认不代表实现或真实验收已经完成。3DS、卡信息与设备信息由托管页承接。
 
@@ -236,18 +237,20 @@ AUTH 成功不形成已扣款或可履约事实。独立资金投影只区分 `p
 
 [请款或撤销接口](https://developers.onerway.com/payments/api-reference/endpoints/capture-or-void-authorization)为 `POST /v1/txn/authPayment`。请求只使用服务端保存的原 AUTH `originTransactionId`，以及稳定且独立的操作 `merchantTxnId`、`txnType=CAPTURE|VOID` 和商户签名；接口无请款金额字段，仅支持全额。原授权 transactionId 永久保留，返回的新 transactionId 属于本次操作，paymentId 必须关联同一授权。`respCode=20000` 不代表资金成功；同步 `data.status` 可记录操作处理结果，但不能代替已验签通知或经确认的查询资金事实。解析器缺少必要关联时拒绝推进，即使 Provider schema 没有声明这些字段必返。
 
-最终接入须在数据库事务中锁定同一 Attempt，验证资金已授权且尚无操作，再原子保存互斥的 CAPTURE/VOID claim 后请求 Provider；纯领域 claim 判定不构成跨请求并发保护。已认领、响应未知或已确认的操作都不得重新提交，相反动作也不得并发执行。网络错误、HTTP 错误、业务拒绝或响应无法解析均不自动解除 claim；恢复只读取原操作。前端只提交动作选择，不能提供金额、客户、paymentId 或其他交易标识；服务端重新校验 cookie、customer scope、Sandbox 与 canonical origin。
+资金操作在数据库事务中锁定同一 Attempt，验证资金已授权且尚无操作，再原子保存互斥的 CAPTURE/VOID claim 后请求 Provider；纯领域 claim 判定不构成跨请求并发保护。已认领、响应未知或已确认的操作都不得重新提交，相反动作也不得并发执行。网络错误、HTTP 错误、业务拒绝或响应无法解析均不自动解除 claim；恢复只读取原操作。前端在操作 URL 中选择当前页面的本地订单，body 只提交动作；不能提供金额、客户、paymentId 或其他 Provider 标识。服务端要求签名恢复 cookie 与该本地订单一致，再校验 customer scope、Sandbox、canonical origin 和已保存的交易上下文，防止旧标签页误操作 Cookie 已切换的新订单。
 
 通知继续验证公共 `X-Rh-Signature`，只投影白名单字段。CAPTURE 通知可能使用原 AUTH merchantTxnId，VOID 可能使用本次操作 merchantTxnId；因此关联必须结合 paymentId、已保存的授权和操作 ID、操作类型、金额币种与已认领操作。`originTransactionId / originMerchantTxnId` 不参与现有签名，不作为单独授权依据。通知早于同步响应时，仅在签名 merchantTxnId 命中已保存允许集合、同一 Payment 且同类型操作已认领后绑定新操作 transactionId；后续同步响应不能覆盖通知真值。落库与事件须在同一事务提交后再 ACK。
 
-2026-09-18 再次核对官方指南：[通知指南](https://developers.onerway.com/payments/get-started/webhooks#interpret-the-status)明确 Checkout 使用交易查询补偿缺失通知，收到终态通知后不要求再做确认性查询。[交易查询](https://developers.onerway.com/payments/api-reference/endpoints/query-transactions)支持 `merchantTxnIds`，省略 `txnTypes` 时返回所有类型；但响应仍未列 `paymentStatus`，`txnType` 枚举仍只有 SALE/AUTH/REFUND，未完整定义 CAPTURE/VOID 查询结果。[Payment 查询](https://developers.onerway.com/payments/api-reference/endpoints/query-payments)包含 `A` 资金状态，但不能仅凭该枚举替代官方指定的 Checkout 查询路线。剩余缺口是缺通知、响应未知时的完整主动查询补偿，不是成功通知能否确认授权、扣款或释放。不得从空查询结果推断操作未执行，也不得从原 AUTH 历史成功推断当前资金仍可操作；查询补偿承诺确认前不编造 adapter，资金操作路由仍保持关闭。实施范围、查询补偿待确认项与分层验收证据记录在 [Issue #11](https://github.com/abel-wang777-showcase/onerway-payment-showcase/issues/11)。
+2026-09-18 再次核对官方指南：[通知指南](https://developers.onerway.com/payments/get-started/webhooks#interpret-the-status)明确 Checkout 使用交易查询补偿缺失通知，收到终态通知后不要求再做确认性查询。[交易查询](https://developers.onerway.com/payments/api-reference/endpoints/query-transactions)支持 `merchantTxnIds`，省略 `txnTypes` 时返回所有类型；但响应仍未列 `paymentStatus`，`txnType` 枚举仍只有 SALE/AUTH/REFUND，未完整定义 CAPTURE/VOID 查询结果。[Payment 查询](https://developers.onerway.com/payments/api-reference/endpoints/query-payments)包含 `A` 资金状态，但不能仅凭该枚举替代官方指定的 Checkout 查询路线。剩余缺口是缺通知、响应未知时的完整主动查询补偿，不是成功通知能否确认授权、扣款或释放。不得从空查询结果推断操作未执行，也不得从原 AUTH 历史成功推断当前资金仍可操作；不编造补偿 adapter，不把本地恢复记作主动查询验收通过。
+
+当前 AUTH 回跳和刷新仅恢复数据库中已持久化的验签通知事实，不签发普通 SALE query capability，也不调用其查询映射。缺失创建响应仍恢复同一待确认 Attempt；缺失资金操作响应保留原 claim。响应和通知均缺失时显示待确认，禁用再次请求、相反操作及普通付款 Retry；后续匹配通知仍可完成同一操作。主动查询补偿及真实旅程的未完成验收记录在 [Issue #11](https://github.com/abel-wang777-showcase/onerway-payment-showcase/issues/11)，不能据此关闭该 Issue。
 
 ## 6. 回跳、通知和最终状态
 
 支付结果采用多来源收敛，不采用“最后到达者覆盖”：
 
 1. SDK 客户端 `payment_result` 或 `confirmPayment()` resolve 只更新交互状态，不能单独确认最终成功；`rawResult` 不保存、不记录日志、不进入 Technical details。
-2. `returnUrl` 用于恢复 Order / PaymentAttempt，并触发服务端 query；它不是支付成功证据。
+2. `returnUrl` 用于恢复 Order / PaymentAttempt，并触发服务端 query；它不是支付成功证据。Issue #11 的 AUTH 在主动查询契约补齐前按上节仅恢复已持久化事实，回跳本身不确认授权或资金结果。
 3. Webhook 先可靠持久化、幂等处理，再按 Onerway 契约返回 ACK。
 4. query 与 Webhook 都产生 PaymentEvent，并通过明确的优先级和状态迁移规则收敛 PaymentAttempt。
 5. `processing` 必须可刷新恢复和后续收敛；重复回调不得重复创建业务结果或触发重复扣款。

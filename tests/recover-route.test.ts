@@ -103,6 +103,33 @@ beforeEach(() => {
 })
 
 describe('payment recovery route', () => {
+  it.each([undefined, '9000000000000000001'])('restores AUTH locally without minting a query capability, paymentId=%s', async (paymentId) => {
+    const stored = recovery()
+    mocks.getPaymentRecovery.mockResolvedValue({
+      ...stored,
+      attempt: { ...stored.attempt, integration: 'checkout', paymentId, authorization: { fundsStatus: 'pending' } },
+    })
+    mocks.requireServerProfile.mockReturnValue({ profile: 'sandbox', secret: 'test-secret', merchantNo: 'private-merchant', appId: 'private-app' })
+    const { default: handler } = await import('../server/api/payment/recover.get')
+    const result = await (handler as (event: unknown) => Promise<Record<string, unknown>>)({})
+    expect(result.query).toBeNull()
+    expect(result.paymentId).toBe(paymentId ?? null)
+    expect(result.attempt).toMatchObject({ authorization: { fundsStatus: 'pending' } })
+    expect(mocks.queryCheckoutPayment).not.toHaveBeenCalled()
+    expect(mocks.queryPaymentCreation).not.toHaveBeenCalled()
+    expect(mocks.queryPayment).not.toHaveBeenCalled()
+    expect(mocks.createQueryToken).not.toHaveBeenCalled()
+  })
+
+  it('rejects AUTH recovery from a different customer scope', async () => {
+    const stored = recovery()
+    mocks.getPaymentRecovery.mockResolvedValue({ ...stored, attempt: { ...stored.attempt, authorization: { fundsStatus: 'pending' } } })
+    mocks.requireServerProfile.mockReturnValue({ profile: 'sandbox', secret: 'test-secret', merchantNo: 'other-merchant', appId: 'private-app' })
+    const { default: handler } = await import('../server/api/payment/recover.get')
+    await expect((handler as (event: unknown) => Promise<unknown>)({})).rejects.toMatchObject({ statusCode: 409 })
+    expect(mocks.queryPayment).not.toHaveBeenCalled()
+  })
+
   it('queries the same retained payment and known contract after Payment audit cleanup', async () => {
     mocks.getPaymentRecovery.mockResolvedValue(null)
     mocks.getRetainedSubscriptionRecovery.mockResolvedValue({

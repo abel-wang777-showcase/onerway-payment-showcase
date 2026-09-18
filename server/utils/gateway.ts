@@ -458,9 +458,9 @@ export function buildCheckoutCreatePayload(
     merchantCustId: context.merchantCustId,
     orderAmount: formatAmount(order.amount.minor),
     orderCurrency: order.amount.currency,
-    productType: 'ALL',
+    productType: journey.id === 'hosted-authorization' ? 'CARD' : 'ALL',
     subProductType: 'DIRECT',
-    txnType: 'SALE',
+    txnType: journey.id === 'hosted-authorization' ? 'AUTH' : 'SALE',
     txnOrderMsg: {
       appId: profile.appId,
       products: [{
@@ -1066,6 +1066,14 @@ async function post(
 export async function createPayment(profile: Extract<ServerProfile, { profile: 'sandbox' }>, context: CreateContext): Promise<CreatedPayment> {
   const response = await post(profile, '/v1/sdkTxn/doTransaction', buildCreatePayload(profile, context))
   return readCreateResponse(response)
+}
+
+export async function executeAuthorizationOperation(
+  profile: Extract<ServerProfile, { profile: 'sandbox' }>,
+  context: AuthorizationOperationContext,
+): Promise<AuthorizationOperationResponse> {
+  const response = await post(profile, '/v1/txn/authPayment', buildAuthorizationOperationPayload(profile, context))
+  return readAuthorizationOperationResponse(response, context)
 }
 
 export async function createSubscriptionPayment(

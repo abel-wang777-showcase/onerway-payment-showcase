@@ -95,6 +95,22 @@ beforeEach(() => {
 })
 
 describe('payment return route', () => {
+  it('records AUTH return as navigation only, without querying or treating it as authorization', async () => {
+    mocks.requireServerProfile.mockReturnValue({ profile: 'sandbox', secret: 'test-secret', merchantNo: 'merchant-1', appId: 'app-1' })
+    mocks.getPaymentRecovery.mockResolvedValue({
+      order: { id: 'order-1' },
+      attempt: { id: 'attempt-1', orderId: 'order-1', integration: 'checkout', authorization: { fundsStatus: 'pending' } },
+      customer: { environment: 'sandbox', merchantNo: 'merchant-1', appId: 'app-1', merchantCustId: 'cust_1' },
+      events: [],
+    })
+    const { default: handler } = await import('../server/api/payment/return.post')
+    await expect((handler as (event: unknown) => Promise<unknown>)({})).resolves.toEqual({ duplicate: false })
+    expect(mocks.recordReturnEvent).toHaveBeenCalledWith('attempt-1', expect.any(String))
+    expect(mocks.queryCheckoutPayment).not.toHaveBeenCalled()
+    expect(mocks.queryPayment).not.toHaveBeenCalled()
+    expect(mocks.recordQueryEvent).not.toHaveBeenCalled()
+  })
+
   it('always performs a fresh query after an idempotent return, even after a Webhook terminal projection', async () => {
     const { default: handler } = await import('../server/api/payment/return.post')
     const result = await (handler as (event: unknown) => Promise<unknown>)({})

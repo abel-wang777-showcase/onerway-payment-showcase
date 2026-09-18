@@ -3,10 +3,12 @@ import {
   PaymentStoreError,
   recordSubscriptionWebhookEvent,
   recordWebhookEvent,
+  recordAuthorizationWebhookEvent,
 } from '../../../utils/store'
 import {
   readWebhookBody,
   readPaymentWebhook,
+  readAuthorizationWebhook,
   readSubscriptionPaymentWebhook,
   WebhookError,
 } from '../../../utils/webhook'
@@ -44,6 +46,12 @@ export default defineEventHandler(async (event): Promise<string> => {
         ? await querySubscription(profile, fact.contractId)
         : null
       await recordSubscriptionWebhookEvent(fact, details, new Date().toISOString())
+      transactionId = fact.transactionId
+    }
+    else if (['AUTH', 'CAPTURE', 'VOID'].includes(String(body.txnType))) {
+      const fact = readAuthorizationWebhook(body, profile.secret, profile.merchantNo, signatureHeader)
+      const recorded = await recordAuthorizationWebhookEvent(fact, new Date().toISOString())
+      if (!recorded.correlated) throw new PaymentStoreError('PAYMENT_ATTEMPT_NOT_FOUND')
       transactionId = fact.transactionId
     }
     else {

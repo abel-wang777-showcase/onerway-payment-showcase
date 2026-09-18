@@ -24,6 +24,12 @@ export function readCheckoutRedirectUrl(value: unknown): string | null {
 }
 
 export function paymentPath(attempt: PaymentAttempt): string {
+  if (attempt.authorization && (
+    attempt.authorization.fundsStatus !== 'pending'
+    || attempt.authorization.operation
+    || attempt.authorization.conflict
+  )) return `/halden/result/${attempt.orderId}`
+
   const page = ['succeeded', 'failed', 'cancelled'].includes(attempt.status)
     ? 'result'
     : attempt.integration === 'checkout' ? 'hosted' : 'sdk'

@@ -13,13 +13,14 @@ export interface AuthorizationOperation {
 }
 
 export interface AuthorizationState {
-  readonly paymentId: string
-  readonly authTransactionId: string
+  readonly paymentId?: string
+  readonly authTransactionId?: string
   readonly authMerchantTxnId: string
   readonly amountMinor: number
   readonly currency: 'USD'
   readonly fundsStatus: AuthorizationFundsStatus
   readonly operation?: AuthorizationOperation
+  readonly conflict?: boolean
   readonly updatedAt: string
 }
 
@@ -74,7 +75,25 @@ export function mapAuthorizationStatus(
 }
 
 export function canClaimAuthorizationOperation(authorization: AuthorizationState): boolean {
-  return authorization.fundsStatus === 'authorized' && !authorization.operation
+  return authorization.fundsStatus === 'authorized'
+    && Boolean(authorization.paymentId && authorization.authTransactionId)
+    && !authorization.conflict
+    && !authorization.operation
+}
+
+export function createAuthorizationState(input: {
+  readonly merchantTxnId: string
+  readonly amountMinor: number
+  readonly currency: 'USD'
+  readonly occurredAt: string
+}): AuthorizationState {
+  return Object.freeze({
+    authMerchantTxnId: input.merchantTxnId,
+    amountMinor: input.amountMinor,
+    currency: input.currency,
+    fundsStatus: 'pending',
+    updatedAt: input.occurredAt,
+  })
 }
 
 export function claimAuthorizationOperation(
@@ -121,7 +140,7 @@ export function mergeAuthorization(
   fact: AuthorizationFact,
 ): AuthorizationMerge {
   const reject = (conflict = false): AuthorizationMerge => Object.freeze({
-    authorization,
+    authorization: conflict ? Object.freeze({ ...authorization, conflict: true }) : authorization,
     accepted: false,
     conflict,
   })
@@ -133,7 +152,7 @@ export function mergeAuthorization(
   const projection = mapAuthorizationStatus(fact.txnType, fact.transactionStatus, fact.paymentStatus)
 
   if (
-    fact.paymentId !== authorization.paymentId
+    (authorization.paymentId && fact.paymentId !== authorization.paymentId)
     || fact.amountMinor !== authorization.amountMinor
     || fact.currency !== authorization.currency
   ) {
@@ -142,10 +161,14 @@ export function mergeAuthorization(
 
   if (fact.txnType === 'AUTH') {
     if (
-      fact.transactionId !== authorization.authTransactionId
-      || fact.merchantTxnId !== authorization.authMerchantTxnId
+      fact.merchantTxnId !== authorization.authMerchantTxnId
     ) {
       return reject()
+    }
+
+    if (projection.fundsStatus === 'authorized' && authorization.authTransactionId
+      && fact.transactionId !== authorization.authTransactionId) {
+      return reject(true)
     }
 
     // An attempt can fail while its Payment remains open. Neither an old AUTH
@@ -157,6 +180,8 @@ export function mergeAuthorization(
     return Object.freeze({
       authorization: Object.freeze({
         ...authorization,
+        paymentId: fact.paymentId,
+        ...(projection.fundsStatus === 'authorized' ? { authTransactionId: fact.transactionId } : {}),
         fundsStatus: projection.fundsStatus,
         updatedAt: latest(authorization.updatedAt, fact.occurredAt),
       }),
@@ -181,6 +206,8 @@ export function mergeAuthorization(
 
   if (
     !operation
+    || !authorization.paymentId
+    || !authorization.authTransactionId
     || operation.type !== fact.txnType
     || fact.transactionId === authorization.authTransactionId
     || (operation.transactionId && operation.transactionId !== fact.transactionId)

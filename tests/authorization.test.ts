@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   canClaimAuthorizationOperation,
   claimAuthorizationOperation,
+  createAuthorizationState,
   mapAuthorizationStatus,
   mergeAuthorization,
   type AuthorizationFact,
@@ -94,6 +95,19 @@ describe('authorization funds projection', () => {
     expect(Object.isFrozen(result.authorization)).toBe(true)
   })
 
+  it('binds only the first successful AUTH transaction, not a failed attempt', () => {
+    const pending = createAuthorizationState({ merchantTxnId: 'showcase-auth-1', amountMinor: 500, currency: 'USD', occurredAt })
+    const failed = mergeAuthorization(pending, fact({ transactionStatus: 'F', paymentStatus: 'O' })).authorization
+    expect(failed.paymentId).toBe('2000000000000000001')
+    expect(failed.authTransactionId).toBeUndefined()
+    const authorized = mergeAuthorization(failed, fact({ transactionId: '2000000000000000008' })).authorization
+    expect(authorized.authTransactionId).toBe('2000000000000000008')
+    const conflict = mergeAuthorization(authorized, fact())
+    expect(conflict.conflict).toBe(true)
+    expect(conflict.authorization).toMatchObject({ authTransactionId: '2000000000000000008', conflict: true })
+    expect(canClaimAuthorizationOperation(conflict.authorization)).toBe(false)
+  })
+
   it('keeps initial transaction failure open and prevents a late failure from unfreezing funds', () => {
     const failedAttempt = fact({ transactionStatus: 'F', paymentStatus: 'O' })
     expect(mergeAuthorization(state(), failedAttempt).authorization.fundsStatus).toBe('pending')
@@ -162,7 +176,6 @@ describe('authorization operation claim', () => {
 describe('authorization notification correlation and ordering', () => {
   it.each([
     { paymentId: '2000000000000000099' },
-    { transactionId: '2000000000000000099' },
     { merchantTxnId: 'another-order' },
     { amountMinor: 501 },
     { currency: 'EUR' },
@@ -238,7 +251,7 @@ describe('authorization notification correlation and ordering', () => {
     const completed = mergeAuthorization(claimed(type), operationFact(type)).authorization
     const conflicting = operationFact(type === 'CAPTURE' ? 'VOID' : 'CAPTURE')
     expect(mergeAuthorization(completed, conflicting)).toEqual({
-      authorization: completed, accepted: false, conflict: true,
+      authorization: { ...completed, conflict: true }, accepted: false, conflict: true,
     })
   })
 
