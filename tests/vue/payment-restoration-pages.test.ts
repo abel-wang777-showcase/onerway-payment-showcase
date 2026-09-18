@@ -4,7 +4,7 @@ import { defineComponent, nextTick, shallowRef } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { getPaymentFailure } from '../../shared/payment/failure'
 import type { SdkSession } from '../../shared/payment/sdk'
-import type { SubscriptionSummary } from '../../shared/payment/subscription'
+import type { SubscriptionIntegration, SubscriptionSummary } from '../../shared/payment/subscription'
 import { advanceSession, createSession } from '../../shared/demo/session'
 import HubPage from '../../app/pages/index.vue'
 import CheckoutPage from '../../app/pages/halden/checkout/[order].vue'
@@ -34,12 +34,15 @@ function deferred<T>() {
   return { promise, resolve }
 }
 
-function payment(status: 'cancelled' | 'processing' = 'cancelled'): SdkSession {
+function payment(
+  status: 'cancelled' | 'processing' = 'cancelled',
+  integration: SubscriptionIntegration = 'web-js-sdk',
+): SdkSession {
   const attempt = {
     id: 'attempt-1',
     orderId: 'order-1',
-    integration: 'web-js-sdk' as const,
-    method: 'card' as const,
+    integration,
+    method: integration === 'checkout' ? 'all' as const : 'card' as const,
     status,
     ...(status === 'cancelled' ? { statusSource: 'query' as const } : {}),
     paymentId: 'payment-1',
@@ -73,7 +76,7 @@ function payment(status: 'cancelled' | 'processing' = 'cancelled'): SdkSession {
   }
 }
 
-function subscription(): SubscriptionSummary {
+function subscription(state: SubscriptionSummary['state'] = 'pending'): SubscriptionSummary {
   return {
     planId: 'halden-daily-essentials-v1',
     productName: 'Halden Daily Essentials',
@@ -81,7 +84,7 @@ function subscription(): SubscriptionSummary {
     frequencyType: 'D',
     frequencyPoint: 1,
     expireDate: '2099-12-31',
-    state: 'pending',
+    state,
     statusSource: 'placeholder',
   }
 }
@@ -777,5 +780,120 @@ describe('payment restoration pages', () => {
 
     expect(probeRecovery).not.toHaveBeenCalled()
     wrapper.unmount()
+  })
+
+  describe.each([
+    { integration: 'web-js-sdk' as const, journey: 'standard-success' },
+    { integration: 'checkout' as const, journey: 'hosted-checkout' },
+  ])('Hub $integration subscription recovery', ({ integration, journey }) => {
+    beforeEach(() => {
+      nuxt.useRoute.mockReturnValue({ params: {}, query: { mode: 'subscription', journey } })
+    })
+
+    describe.each(['payment', 'retained'] as const)('%s recovery', (recovery) => {
+      function recoveredState(state: SubscriptionSummary['state']) {
+        return sdkState({
+          session: shallowRef(recovery === 'payment' ? payment('cancelled', integration) : null),
+          subscription: shallowRef(subscription(state)),
+          retainedSubscriptionOrderId: shallowRef(recovery === 'retained' ? 'order-1' : null),
+        })
+      }
+
+      it('offers a normal subscription start after the recovered contract becomes terminal', async () => {
+        const recovered = shallowRef<SubscriptionSummary | null>(null)
+        const sdk = sdkState({
+          ...recoveredState('terminal'),
+          subscription: recovered,
+          probeRecovery: vi.fn(async () => {
+            recovered.value = subscription('terminal')
+            return true
+          }),
+        })
+        nuxt.useSdk.mockReturnValue(sdk)
+
+        const wrapper = await mountSuspended(HubPage)
+        await flushPromises()
+
+        const start = wrapper.findAll('button')
+          .find(button => button.text() === 'Start Sandbox subscription')
+        expect(start?.exists()).toBe(true)
+        expect(start?.attributes('disabled')).toBeUndefined()
+        expect(wrapper.text()).not.toContain('View existing subscription')
+        expect(wrapper.text()).not.toContain('Start again as a new Sandbox customer')
+        expect(sdk.startSubscription).not.toHaveBeenCalled()
+
+        await start!.trigger('click')
+        expect(sdk.startSubscription).toHaveBeenCalledExactlyOnceWith(
+          'halden-daily-essentials-v1', false, integration,
+        )
+        expect(sdk.start).not.toHaveBeenCalled()
+        wrapper.unmount()
+      })
+
+      it.each(['pending', 'active', 'needs_attention'] as const)(
+        'keeps a %s contract guarded even when its initial payment is cancelled',
+        async (state) => {
+          const sdk = recoveredState(state)
+          nuxt.useSdk.mockReturnValue(sdk)
+          const wrapper = await mountSuspended(HubPage)
+          await flushPromises()
+
+          const view = wrapper.findAll('a')
+            .find(link => link.text() === 'View existing subscription')
+          const newCustomer = wrapper.findAll('button')
+            .find(button => button.text() === 'Start again as a new Sandbox customer')
+          expect(view?.attributes('href')).toBe('/halden/result/order-1')
+          expect(newCustomer?.exists()).toBe(true)
+          expect(wrapper.text()).not.toContain('Start Sandbox subscription')
+          expect(sdk.startSubscription).not.toHaveBeenCalled()
+
+          await newCustomer!.trigger('click')
+          expect(sdk.startSubscription).toHaveBeenCalledExactlyOnceWith(
+            'halden-daily-essentials-v1', true, integration,
+          )
+          wrapper.unmount()
+        },
+      )
+    })
+
+    it('keeps a placeholder without Provider evidence unavailable for a new customer', async () => {
+      const current = payment('processing', integration)
+      const sdk = sdkState({
+        session: shallowRef({ ...current, paymentId: null }),
+        subscription: shallowRef(subscription()),
+      })
+      nuxt.useSdk.mockReturnValue(sdk)
+      const wrapper = await mountSuspended(HubPage)
+      await flushPromises()
+
+      expect(wrapper.text()).toContain('View existing subscription')
+      expect(wrapper.text()).not.toContain('Start again as a new Sandbox customer')
+      expect(wrapper.text()).not.toContain('Start Sandbox subscription')
+      expect(sdk.startSubscription).not.toHaveBeenCalled()
+      wrapper.unmount()
+    })
+
+    it('keeps the one-time payment action independent of a recovered terminal subscription', async () => {
+      nuxt.useRoute.mockReturnValue({ params: {}, query: { journey } })
+      const sdk = sdkState({
+        session: shallowRef(payment('cancelled', integration)),
+        subscription: shallowRef(subscription('terminal')),
+      })
+      nuxt.useSdk.mockReturnValue(sdk)
+      const wrapper = await mountSuspended(HubPage)
+      await flushPromises()
+
+      const label = integration === 'checkout'
+        ? 'Start a new Sandbox Hosted Checkout'
+        : 'Start a new real Sandbox checkout'
+      const start = wrapper.findAll('button').find(button => button.text() === label)
+      expect(start?.exists()).toBe(true)
+      await start!.trigger('click')
+      expect(sdk.start).toHaveBeenCalledExactlyOnceWith(
+        journey, true, integration === 'checkout' ? 'all' : 'card',
+      )
+      expect(sdk.startSubscription).not.toHaveBeenCalled()
+      wrapper.unmount()
+    })
   })
 })

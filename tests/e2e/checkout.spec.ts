@@ -535,6 +535,49 @@ test('Checkout initial subscription keeps payment success separate from contract
   mock.assertClean()
 })
 
+test('terminal Checkout subscription recovery offers a normal same-customer start from the Hub', async ({ page }) => {
+  test.setTimeout(120_000)
+  const mock = await installCheckoutMock(page, {
+    subscription: true,
+    queryOutcome: { status: 'cancelled', transactionStatus: 'N', paymentStatus: 'N' },
+  })
+  await startCheckoutSubscription(page)
+  mock.setSubscriptionState('terminal')
+  await page.reload()
+  const verify = page.getByRole('button', { name: 'Verify existing payment', exact: true })
+  await expect(verify).toBeEnabled()
+  await verify.click()
+  await expect(page).toHaveURL(`${BASE_URL}/halden/result/${ORDER_ID}`)
+  await page.getByRole('link', { name: 'Return to Demo Hub', exact: true }).click()
+
+  const checkout = page.locator('[role="radio"][value="checkout"]')
+  await checkout.press('Space')
+  await expect(checkout).toBeChecked()
+  const billing = page.locator('[role="radio"][value="subscription"]')
+  await billing.press('Space')
+  await expect(billing).toBeChecked()
+  const start = page.getByRole('button', { name: 'Start Sandbox subscription', exact: true })
+  await expect(start).toBeEnabled()
+  await expect(page.getByRole('link', { name: 'View existing subscription', exact: true })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Start again as a new Sandbox customer', exact: true })).toHaveCount(0)
+
+  // Inspect the normal intent without creating a second order using the fixed fixture IDs.
+  let restartBody: unknown
+  await page.route('**/api/payment/subscription/intent', async (route) => {
+    restartBody = route.request().postDataJSON()
+    await route.fulfill({ status: 409, json: { statusMessage: 'MOCK_RESTART_NOT_CREATED' } })
+  })
+  await start.focus()
+  await expect(start).toBeFocused()
+  await start.press('Enter')
+  await expect.poll(() => restartBody).toEqual({
+    planId: 'halden-daily-essentials-v1', integration: 'checkout',
+  })
+  expect(mock.calls.filter(call => call.path === '/api/payment/subscription/create')).toHaveLength(1)
+  expect(mock.externalRequests).toEqual([])
+  mock.assertClean()
+})
+
 for (const loseCreateResponse of [false, true]) {
   test(`Checkout subscription restores the same attempt with create response ${loseCreateResponse ? 'lost' : 'received'}`, async ({ page }) => {
     const mock = await installCheckoutMock(page, { subscription: true, loseCreateResponse })

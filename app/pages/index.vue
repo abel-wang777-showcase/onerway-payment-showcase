@@ -343,7 +343,7 @@ async function startNewSandboxSubscriptionCustomer(): Promise<void> {
 const resumableSubscription = computed(() => {
   const orderId = sdkSession.value?.order.id ?? retainedSubscriptionOrderId.value
 
-  return recoveredSubscription.value && orderId
+  return recoveredSubscription.value && recoveredSubscription.value.state !== 'terminal' && orderId
     ? {
         orderId,
         state: recoveredSubscription.value.state,
