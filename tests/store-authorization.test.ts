@@ -175,7 +175,7 @@ describe('authorization persistence', () => {
     const { events } = mockRow()
     await expect(recordQueryEvent('attempt-1', '1000', { paymentId: '1000', transactionId: '1001', merchantTxnId, status: 'succeeded', rawStatus: 'S' }, now))
       .rejects.toMatchObject({ code: 'PAYMENT_ATTEMPT_MISMATCH' })
-    await expect(recordWebhookEvent({ ...fact(), status: 'succeeded', paymentStatus: 'S' }))
+    await expect(recordWebhookEvent({ ...fact(), occurredAt: now, status: 'succeeded', paymentStatus: 'S' }))
       .rejects.toMatchObject({ code: 'PAYMENT_ATTEMPT_MISMATCH' })
     await expect(createPaymentRetry('order-1', 'attempt-1', '1000', now)).rejects.toMatchObject({ code: 'PAYMENT_RETRY_NOT_ALLOWED' })
     await expect(completePaymentRecord('attempt-1', '1000', '1001', { ...createResult(), source: 'query', status: 'succeeded' }))

@@ -241,6 +241,8 @@ AUTH 成功不形成已扣款或可履约事实。独立资金投影只区分 `p
 
 通知继续验证公共 `X-Rh-Signature`，只投影白名单字段。CAPTURE 通知可能使用原 AUTH merchantTxnId，VOID 可能使用本次操作 merchantTxnId；因此关联必须结合 paymentId、已保存的授权和操作 ID、操作类型、金额币种与已认领操作。`originTransactionId / originMerchantTxnId` 不参与现有签名，不作为单独授权依据。通知早于同步响应时，仅在签名 merchantTxnId 命中已保存允许集合、同一 Payment 且同类型操作已认领后绑定新操作 transactionId；后续同步响应不能覆盖通知真值。落库与事件须在同一事务提交后再 ACK。
 
+2026-09-21 用户确认及真实 Sandbox 样本表明，CAPTURE/VOID 通知可以不含 `txnTime`，这不是 Provider 待补字段或资金成功前置。AUTH 保持交易时间校验；CAPTURE/VOID 有非空 `txnTime` 时仍严格校验日期及时区，缺省、null 或空串时使用服务端接收时间记录通知事件的 `occurredAt`。该回退表示接收时间，不宣称为 Provider 交易发生时间，也不把 `responseTime / responseDate` 或历史 AUTH 时间当作本次交易时间。重复通知沿用首次持久化事件时间；资金状态、关联、冲突和操作资格仍由已验签业务事实决定，不按事件时间先后推导。其他通知格式的字段名不因单份样例自动加入本项目解析或签名规则。
+
 2026-09-18 再次核对官方指南：[通知指南](https://developers.onerway.com/payments/get-started/webhooks#interpret-the-status)明确 Checkout 使用交易查询补偿缺失通知，收到终态通知后不要求再做确认性查询。[交易查询](https://developers.onerway.com/payments/api-reference/endpoints/query-transactions)支持 `merchantTxnIds`，省略 `txnTypes` 时返回所有类型；但响应仍未列 `paymentStatus`，`txnType` 枚举仍只有 SALE/AUTH/REFUND，未完整定义 CAPTURE/VOID 查询结果。[Payment 查询](https://developers.onerway.com/payments/api-reference/endpoints/query-payments)包含 `A` 资金状态，但不能仅凭该枚举替代官方指定的 Checkout 查询路线。剩余缺口是缺通知、响应未知时的完整主动查询补偿，不是成功通知能否确认授权、扣款或释放。不得从空查询结果推断操作未执行，也不得从原 AUTH 历史成功推断当前资金仍可操作；不编造补偿 adapter，不把本地恢复记作主动查询验收通过。
 
 当前 AUTH 回跳和刷新仅恢复数据库中已持久化的验签通知事实，不签发普通 SALE query capability，也不调用其查询映射。缺失创建响应仍恢复同一待确认 Attempt；缺失资金操作响应保留原 claim。响应和通知均缺失时显示待确认，禁用再次请求、相反操作及普通付款 Retry；后续匹配通知仍可完成同一操作。主动查询补偿及真实旅程的未完成验收记录在 [Issue #11](https://github.com/abel-wang777-showcase/onerway-payment-showcase/issues/11)，不能据此关闭该 Issue。

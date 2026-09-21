@@ -54,8 +54,11 @@ export interface SubscriptionPaymentWebhook extends PaymentWebhook {
   readonly subscriptionState: SubscriptionState
 }
 
-export interface AuthorizationWebhook extends AuthorizationFact, AuthorizationProjection {
+export interface AuthorizationWebhook extends Omit<AuthorizationFact, 'occurredAt'>, AuthorizationProjection {
   readonly kind: 'authorization'
+  // CAPTURE/VOID may omit the transaction time. Persistence then records the
+  // notification's server receipt time, not an invented Provider transaction time.
+  readonly occurredAt?: string
 }
 
 export type WebhookErrorCode
@@ -484,6 +487,9 @@ export function readAuthorizationWebhook(
     throw new WebhookError('PAYMENT_WEBHOOK_FIELDS_INVALID', 'A01')
   }
 
+  const hasTransactionTime = body.txnTime !== undefined && body.txnTime !== null && body.txnTime !== ''
+  const occurredAt = txnType === 'AUTH' || hasTransactionTime ? readOccurredAt(body) : undefined
+
   return Object.freeze({
     kind: 'authorization',
     source: 'webhook',
@@ -496,6 +502,6 @@ export function readAuthorizationWebhook(
     transactionStatus,
     paymentStatus,
     ...projection,
-    occurredAt: readOccurredAt(body),
+    ...(occurredAt ? { occurredAt } : {}),
   })
 }

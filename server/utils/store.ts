@@ -1767,7 +1767,10 @@ export async function recordAuthorizationWebhookEvent(
       || (current.paymentId && current.paymentId !== fact.paymentId)) {
       throw new PaymentStoreError('PAYMENT_ATTEMPT_MISMATCH')
     }
-    const merged = mergeAuthorization(current.authorization, fact)
+    // An operation notification without txnTime is timed by receipt. Duplicate
+    // delivery still returns the original event below, preserving its first time.
+    const occurredAt = fact.occurredAt ?? observedAt
+    const merged = mergeAuthorization(current.authorization, { ...fact, occurredAt })
     if (!merged.accepted && !merged.conflict) throw new PaymentStoreError('PAYMENT_ATTEMPT_MISMATCH')
     const rawStatus = `${fact.txnType}:${fact.transactionStatus}:${fact.paymentStatus}`
     const duplicate = await findEvent(client, 'webhook', fact.transactionId)
@@ -1796,7 +1799,7 @@ export async function recordAuthorizationWebhookEvent(
       status: mapAuthorizationStatus(fact.txnType, fact.transactionStatus, fact.paymentStatus).status,
       rawStatus, transactionId: fact.transactionId, transactionStatus: fact.transactionStatus,
       paymentStatus: fact.paymentStatus, ...(merged.conflict ? { conflict: true } : {}),
-      occurredAt: fact.occurredAt,
+      occurredAt,
     })
     await insertEvent(client, event)
     await updateAttempt(client, attempt)

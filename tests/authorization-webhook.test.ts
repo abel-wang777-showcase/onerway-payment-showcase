@@ -121,7 +121,7 @@ describe('authorization webhook signature and whitelist', () => {
 
     expect(parsed).not.toHaveProperty('originTransactionId')
     expect(parsed).not.toHaveProperty('originMerchantTxnId')
-    expect(mergeAuthorization(original, parsed).accepted).toBe(false)
+    expect(mergeAuthorization(original, { ...parsed, occurredAt: parsed.occurredAt! }).accepted).toBe(false)
 
     const claimed: AuthorizationState = {
       ...original,
@@ -133,7 +133,8 @@ describe('authorization webhook signature and whitelist', () => {
       originTransactionId: original.authTransactionId,
       originMerchantTxnId: original.authMerchantTxnId,
     })
-    expect(mergeAuthorization(claimed, read(unrelated)).accepted).toBe(false)
+    const unrelatedFact = read(unrelated)
+    expect(mergeAuthorization(claimed, { ...unrelatedFact, occurredAt: unrelatedFact.occurredAt! }).accepted).toBe(false)
   })
 
   it('keeps the SALE parser closed to authorization categories', () => {
@@ -144,6 +145,37 @@ describe('authorization webhook signature and whitelist', () => {
 })
 
 describe('authorization webhook confirmed combinations', () => {
+  it.each(['CAPTURE', 'VOID'])('accepts %s without a transaction time while retaining signature validation', (txnType) => {
+    for (const txnTime of [undefined, null, '']) {
+      const body = payload({ txnType, paymentStatus: txnType === 'CAPTURE' ? 'S' : 'N', txnTime,
+        responseTime: '2026-09-21 11:59:25', txnTimeZone: '+08:00' })
+      if (txnTime === undefined) delete body.txnTime
+      const header = `v1=${sign(body)}`
+      const result = readAuthorizationWebhook(body, secret, 'merchant', header)
+      expect(result).toMatchObject({ fundsStatus: txnType === 'CAPTURE' ? 'captured' : 'voided' })
+      expect(result).not.toHaveProperty('occurredAt')
+      expect(result).not.toHaveProperty('responseTime')
+      expect(() => readAuthorizationWebhook({ ...body, responseTime: '2026-09-21 12:00:00' }, secret, 'merchant', header))
+        .toThrow('PAYMENT_WEBHOOK_SIGNATURE_INVALID')
+    }
+  })
+
+  it.each([undefined, null, ''])('still requires AUTH transaction time when it is %s', (txnTime) => {
+    expect(() => read(payload({ txnTime, responseTime: '2026-09-21 11:59:25' })))
+      .toThrow(expect.objectContaining({ diagnosticCode: 'T01' }))
+  })
+
+  it.each(['CAPTURE', 'VOID'])('preserves or validates a supplied %s transaction time', (txnType) => {
+    const body = payload({ txnType, paymentStatus: txnType === 'CAPTURE' ? 'S' : 'N' })
+    expect(read(body).occurredAt).toBe('2026-09-18T08:01:00.000Z')
+    for (const txnTime of [0, false, 'invalid', '2026-02-30 16:01:00']) {
+      expect(() => read({ ...body, txnTime })).toThrow('PAYMENT_WEBHOOK_FIELDS_INVALID')
+    }
+    for (const txnTimeZone of [undefined, 'UTC+8']) {
+      expect(() => read({ ...body, txnTimeZone })).toThrow(expect.objectContaining({ diagnosticCode: 'T02' }))
+    }
+  })
+
   it.each([
     ['AUTH', 'S', 'A', 'authorized', 'processing'],
     ['AUTH', 'F', 'O', 'pending', 'processing'],

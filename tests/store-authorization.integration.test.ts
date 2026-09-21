@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { Pool } from '@neondatabase/serverless'
 import { describe, expect, it } from 'vitest'
 import { createAttempt } from '../shared/payment/attempt'
@@ -6,7 +6,7 @@ import { createAuthorizationState } from '../shared/payment/authorization'
 import { createEvent } from '../shared/payment/event'
 import { createOrder } from '../shared/payment/order'
 import { createMerchantCustomer } from '../server/utils/customer'
-import type { AuthorizationWebhook, PaymentWebhook } from '../server/utils/webhook'
+import { readAuthorizationWebhook, type AuthorizationWebhook, type PaymentWebhook } from '../server/utils/webhook'
 import {
   claimStoredAuthorizationOperation,
   completePaymentRecord,
@@ -63,6 +63,47 @@ async function insert(input: ReturnType<typeof fixture>) {
 }
 
 describe('Neon authorization persistence', () => {
+  it.each(['CAPTURE', 'VOID'] as const)('stores signed %s without txnTime at first receipt and preserves that time on redelivery', async (type) => {
+    const data = fixture()
+    try {
+      await insert(data)
+      await recordAuthorizationWebhookEvent(data.fact, data.now)
+      const operationMerchantTxnId = `operation-${randomUUID()}`
+      await claimStoredAuthorizationOperation(data.attempt.id, type, operationMerchantTxnId, data.now)
+      await recordAuthorizationOperationResponse(data.attempt.id, operationMerchantTxnId, null, data.now)
+      const body = {
+        notifyType: 'TXN', txnType: type, merchantNo: 'test-merchant',
+        transactionId: `8${data.sequence}`, paymentId: data.fact.paymentId, merchantTxnId: operationMerchantTxnId,
+        orderAmount: '5.00', orderCurrency: 'USD', status: 'S', paymentStatus: type === 'CAPTURE' ? 'S' : 'N',
+        responseTime: '2026-09-21 11:59:25', txnTimeZone: '+08:00',
+      }
+      const secret = 'isolated-notification-test-secret'
+      const digest = createHash('sha256').update(Object.entries(body)
+        .sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0)
+        .map(([, value]) => value).join('') + secret).digest('hex')
+      const parsed = readAuthorizationWebhook(body, secret, 'test-merchant', `v1=${digest}`)
+      const receivedAt = new Date(Date.parse(data.now) + 1000).toISOString()
+      const redeliveredAt = new Date(Date.parse(data.now) + 3000).toISOString()
+      const first = await recordAuthorizationWebhookEvent(parsed, receivedAt)
+      const duplicate = await recordAuthorizationWebhookEvent(parsed, redeliveredAt)
+      const recovery = await getPaymentRecovery(data.order.id, data.attempt.id)
+      expect(first.event?.occurredAt).toBe(receivedAt)
+      expect(duplicate.duplicate).toBe(true)
+      expect(duplicate.event).toEqual(first.event)
+      expect(recovery?.attempt.status).toBe(type === 'CAPTURE' ? 'succeeded' : 'cancelled')
+      expect(recovery?.attempt.authorization).toMatchObject({
+        fundsStatus: type === 'CAPTURE' ? 'captured' : 'voided', updatedAt: receivedAt,
+        authTransactionId: data.fact.transactionId,
+        operation: { type, merchantTxnId: operationMerchantTxnId, transactionId: body.transactionId, status: 'confirmed' },
+      })
+      expect(recovery?.events.filter(event => event.sourceKey === body.transactionId)).toHaveLength(1)
+      expect((await claimStoredAuthorizationOperation(data.attempt.id, type === 'CAPTURE' ? 'VOID' : 'CAPTURE', `blocked-${randomUUID()}`, redeliveredAt)).claimed).toBe(false)
+    }
+    finally {
+      await cleanup(data.order.id)
+    }
+  })
+
   it.each(['CAPTURE', 'VOID'] as const)('allows one winner for concurrent CAPTURE and %s, preserving notification-before-response truth', async (competingType) => {
     const data = fixture()
     try {
