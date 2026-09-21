@@ -2,7 +2,7 @@
 
 > 状态：M0 Web JS SDK Card、订阅与钱包；Sandbox Hosted Checkout 已有真实演示证据，逐方式能力保持条件限制
 >
-> 更新日期：2026-09-18
+> 更新日期：2026-09-21
 > 作用：这是项目长期有效的产品、架构、状态和安全边界。GitHub Issues 负责交付顺序，不替代本文件。
 
 ## 1. 产品目标、受众和非目标
@@ -60,7 +60,8 @@ Demo Hub 是公开演示入口，不是第二套后台。它负责：
 - Card simulation 额外开放 processing recovery、cancelled retry、deterministic failure 与 form load recovery 四条异常旅程；它们不含 Sandbox mode、不产生 provider 标识，也不扩张真实 create allowlist。deterministic failure 只形成 `source=simulation / status=failed` 的本地事实，不能作为 Payment-level `failed` 原始状态证据。
 - `E-commerce × Web JS SDK × Google Pay` 与 `E-commerce × Web JS SDK × Apple Pay` 均保持 Conditional，并复用 USD 5.00 `standard-success` 的真实 Sandbox 入口；Showcase 只记录用户选择的预期方式，是否渲染对应钱包按钮及其资格由同一个 Onerway SDK Element 决定。两者都不渲染伪钱包按钮，也没有钱包专属 simulation。Apple Pay 的最终真实设备 / Safari / Wallet canary 仍需单独授权与用户设备配合，不能由桌面浏览器或历史支付替代。
 - `E-commerce × Checkout × All` 为 Conditional，并提供 USD 5.00 普通支付与 USD 50.00 3DS 的 Sandbox 一次性支付入口。`All` 是支付方式选择策略，不代表最终使用某张卡或钱包；具体可选项由商户启用、国家、币种和设备条件决定。USD 50.00 真实 3DS 已获用户人工验收确认，返回恢复、超时取消与通知链路已有独立 Sandbox 证据，执行范围见 Issue #8；这些证据不代表所有设备或具体支付方式均已验证，不宣称任一具体收银台支付方式为 Available。同一入口另有 Card 初始订阅选项，沿用固定 USD 5.00 计划且保持 Conditional，范围及证据边界见 Issue #10 章节。
-- Checkout 的具体支付方式直达、Direct API、其余 APM 和 Game / Live / AI 场景当前为 Planned。
+- `E-commerce × Checkout × Card` 提供 USD 5.00 预授权旅程及全额请款或撤销操作，保持 Conditional；当前实现、查询补偿与真实 Sandbox 验收边界见 Issue #11 章节。
+- Checkout 的其余具体支付方式直达、Direct API、其余 APM 和 Game / Live / AI 场景当前为 Planned。
 - Unavailable 保留为明确证实不支持时使用的状态；当前不为凑齐 UI 而制造无证据的 Unavailable 组合。
 
 ## 4. 统一支付模型
@@ -215,12 +216,47 @@ Checkout 复用第 6.1 节固定 `halden-daily-essentials-v1` 计划、服务端
 
 [Issue #10](https://github.com/abel-wang777-showcase/onerway-payment-showcase/issues/10) 分开记录本次自动化、历史 SDK/保存卡证据和本次真实 Checkout 订阅证据。本次实现不能替代首次托管 Card/3DS、回跳、通知与查询真实验收；未授权时不部署、不执行真实订阅交易、不合并，也不将能力提升为 Available。
 
+### Checkout 预授权、请款与撤销（Issue #11）
+
+本期范围是 Card 的标准全额 `AUTH → CAPTURE` 与 `AUTH → VOID`，继续使用 `Order → PaymentAttempt → PaymentEvent`、服务端 customer scope 和现有恢复权限。部分或多次请款、增量授权、退款、APM 预授权、分期与 Production 交易不在范围内。实现接入固定 USD 5.00 旅程、交易路由、资金操作、通知持久化及原交易查询补偿，能力仍保持 Conditional。真实 Sandbox 与自动化验收分别记录在 Issue #11，不因本地或 mock 闭环通过而宣称真实旅程已验收。
+
+[Checkout 指南](https://developers.onerway.com/payments/online-payments/checkout#pre-authorization)与[创建接口](https://developers.onerway.com/payments/api-reference/endpoints/create-checkout-payment)规定通过 `POST /txn/payment`、`subProductType=DIRECT`、`txnType=AUTH` 创建授权。用户已于 2026-09-18 确认当前 Sandbox 商户支持 `CARD + DIRECT + AUTH`，本期固定使用该组合；商户支持已确认不代表实现或真实验收已经完成。3DS、卡信息与设备信息由托管页承接。
+
+资金状态与交易结果分开表达。已验签的[预授权通知](https://developers.onerway.com/payments/api-reference/webhooks/authorization-capture)当前可确认的组合为：
+
+| txnType | status / paymentStatus | 资金语义 | PaymentAttempt 投影 |
+| --- | --- | --- | --- |
+| AUTH | S / A | 已授权冻结，尚未扣款 | processing |
+| AUTH | F / O | 本次授权尝试失败，Payment 仍开放 | processing |
+| CAPTURE | S / S | 已全额扣款 | succeeded |
+| VOID | S / N | 授权已撤销并释放 | cancelled；不开放普通付款 Retry |
+
+[预授权场景指南](https://developers.onerway.com/payments/online-payments/scenarios/pre-authorization#confirm-the-authorization)明确以 AUTH `S/A` 通知确认授权，并保存其 `transactionId / paymentId`。成功通知通过验签及关联核对，或下述查询组合确认原 AUTH 成功且当前 Payment 仍为 A 后，事务性确定成功授权 `transactionId`，后续将其作为 `originTransactionId`；不能把创建响应中尚未成功的交易 ID 提前固定为成功授权锚点。已经确认的成功授权 ID 不随迟到创建响应或失败通知改变，出现第二个冲突的成功授权 ID 时保留冲突并关闭资金操作。Provider 内部重试机制的完整说明不是这条成功通知路径的前置条件。
+
+AUTH 成功不形成已扣款或可履约事实。独立资金投影只区分 `pending / authorized / captured / voided`；操作的 `pending / unknown / confirmed` 与资金状态分开。迟到或重复的 AUTH 事实不得回退已授权或已完成资金状态；相互矛盾的资金终态保留冲突，不能按到达顺序覆盖。CAPTURE/VOID 失败组合、AUTH 取消缺 ID 的例外和授权自然过期均不得自行推导；不使用本地时钟宣告冻结已释放。普通 Checkout 无 Payment ID 取消规则不自动适用于 AUTH。这些未定义组合保持待确认且不解除操作锁，不要求先取得所有异常样本才实施两条标准成功旅程。
+
+[请款或撤销接口](https://developers.onerway.com/payments/api-reference/endpoints/capture-or-void-authorization)为 `POST /v1/txn/authPayment`。请求只使用服务端保存的原 AUTH `originTransactionId`，以及稳定且独立的操作 `merchantTxnId`、`txnType=CAPTURE|VOID` 和商户签名；接口无请款金额字段，仅支持全额。原授权 transactionId 永久保留，返回的新 transactionId 属于本次操作，paymentId 必须关联同一授权。`respCode=20000` 不代表资金成功；同步 `data.status` 可记录操作处理结果，但不能代替已验签通知或经确认的查询资金事实。解析器缺少必要关联时拒绝推进，即使 Provider schema 没有声明这些字段必返。
+
+资金操作在数据库事务中锁定同一 Attempt，验证资金已授权且尚无操作，再原子保存互斥的 CAPTURE/VOID claim 后请求 Provider；纯领域 claim 判定不构成跨请求并发保护。已认领、响应未知或已确认的操作都不得重新提交，相反动作也不得并发执行。网络错误、HTTP 错误、业务拒绝或响应无法解析均不自动解除 claim；恢复只读取原操作。前端在操作 URL 中选择当前页面的本地订单，body 只提交动作；不能提供金额、客户、paymentId 或其他 Provider 标识。服务端要求签名恢复 cookie 与该本地订单一致，再校验 customer scope、Sandbox、canonical origin 和已保存的交易上下文，防止旧标签页误操作 Cookie 已切换的新订单。
+
+通知继续验证公共 `X-Rh-Signature`，只投影白名单字段。CAPTURE 通知可能使用原 AUTH merchantTxnId，VOID 可能使用本次操作 merchantTxnId；因此关联必须结合 paymentId、已保存的授权和操作 ID、操作类型、金额币种与已认领操作。`originTransactionId / originMerchantTxnId` 不参与现有签名，不作为单独授权依据。通知早于同步响应时，仅在签名 merchantTxnId 命中已保存允许集合、同一 Payment 且同类型操作已认领后绑定新操作 transactionId；后续同步响应不能覆盖通知真值。落库与事件须在同一事务提交后再 ACK。
+
+2026-09-21 用户确认及真实 Sandbox 样本表明，CAPTURE/VOID 通知可以不含 `txnTime`，这不是 Provider 待补字段或资金成功前置。AUTH 保持交易时间校验；CAPTURE/VOID 有非空 `txnTime` 时仍严格校验日期及时区，缺省、null 或空串时使用服务端接收时间记录通知事件的 `occurredAt`。该回退表示接收时间，不宣称为 Provider 交易发生时间，也不把 `responseTime / responseDate` 或历史 AUTH 时间当作本次交易时间。重复通知沿用首次持久化事件时间；资金状态、关联、冲突和操作资格仍由已验签业务事实决定，不按事件时间先后推导。其他通知格式的字段名不因单份样例自动加入本项目解析或签名规则。
+
+2026-09-21 用户要求补齐主动查询补偿。同日真实 Sandbox 只读验证确认：[交易查询](https://developers.onerway.com/payments/api-reference/endpoints/query-transactions)省略 `txnTypes`、按原操作 `merchantTxnIds` 可分别返回 CAPTURE/VOID 成功记录，包含独立操作 `transactionId`、同一 `paymentId`、原 AUTH `originTransactionId`，但不含 `paymentStatus`；[Payment 查询](https://developers.onerway.com/payments/api-reference/endpoints/query-payments)按该 `paymentId` 返回当前 S/N，且 `lastTransactionId` 对应同一操作。公开交易查询枚举尚未列出两种操作，不据此要求 Provider 新增字段；本项目按上述实际返回组合核验，不把 transaction S 单独映射为资金成功。
+
+主动补偿仅从现有恢复入口触发，沿用签名 recovery cookie、customer scope、Sandbox 与查询限流。服务端从持久化状态选择目标：已有操作 claim 时查该 CAPTURE/VOID，否则查原 AUTH；所有 ID、金额和币种均不由客户端输入。先查询唯一交易，严格核对 merchantTxnId、交易类型、CARD/DIRECT、appId、金额币种、已有 Payment/交易 ID，以及操作的原 AUTH ID；交易 S 后再查唯一 Payment，核对同一 Payment、merchantTxnId、appId、金额币种及 `lastTransactionId`。只有 AUTH S + 当前 A、CAPTURE S + 当前 S、VOID S + 当前 N 才形成 `source=query` 的资金事实。AUTH 查询不能使用创建响应的交易 ID 冒充成功授权锚点；没有 Payment ID 的创建响应未知场景可按原 merchantTxnId 找回关联，但不得重建订单或重发 create。
+
+查询在数据库事务外执行，落库时锁定并重新校验原目标与最新授权/操作关联，避免覆盖查询期间到达的通知。query 事件按 Attempt、Payment、交易及实际状态组合幂等，时间表示服务端查询观察时间；重复查询不刷新原事件。query 与 Webhook 可各自保留来源，迟到 AUTH 或冲突事实不能改写当前终态的来源、原 AUTH 锚点或再次开放资金操作；相互矛盾的资金终态继续保留冲突，不自动撤销已确认状态。对 pending/authorized 且尚无操作的授权，若严格关联的当前 Payment 已不是该 AUTH 的 A 状态或最新交易已变化，则传递查询实际核验的 AUTH/Payment 标识，事务性重验并保留最后资金事实、标记 conflict、关闭操作资格；这条否定观察先于 AUTH 通知到达时也必须保存，迟到通知不得重新开放操作。不把这种明确否定授权的观察当作网络失败忽略。空结果、一般查询拒绝、网络故障、未知或未完成操作状态均不证明资金操作未执行，只恢复最新持久化状态并保留 claim。后续匹配通知或成功查询都可完成原操作。
+
+AUTH 回跳仅记录导航事实，再通过恢复入口查询；结果页刷新及重新打开复用同一入口，不签发普通 SALE query capability，不调用 SALE 查询映射，也不新增后台轮询。无冲突的 captured/voided 已有可信终态时直接恢复，避免确认性重复查询。已授权状态查询仍必须核对当前 Payment；原 AUTH 历史成功不能证明资金现在仍冻结。查询恢复不会创建新的 AUTH、CAPTURE、VOID 或普通付款 Retry。真实查询、通知恢复及浏览器验收的具体范围记录在 [Issue #11](https://github.com/abel-wang777-showcase/onerway-payment-showcase/issues/11)。
+
 ## 6. 回跳、通知和最终状态
 
 支付结果采用多来源收敛，不采用“最后到达者覆盖”：
 
 1. SDK 客户端 `payment_result` 或 `confirmPayment()` resolve 只更新交互状态，不能单独确认最终成功；`rawResult` 不保存、不记录日志、不进入 Technical details。
-2. `returnUrl` 用于恢复 Order / PaymentAttempt，并触发服务端 query；它不是支付成功证据。
+2. `returnUrl` 用于恢复 Order / PaymentAttempt，并触发服务端 query；它不是支付成功证据。Issue #11 的 AUTH 通过上节专用恢复查询核验，回跳本身不确认授权或资金结果。
 3. Webhook 先可靠持久化、幂等处理，再按 Onerway 契约返回 ACK。
 4. query 与 Webhook 都产生 PaymentEvent，并通过明确的优先级和状态迁移规则收敛 PaymentAttempt。
 5. `processing` 必须可刷新恢复和后续收敛；重复回调不得重复创建业务结果或触发重复扣款。
@@ -257,6 +293,8 @@ Card merchant confirm 使用独立的持久化 submission latch：浏览器在�
 新 PaymentAttempt Retry 与“重载原 Payment”或“启动独立 Sandbox Order”是三种不同动作：SDK 脚本 / Element 在 pre-confirm 阶段加载失败时先重载同一个 `paymentId`，不创建新 Attempt；create、confirm 或网络结果未知以及 `created / requires_action / processing` 只恢复和 query 原 Attempt；独立 clean-run 继续创建新 Order。只有 query / Webhook 权威建立的 `cancelled`，以及未来具有同等权威来源的 `failed`，才允许服务端在同一 Order 下创建带 `retryOf` 的新 Attempt。当前 transaction `F`（包括 Checkout 查询返回的 `F`）不能单独映射 Payment-level `failed`，在正式来源确认前真实 Sandbox `failed` 路径保持 stop gate。
 
 Retry 由服务端在单一数据库事务中锁定 parent、重新计算资格并 get-or-create 唯一直接 child；数据库以非空 `retry_of` 唯一索引防止多击、请求重放或跨实例并发产生兄弟 Attempt。child 继承 parent 的 integration / method，使用新的 `merchantTxnId`，不覆盖旧 Attempt/Event。切换 recovery cookie 前 child 记录必须已完成数据库提交；响应丢失后，无论浏览器仍持有旧 parent cookie，还是已经收到响应头并切换为该 child cookie，重放同一个 parent retry 请求都只回读同一 child，其他 cookie lineage 一律拒绝。child 调用 Provider create 前必须再次锁定并核验 parent 资格，防止 parent 在建 child 后被 fresh query 调和为 `succeeded` 仍产生新扣款；一旦 child 已有 create claim 或 Provider 标识，后续只恢复该 child，不能重放 create。若 pre-create child 因 parent 真值变化而不再具有 Retry 资格，claim 事务必须先持久化本地、非投影且不可逆的拒绝事件，再永久关闭该 child；recovery 只在该拒绝事实存在时恢复并重绑 direct parent，不查询被拒 child 的 Provider creation、不删除 child 历史，也不把 child 伪装为 Provider `cancelled / failed`。
+
+Demo Hub 初始化探测恢复会话期间，普通支付的恢复与新单入口保持禁用，并明确显示正在检查。恢复与创建独立订单使用固定、分离的动作：用户点击恢复后，即使会话缺失、失效或异步状态变化，也不得自动转为创建 Order / Attempt 或调用 Provider create；只有明确的新订单入口可以创建独立 Sandbox 订单。
 
 客户端异常动作使用结构化 operation + action 契约，不从任意错误 message 或 HTTP 状态单独猜测：pre-confirm SDK / Element load 失败只重载同一个 `paymentId`；create 结果未知只恢复已有 Attempt；query / confirm 结果未知只核验已有 Attempt；暂时性 recovery 失败只重试 restoration；只有服务端权威允许的终态才显示同 Order Retry；clean-run 始终创建独立 Order。query capability 被拒绝时最多先通过 HttpOnly recovery 刷新一次 capability，再查询同一 Attempt，不循环复用旧 token。Retry 或 child create 响应未知时优先恢复 cookie 当前绑定的 parent/child；不得因此再次 confirm 或无条件重放 Provider create。
 

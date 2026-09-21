@@ -4,6 +4,7 @@ import type {
   WalletPaymentMethodId,
 } from './capability'
 import type { PaymentEventSource } from './event'
+import type { AuthorizationState } from './authorization'
 
 export const PAYMENT_STATUSES = [
   'created',
@@ -30,11 +31,13 @@ export interface PaymentAttempt {
   readonly fundingNetwork?: string
   readonly attributionTransactionId?: string
   readonly submissionStartedAt?: string
+  readonly authorization?: AuthorizationState
   readonly createdAt: string
   readonly updatedAt: string
 }
 
 export interface CreateAttemptInput {
+  readonly authorization?: AuthorizationState
   readonly id: string
   readonly orderId: string
   readonly integration: IntegrationId
@@ -84,6 +87,7 @@ export function hasCompletePaymentMethodAttribution(attempt: PaymentAttempt): bo
 }
 
 export const RETRY_REASONS = [
+  'authorization',
   'eligible',
   'pending',
   'succeeded',
@@ -99,6 +103,9 @@ export interface RetryDecision {
 const trustedTerminalSources = new Set<PaymentEventSource>(['query', 'webhook'])
 
 export function getRetryDecision(attempt: PaymentAttempt): RetryDecision {
+  if (attempt.authorization) {
+    return Object.freeze({ allowed: false, reason: 'authorization' })
+  }
   if (!['succeeded', 'failed', 'cancelled'].includes(attempt.status)) {
     return Object.freeze({ allowed: false, reason: 'pending' })
   }

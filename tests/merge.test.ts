@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { createAttempt } from '../shared/payment/attempt'
+import { createAuthorizationState } from '../shared/payment/authorization'
 import { createEvent } from '../shared/payment/event'
 import { findProjectionEvent, mapWebhookStatus, mergeAttempt } from '../shared/payment/merge'
 
@@ -127,5 +128,43 @@ describe('payment state convergence', () => {
       status: 'succeeded',
       occurredAt: '2026-08-04T07:01:00.000Z',
     }))).toThrow('PAYMENT_EVENT_TERMINAL_UNTRUSTED')
+  })
+})
+
+describe('authorization projection evidence', () => {
+  const pending = createAuthorizationState({ merchantTxnId: 'auth-merchant', amountMinor: 500, currency: 'USD', occurredAt: '2026-09-21T00:00:00.000Z' })
+
+  it.each(['query', 'webhook'] as const)('keeps the successful AUTH %s evidence after failure or conflicting same-source facts', (source) => {
+    const current = { ...attempt('processing', source), authorization: { ...pending, fundsStatus: 'authorized' as const, paymentId: '1000', authTransactionId: '1001' } }
+    const authorized = createEvent({ ...event('processing', source), transactionId: '1001', rawStatus: 'AUTH:S:A', transactionStatus: 'S', paymentStatus: 'A' })
+    const failure = createEvent({ ...authorized, id: 'failure', transactionId: '1002', rawStatus: 'AUTH:F:O', transactionStatus: 'F', paymentStatus: 'O' })
+    const conflict = createEvent({ ...authorized, id: 'conflict', transactionId: '1003', conflict: true })
+    const otherTransaction = createEvent({ ...authorized, id: 'other-transaction', transactionId: '1004' })
+    expect(findProjectionEvent(current, [authorized, failure, conflict, otherTransaction])).toBe(authorized)
+    expect(findProjectionEvent(current, [failure, conflict, otherTransaction])).toBeUndefined()
+  })
+
+  it.each(['CAPTURE', 'VOID'] as const)('requires the confirmed %s operation id and exact funds tuple', (type) => {
+    const captured = type === 'CAPTURE'
+    const status = captured ? 'succeeded' as const : 'cancelled' as const
+    const paymentStatus = captured ? 'S' : 'N'
+    const authorization = { ...pending, fundsStatus: captured ? 'captured' as const : 'voided' as const,
+      paymentId: '1000', authTransactionId: '1001',
+      operation: { type, merchantTxnId: 'operation-merchant', transactionId: '1002', status: 'confirmed' as const } }
+    const current = { ...attempt(status, 'query'), authorization }
+    const completion = createEvent({ ...event(status, 'query'), transactionId: '1002', rawStatus: `${type}:S:${paymentStatus}`, transactionStatus: 'S', paymentStatus })
+    const conflict = createEvent({ ...completion, id: 'conflict', conflict: true })
+    const wrongId = createEvent({ ...completion, id: 'wrong-id', transactionId: '1001' })
+    const wrongType = createEvent({ ...completion, id: 'wrong-type', rawStatus: `AUTH:S:${paymentStatus}` })
+    expect(findProjectionEvent(current, [completion, conflict, wrongId, wrongType])).toBe(completion)
+    expect(findProjectionEvent({ ...current, authorization: { ...authorization,
+      operation: { ...authorization.operation, status: 'unknown' } } }, [completion])).toBeUndefined()
+  })
+
+  it('excludes conflicts from pending AUTH evidence without changing ordinary SALE selection', () => {
+    const initial = event('processing', 'query')
+    const conflict = createEvent({ ...initial, id: 'conflict', conflict: true })
+    expect(findProjectionEvent({ ...attempt('processing', 'query'), authorization: pending }, [initial, conflict])).toBe(initial)
+    expect(findProjectionEvent(attempt('processing', 'query'), [initial, conflict])).toBe(conflict)
   })
 })

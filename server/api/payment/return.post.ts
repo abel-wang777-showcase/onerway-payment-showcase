@@ -5,6 +5,7 @@ import { requireServerProfile } from '../../utils/profile'
 import { enrichDirectPaymentMethod } from '../../utils/method'
 import { refreshSubscription, subscriptionCreationRecoveryError } from '../../utils/subscription'
 import { readPaymentRecovery } from '../../utils/recovery'
+import { isMerchantCustomerInScope } from '../../utils/customer'
 import {
   getPaymentRecovery,
   getSubscriptionForAttempt,
@@ -72,6 +73,14 @@ export default defineEventHandler(async (event): Promise<ObservePaymentReturnRes
 
       if (!recovery) {
         throw createError({ statusCode: 404, statusMessage: 'PAYMENT_RECOVERY_NOT_FOUND' })
+      }
+
+      if (recovery.attempt.authorization) {
+        if (!recovery.customer || !isMerchantCustomerInScope(recovery.customer, profile) || recovery.subscription) {
+          throw createError({ statusCode: 409, statusMessage: 'PAYMENT_CUSTOMER_SCOPE_MISMATCH' })
+        }
+        const recorded = await recordReturnEvent(recovery.attempt.id, new Date().toISOString())
+        return Object.freeze({ duplicate: recorded.duplicate })
       }
 
       if (!recovery.attempt.paymentId && recovery.attempt.integration !== 'checkout') {

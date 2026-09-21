@@ -1,0 +1,344 @@
+import { createHash, randomUUID } from 'node:crypto'
+import { Pool } from '@neondatabase/serverless'
+import { describe, expect, it } from 'vitest'
+import { createAttempt } from '../shared/payment/attempt'
+import { createAuthorizationState, type AuthorizationFact, type AuthorizationQueryTarget } from '../shared/payment/authorization'
+import { createEvent } from '../shared/payment/event'
+import { findProjectionEvent } from '../shared/payment/merge'
+import { createOrder } from '../shared/payment/order'
+import { createMerchantCustomer } from '../server/utils/customer'
+import { readAuthorizationWebhook, type AuthorizationWebhook, type PaymentWebhook } from '../server/utils/webhook'
+import {
+  claimStoredAuthorizationOperation,
+  completePaymentRecord,
+  createPaymentRecord,
+  createPaymentRetry,
+  getPaymentRecovery,
+  getPaymentTimeline,
+  recordAuthorizationOperationResponse,
+  recordAuthorizationQueryConflict,
+  recordAuthorizationQueryEvent,
+  recordAuthorizationWebhookEvent,
+  recordQueryEvent,
+  recordWebhookEvent,
+} from '../server/utils/store'
+import { requireTestDatabaseUrl } from './db'
+
+const databaseUrl = requireTestDatabaseUrl()
+process.env.DATABASE_URL = databaseUrl
+
+function fixture() {
+  const suffix = randomUUID().replaceAll('-', '')
+  const now = new Date().toISOString()
+  const id = `HLD-TEST-AUTH-${suffix}`
+  const merchantTxnId = `auth-${suffix}`
+  const order = createOrder({ id, scene: 'ecommerce', item: {
+    sku: 'auth-test', name: 'AUTH persistence test', variant: 'Test only', quantity: 1,
+    unitAmount: { minor: 500, currency: 'USD' },
+  }, amount: { minor: 500, currency: 'USD' }, createdAt: now })
+  const attempt = createAttempt({
+    id: `${id}-attempt`, orderId: id, integration: 'checkout', method: 'card', merchantTxnId,
+    createdAt: now, authorization: createAuthorizationState({ merchantTxnId, amountMinor: 500, currency: 'USD', occurredAt: now }),
+  })
+  const sequence = BigInt(`0x${suffix.slice(0, 15)}`).toString().padStart(19, '0')
+  const fact: AuthorizationWebhook = {
+    kind: 'authorization', source: 'webhook', txnType: 'AUTH', merchantTxnId,
+    paymentId: `1${sequence}`, transactionId: `2${sequence}`, amountMinor: 500, currency: 'USD',
+    transactionStatus: 'S', paymentStatus: 'A', status: 'processing', fundsStatus: 'authorized', occurredAt: now,
+  }
+  return { order, attempt, fact, now, sequence }
+}
+
+async function cleanup(orderId: string) {
+  const pool = new Pool({ connectionString: databaseUrl })
+  try {
+    await pool.query("DELETE FROM payment_orders WHERE id = $1 AND id LIKE 'HLD-TEST-AUTH-%'", [orderId])
+  }
+  finally {
+    await pool.end()
+  }
+}
+
+async function insert(input: ReturnType<typeof fixture>) {
+  await createPaymentRecord(input.order, input.attempt, createMerchantCustomer({
+    profile: 'sandbox', merchantNo: 'test-merchant', appId: 'test-app',
+  }))
+}
+
+describe('Neon authorization persistence', () => {
+  it('keeps a current-Payment conflict received before the AUTH notification locked after authorization arrives', async () => {
+    const data = fixture()
+    try {
+      await insert(data)
+      const target: AuthorizationQueryTarget = { txnType: 'AUTH', merchantTxnId: data.fact.merchantTxnId,
+        paymentId: data.fact.paymentId, transactionId: data.fact.transactionId }
+      const conflicted = await recordAuthorizationQueryConflict(data.attempt.id, target, data.now)
+      expect(conflicted.attempt.authorization).toMatchObject({ fundsStatus: 'pending', conflict: true })
+      expect(conflicted.attempt.authorization?.authTransactionId).toBeUndefined()
+      expect(conflicted.attempt.authorization?.paymentId).toBeUndefined()
+      await recordAuthorizationWebhookEvent(data.fact, data.now)
+      const recovery = await getPaymentRecovery(data.order.id, data.attempt.id)
+      expect(recovery?.attempt.authorization).toMatchObject({ fundsStatus: 'authorized', conflict: true, authTransactionId: data.fact.transactionId })
+      expect(recovery?.events.filter(event => event.rawStatus === 'AUTH:CONFLICT')).toHaveLength(1)
+      for (const type of ['CAPTURE', 'VOID'] as const) {
+        expect((await claimStoredAuthorizationOperation(data.attempt.id, type, `blocked-${randomUUID()}`, data.now)).claimed).toBe(false)
+      }
+    }
+    finally {
+      await cleanup(data.order.id)
+    }
+  })
+
+  it('persists one current-Payment conflict event and closes both operations atomically', async () => {
+    const data = fixture()
+    try {
+      await insert(data)
+      await recordAuthorizationWebhookEvent(data.fact, data.now)
+      const target: AuthorizationQueryTarget = { txnType: 'AUTH', merchantTxnId: data.fact.merchantTxnId,
+        paymentId: data.fact.paymentId, transactionId: data.fact.transactionId }
+      const results = await Promise.all([
+        recordAuthorizationQueryConflict(data.attempt.id, target, data.now),
+        recordAuthorizationQueryConflict(data.attempt.id, target, data.now),
+      ])
+      expect(results.filter(result => result.duplicate)).toHaveLength(1)
+      const recovery = await getPaymentRecovery(data.order.id, data.attempt.id)
+      expect(recovery?.attempt).toMatchObject({ status: 'processing', statusSource: 'webhook', authorization: {
+        fundsStatus: 'authorized', conflict: true, authTransactionId: data.fact.transactionId,
+      } })
+      expect(recovery?.events.filter(event => event.rawStatus === 'AUTH:CONFLICT')).toHaveLength(1)
+      expect(findProjectionEvent(recovery!.attempt, recovery!.events)).toMatchObject({ rawStatus: 'AUTH:S:A', transactionId: data.fact.transactionId })
+      for (const type of ['CAPTURE', 'VOID'] as const) {
+        expect((await claimStoredAuthorizationOperation(data.attempt.id, type, `blocked-${randomUUID()}`, data.now)).claimed).toBe(false)
+      }
+    }
+    finally {
+      await cleanup(data.order.id)
+    }
+  })
+
+  it('serializes an AUTH current-Payment conflict against a concurrent operation claim', async () => {
+    const data = fixture()
+    try {
+      await insert(data)
+      await recordAuthorizationWebhookEvent(data.fact, data.now)
+      const target: AuthorizationQueryTarget = { txnType: 'AUTH', merchantTxnId: data.fact.merchantTxnId,
+        paymentId: data.fact.paymentId, transactionId: data.fact.transactionId }
+      const [claim] = await Promise.all([
+        claimStoredAuthorizationOperation(data.attempt.id, 'CAPTURE', `operation-${randomUUID()}`, data.now),
+        recordAuthorizationQueryConflict(data.attempt.id, target, data.now),
+        recordAuthorizationQueryConflict(data.attempt.id, target, data.now),
+      ])
+      const recovery = await getPaymentRecovery(data.order.id, data.attempt.id)
+      expect(recovery?.attempt.authorization?.fundsStatus).toBe('authorized')
+      expect(recovery?.attempt.authorization?.authTransactionId).toBe(data.fact.transactionId)
+      if (claim.claimed) {
+        expect(recovery?.attempt.authorization?.operation?.status).toBe('pending')
+        expect(recovery?.attempt.authorization?.conflict).toBeUndefined()
+        expect(recovery?.events.filter(event => event.rawStatus === 'AUTH:CONFLICT')).toHaveLength(0)
+      }
+      else {
+        expect(recovery?.attempt.authorization?.operation).toBeUndefined()
+        expect(recovery?.attempt.authorization?.conflict).toBe(true)
+        expect(recovery?.events.filter(event => event.rawStatus === 'AUTH:CONFLICT')).toHaveLength(1)
+      }
+      expect((await claimStoredAuthorizationOperation(data.attempt.id, 'VOID', `blocked-${randomUUID()}`, data.now)).claimed).toBe(false)
+    }
+    finally {
+      await cleanup(data.order.id)
+    }
+  })
+
+  it.each(['CAPTURE', 'VOID'] as const)('serializes duplicate %s queries and a matching webhook without reopening the claim', async (type) => {
+    const data = fixture()
+    try {
+      await insert(data)
+      await completePaymentRecord(data.attempt.id, data.fact.paymentId, `3${data.sequence}`, createEvent({
+        id: randomUUID(), attemptId: data.attempt.id, source: 'server', sourceKey: `create:${data.attempt.id}`,
+        status: 'processing', rawStatus: 'U', transactionId: `3${data.sequence}`, occurredAt: data.now,
+      }))
+      await recordAuthorizationWebhookEvent(data.fact, data.now)
+      const merchantTxnId = `operation-${randomUUID()}`
+      await claimStoredAuthorizationOperation(data.attempt.id, type, merchantTxnId, data.now)
+      await recordAuthorizationOperationResponse(data.attempt.id, merchantTxnId, null, data.now)
+      const target: AuthorizationQueryTarget = { txnType: type, merchantTxnId, paymentId: data.fact.paymentId }
+      const completion: AuthorizationFact = { ...data.fact, source: 'query', txnType: type, merchantTxnId,
+        transactionId: `4${data.sequence}`, paymentStatus: type === 'CAPTURE' ? 'S' : 'N', occurredAt: data.now }
+      const results = await Promise.all([
+        recordAuthorizationQueryEvent(data.attempt.id, target, completion, data.now),
+        recordAuthorizationQueryEvent(data.attempt.id, target, completion, data.now),
+        recordAuthorizationWebhookEvent({ ...data.fact, ...completion, source: 'webhook' }, data.now),
+      ])
+      expect(results.slice(0, 2).filter(result => result.duplicate)).toHaveLength(1)
+      // This result was requested before the operation but returned afterwards.
+      await recordAuthorizationQueryEvent(data.attempt.id, { txnType: 'AUTH', merchantTxnId: data.fact.merchantTxnId },
+        { ...data.fact, source: 'query', occurredAt: data.now }, data.now)
+      await recordAuthorizationWebhookEvent({ ...data.fact, transactionId: `5${data.sequence}`, transactionStatus: 'F', paymentStatus: 'O' }, data.now)
+      await recordAuthorizationOperationResponse(data.attempt.id, merchantTxnId, null, data.now)
+      const lateConflict = await recordAuthorizationQueryConflict(data.attempt.id, {
+        txnType: 'AUTH', merchantTxnId: data.fact.merchantTxnId,
+        paymentId: data.fact.paymentId, transactionId: data.fact.transactionId,
+      }, data.now)
+      expect(lateConflict.event).toBeUndefined()
+      const recovery = await getPaymentRecovery(data.order.id, data.attempt.id)
+      expect(recovery?.attempt).toMatchObject({
+        status: type === 'CAPTURE' ? 'succeeded' : 'cancelled', statusSource: 'query', transactionId: `3${data.sequence}`,
+        authorization: { authTransactionId: data.fact.transactionId, fundsStatus: type === 'CAPTURE' ? 'captured' : 'voided',
+          operation: { type, merchantTxnId, transactionId: completion.transactionId, status: 'confirmed' } },
+      })
+      expect(recovery?.events.filter(event => event.source === 'query' && event.transactionId === completion.transactionId)).toHaveLength(1)
+      expect(recovery?.events.filter(event => event.source === 'webhook' && event.transactionId === completion.transactionId)).toHaveLength(1)
+      expect(findProjectionEvent(recovery!.attempt, recovery!.events)).toMatchObject({ source: 'query', transactionId: completion.transactionId })
+      for (const attemptedType of ['CAPTURE', 'VOID'] as const) {
+        expect((await claimStoredAuthorizationOperation(data.attempt.id, attemptedType, `blocked-${randomUUID()}`, data.now)).claimed).toBe(false)
+      }
+    }
+    finally {
+      await cleanup(data.order.id)
+    }
+  })
+
+  it('serializes conflicting initial AUTH queries without replacing the winner or opening operations', async () => {
+    const data = fixture()
+    try {
+      await insert(data)
+      const target: AuthorizationQueryTarget = { txnType: 'AUTH', merchantTxnId: data.fact.merchantTxnId }
+      const first: AuthorizationFact = { ...data.fact, source: 'query', occurredAt: data.now }
+      const results = await Promise.all([
+        recordAuthorizationQueryEvent(data.attempt.id, target, first, data.now),
+        recordAuthorizationQueryEvent(data.attempt.id, target, { ...first, transactionId: `6${data.sequence}` }, data.now),
+      ])
+      expect(results.filter(result => result.event.conflict)).toHaveLength(1)
+      const winner = results.find(result => !result.event.conflict)!
+      const recovery = await getPaymentRecovery(data.order.id, data.attempt.id)
+      expect(recovery?.attempt.authorization).toMatchObject({
+        fundsStatus: 'authorized', conflict: true, authTransactionId: winner.event.transactionId,
+      })
+      expect(recovery?.attempt.status).toBe('processing')
+      expect((await claimStoredAuthorizationOperation(data.attempt.id, 'CAPTURE', `blocked-${randomUUID()}`, data.now)).claimed).toBe(false)
+    }
+    finally {
+      await cleanup(data.order.id)
+    }
+  })
+
+  it.each(['CAPTURE', 'VOID'] as const)('stores signed %s without txnTime at first receipt and preserves that time on redelivery', async (type) => {
+    const data = fixture()
+    try {
+      await insert(data)
+      await recordAuthorizationWebhookEvent(data.fact, data.now)
+      const operationMerchantTxnId = `operation-${randomUUID()}`
+      await claimStoredAuthorizationOperation(data.attempt.id, type, operationMerchantTxnId, data.now)
+      await recordAuthorizationOperationResponse(data.attempt.id, operationMerchantTxnId, null, data.now)
+      const body = {
+        notifyType: 'TXN', txnType: type, merchantNo: 'test-merchant',
+        transactionId: `8${data.sequence}`, paymentId: data.fact.paymentId, merchantTxnId: operationMerchantTxnId,
+        orderAmount: '5.00', orderCurrency: 'USD', status: 'S', paymentStatus: type === 'CAPTURE' ? 'S' : 'N',
+        responseTime: '2026-09-21 11:59:25', txnTimeZone: '+08:00',
+      }
+      const secret = 'isolated-notification-test-secret'
+      const digest = createHash('sha256').update(Object.entries(body)
+        .sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0)
+        .map(([, value]) => value).join('') + secret).digest('hex')
+      const parsed = readAuthorizationWebhook(body, secret, 'test-merchant', `v1=${digest}`)
+      const receivedAt = new Date(Date.parse(data.now) + 1000).toISOString()
+      const redeliveredAt = new Date(Date.parse(data.now) + 3000).toISOString()
+      const first = await recordAuthorizationWebhookEvent(parsed, receivedAt)
+      const duplicate = await recordAuthorizationWebhookEvent(parsed, redeliveredAt)
+      const recovery = await getPaymentRecovery(data.order.id, data.attempt.id)
+      expect(first.event?.occurredAt).toBe(receivedAt)
+      expect(duplicate.duplicate).toBe(true)
+      expect(duplicate.event).toEqual(first.event)
+      expect(recovery?.attempt.status).toBe(type === 'CAPTURE' ? 'succeeded' : 'cancelled')
+      expect(recovery?.attempt.authorization).toMatchObject({
+        fundsStatus: type === 'CAPTURE' ? 'captured' : 'voided', updatedAt: receivedAt,
+        authTransactionId: data.fact.transactionId,
+        operation: { type, merchantTxnId: operationMerchantTxnId, transactionId: body.transactionId, status: 'confirmed' },
+      })
+      expect(recovery?.events.filter(event => event.sourceKey === body.transactionId)).toHaveLength(1)
+      expect((await claimStoredAuthorizationOperation(data.attempt.id, type === 'CAPTURE' ? 'VOID' : 'CAPTURE', `blocked-${randomUUID()}`, redeliveredAt)).claimed).toBe(false)
+    }
+    finally {
+      await cleanup(data.order.id)
+    }
+  })
+
+  it.each(['CAPTURE', 'VOID'] as const)('allows one winner for concurrent CAPTURE and %s, preserving notification-before-response truth', async (competingType) => {
+    const data = fixture()
+    try {
+      await insert(data)
+      await recordAuthorizationWebhookEvent(data.fact, data.now)
+      // The Provider may deliver successful AUTH before the create request returns.
+      const created = await completePaymentRecord(data.attempt.id, data.fact.paymentId, `3${data.sequence}`, createEvent({
+        id: randomUUID(), attemptId: data.attempt.id, source: 'server', sourceKey: `create:${data.attempt.id}`,
+        status: 'processing', rawStatus: 'U', transactionId: `3${data.sequence}`, occurredAt: data.now,
+      }))
+      expect(created.authorization?.authTransactionId).toBe(data.fact.transactionId)
+      const claims = await Promise.all([
+        claimStoredAuthorizationOperation(data.attempt.id, 'CAPTURE', `capture-${randomUUID()}`, data.now),
+        claimStoredAuthorizationOperation(data.attempt.id, competingType, `operation-${randomUUID()}`, data.now),
+      ])
+      expect(claims.filter(result => result.claimed)).toHaveLength(1)
+      const winner = claims.find(result => result.claimed)!
+      const operation = winner.attempt.authorization!.operation!
+      const captured = operation.type === 'CAPTURE'
+      const completion: AuthorizationWebhook = { ...data.fact,
+        txnType: operation.type, transactionId: `4${data.sequence}`,
+        merchantTxnId: captured ? data.fact.merchantTxnId : operation.merchantTxnId,
+        paymentStatus: captured ? 'S' : 'N', status: captured ? 'succeeded' : 'cancelled', fundsStatus: captured ? 'captured' : 'voided',
+      }
+      const notifications = await Promise.all([
+        recordAuthorizationWebhookEvent(completion, data.now),
+        recordAuthorizationWebhookEvent(completion, data.now),
+      ])
+      expect(notifications.filter(result => result.duplicate)).toHaveLength(1)
+      await recordAuthorizationOperationResponse(data.attempt.id, operation.merchantTxnId, null, data.now)
+      await recordAuthorizationWebhookEvent({ ...data.fact, transactionId: `5${data.sequence}`, transactionStatus: 'F', paymentStatus: 'O', fundsStatus: 'pending' }, data.now)
+      const recovered = await getPaymentRecovery(data.order.id, data.attempt.id)
+      expect(recovered?.attempt.authorization).toMatchObject({ fundsStatus: completion.fundsStatus,
+        authTransactionId: data.fact.transactionId, operation: { status: 'confirmed', transactionId: completion.transactionId } })
+      expect(recovered?.attempt.transactionId).not.toBe(completion.transactionId)
+      expect(recovered?.attempts[0]?.authorization).toEqual(recovered?.attempt.authorization)
+      expect(recovered?.events.filter(event => event.source === 'webhook' && event.transactionId === completion.transactionId)).toHaveLength(1)
+      expect((await getPaymentTimeline(operation.merchantTxnId))?.attempt.authorization).toEqual(recovered?.attempt.authorization)
+      await expect(createPaymentRetry(data.order.id, data.attempt.id, data.fact.paymentId, data.now)).rejects.toMatchObject({ code: 'PAYMENT_RETRY_NOT_ALLOWED' })
+      // SALE looks up the original merchant request id, independently of which
+      // operation won. Use a new event id so deduplication cannot hide the guard.
+      const sale: PaymentWebhook = {
+        merchantTxnId: data.fact.merchantTxnId, transactionId: `7${data.sequence}`,
+        paymentId: data.fact.paymentId, amountMinor: data.fact.amountMinor, currency: data.fact.currency,
+        transactionStatus: 'S', paymentStatus: 'S', status: 'succeeded', occurredAt: data.now,
+      }
+      await expect(recordWebhookEvent(sale)).rejects.toMatchObject({ code: 'PAYMENT_ATTEMPT_MISMATCH' })
+      await expect(recordWebhookEvent({ ...sale, merchantTxnId: operation.merchantTxnId }))
+        .rejects.toMatchObject({ code: 'PAYMENT_ATTEMPT_NOT_FOUND' })
+      await expect(recordQueryEvent(data.attempt.id, data.fact.paymentId, {
+        merchantTxnId: data.fact.merchantTxnId, paymentId: data.fact.paymentId, transactionId: data.fact.transactionId, rawStatus: 'S', status: 'succeeded',
+      }, data.now)).rejects.toMatchObject({ code: 'PAYMENT_ATTEMPT_MISMATCH' })
+      const afterRejections = await getPaymentRecovery(data.order.id, data.attempt.id)
+      expect(afterRejections?.attempt).toEqual(recovered?.attempt)
+      expect(afterRejections?.events).toEqual(recovered?.events)
+    }
+    finally {
+      await cleanup(data.order.id)
+    }
+  })
+
+  it('serializes conflicting successful AUTH ids and closes operation claims', async () => {
+    const data = fixture()
+    try {
+      await insert(data)
+      const results = await Promise.all([
+        recordAuthorizationWebhookEvent(data.fact, data.now),
+        recordAuthorizationWebhookEvent({ ...data.fact, transactionId: `6${data.sequence}` }, data.now),
+      ])
+      expect(results.filter(result => result.event?.conflict)).toHaveLength(1)
+      const recovery = await getPaymentRecovery(data.order.id, data.attempt.id)
+      expect(recovery?.attempt.authorization?.conflict).toBe(true)
+      expect(recovery?.events.filter(event => event.conflict)).toHaveLength(1)
+      expect((await claimStoredAuthorizationOperation(data.attempt.id, 'CAPTURE', `blocked-${randomUUID()}`, data.now)).claimed).toBe(false)
+    }
+    finally {
+      await cleanup(data.order.id)
+    }
+  })
+})

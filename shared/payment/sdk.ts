@@ -82,7 +82,7 @@ export interface CreateSdkPaymentResponse {
   readonly attempts: readonly PaymentAttemptSummary[]
   readonly event: PaymentEvent
   readonly paymentId: string
-  readonly query: QueryRef
+  readonly query: QueryRef | null
 }
 
 export interface CreatePaymentIntentResponse {

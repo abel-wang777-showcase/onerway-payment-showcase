@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { getJourney, isJourneyId, supportsSandboxMethod } from '../../../shared/payment/journey'
 import { PAYMENT_METHODS, type PaymentMethodId } from '../../../shared/payment/capability'
 import { createAttempt } from '../../../shared/payment/attempt'
+import { createAuthorizationState } from '../../../shared/payment/authorization'
 import { createOrder } from '../../../shared/payment/order'
 import {
   isTerminalStatus,
@@ -110,6 +111,7 @@ export default defineEventHandler(async (event): Promise<CreatePaymentIntentResp
       const journey = getJourney(input.journeyId)
       const orderId = `HLD-${randomUUID().slice(0, 8).toUpperCase()}`
       const attemptId = `${orderId}-attempt-1`
+      const merchantTxnId = `showcase-${randomUUID()}`
       const order = createOrder({
         id: orderId,
         scene: 'ecommerce',
@@ -128,7 +130,15 @@ export default defineEventHandler(async (event): Promise<CreatePaymentIntentResp
         orderId,
         integration: journey.integration,
         method: input.method ?? journey.method,
-        merchantTxnId: `showcase-${randomUUID()}`,
+        merchantTxnId,
+        ...(journey.id === 'hosted-authorization' ? {
+          authorization: createAuthorizationState({
+            merchantTxnId,
+            amountMinor: journey.amount,
+            currency: journey.currency,
+            occurredAt: now,
+          }),
+        } : {}),
         createdAt: now,
       })
       const customer = previousInScope

@@ -42,6 +42,10 @@ const {
   failure: sdkFailure,
   restoring,
   retrying,
+  authorizationRequest,
+  authorizationSubmitting,
+  operateAuthorization,
+  refreshAuthorization,
   recover: recoverSdk,
   verify: verifySdk,
   retry: retrySdk,
@@ -63,6 +67,10 @@ const retainedContract = computed(() =>
 const contract = computed(() => sdk.value ? subscription.value : retainedContract.value)
 const order = computed(() => sdk.value?.order ?? demo.value?.order ?? null)
 const attempt = computed(() => sdk.value?.attempt ?? (demo.value ? getActiveAttempt(demo.value) : null))
+const authorization = computed(() => sdk.value?.attempt.authorization)
+const requestedOperation = computed(() => authorizationRequest?.value?.attemptId === attempt.value?.id
+  ? authorizationRequest.value?.type
+  : undefined)
 const attempts = computed(() => demo.value?.attempts ?? sdk.value?.attempts ?? [])
 const amount = computed(() => order.value ? formatMoney(order.value.amount) : '')
 const sandbox = computed(() => Boolean(sdk.value))
@@ -73,6 +81,7 @@ const subscriptionPending = computed(() => Boolean(
 const canRetrySdk = computed(() => Boolean(
   sdk.value
   && !contract.value
+  && !authorization.value
   && attempt.value
   && sdk.value.paymentId
   && (
@@ -250,6 +259,12 @@ const details = computed(() => {
       { label: 'paymentId', value: sdk.value.paymentId ?? 'not returned' },
       { label: 'amountMinor / currency', value: `${order.value.amount.minor} / ${order.value.amount.currency}` },
       { label: 'normalizedStatus', value: attempt.value.status },
+      ...(authorization.value ? [
+        { label: 'fundsStatus', value: authorization.value.fundsStatus },
+        { label: 'authorizationConflict', value: authorization.value.conflict ? 'needs review' : 'none' },
+        { label: 'operation', value: authorization.value.operation?.type ?? 'none' },
+        { label: 'operationStatus', value: authorization.value.operation?.status ?? 'not submitted' },
+      ] : []),
       { label: verification.value.rawLabel, value: verificationEvent.value?.rawStatus ?? 'unavailable' },
       { label: 'verificationSource', value: verification.value.source },
       ...(sdk.value.paymentMethod
@@ -289,7 +304,7 @@ async function restoreCurrentSdkOrder(): Promise<void> {
 
     const restored = sdkSession.value
 
-    if (restored && !isTerminalStatus(restored.attempt.status)) {
+    if (restored && !isTerminalStatus(restored.attempt.status) && paymentPath(restored.attempt) !== route.path) {
       await navigateTo(paymentPath(restored.attempt))
       return
     }
@@ -335,6 +350,7 @@ onMounted(async () => {
 
   const sdkNeedsVerification = Boolean(
     sdk.value
+    && !authorization.value
     && (
       !isTerminalStatus(sdk.value.attempt.status)
       || (
@@ -456,7 +472,7 @@ onMounted(async () => {
     </section>
 
     <div v-else class="mx-auto max-w-2xl">
-      <div class="text-center">
+      <div v-if="!authorization" class="text-center">
         <span
           class="mx-auto flex size-14 items-center justify-center rounded-full"
           :class="succeeded ? 'bg-success/10' : attempt.status === 'failed' ? 'bg-error/10' : 'bg-warning/10'"
@@ -484,6 +500,21 @@ onMounted(async () => {
         </p>
       </div>
 
+      <template v-else>
+        <h1 ref="title" tabindex="-1" class="mb-6 text-3xl font-semibold tracking-tight text-highlighted sm:text-4xl">
+          Card authorization.
+        </h1>
+        <PaymentAuthorization
+          :authorization="authorization"
+          :amount="amount"
+          :requested-operation="requestedOperation"
+          :submitting="authorizationSubmitting"
+          :refreshing="restoring"
+          @operate="operateAuthorization"
+          @refresh="refreshAuthorization()"
+        />
+      </template>
+
       <section aria-labelledby="result-order-title" class="mt-10 rounded-lg border border-default p-5 sm:p-6">
         <div class="flex flex-wrap items-start justify-between gap-4">
           <div>
@@ -493,7 +524,7 @@ onMounted(async () => {
             </h2>
           </div>
           <UBadge
-            :label="`${attempt.status} · ${sandbox ? 'Sandbox' : 'Simulation'}`"
+            :label="`${authorization?.fundsStatus ?? attempt.status} · ${sandbox ? 'Sandbox' : 'Simulation'}`"
             :color="outcome.color"
             variant="soft"
           />
@@ -525,6 +556,7 @@ onMounted(async () => {
         id="payment-technical-details"
         :rows="details"
         :mode="sandbox ? 'sandbox' : 'simulation'"
+        :badge-label="authorization ? 'Sandbox authorization facts' : undefined"
         class="mt-6"
       />
 

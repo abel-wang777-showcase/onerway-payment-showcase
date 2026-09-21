@@ -1,4 +1,5 @@
 import { createEvent } from '#shared/payment/event'
+import { canClaimAuthorizationOperation, type AuthorizationOperationType } from '#shared/payment/authorization'
 import type { JourneyId } from '#shared/payment/journey'
 import type { PaymentMethodId } from '#shared/payment/capability'
 import type { SubscriptionIntegration, SubscriptionPlanId, SubscriptionSummary } from '#shared/payment/subscription'
@@ -174,7 +175,7 @@ function assertSessionCorrelation(
     (expectedOrderId !== undefined && next.order.id !== expectedOrderId)
     || next.attempt.orderId !== next.order.id
     || (next.attempt.paymentId ?? null) !== next.paymentId
-    || (!next.paymentId && (next.attempt.integration !== 'checkout' || !isTerminalStatus(next.attempt.status)))
+    || (!next.paymentId && (next.attempt.integration !== 'checkout' || (!next.attempt.authorization && !isTerminalStatus(next.attempt.status))))
     || active.length !== 1
     || summary?.status !== next.attempt.status
     || summary?.retryOf !== next.attempt.retryOf
@@ -222,6 +223,10 @@ export function useSdk() {
   const elementRevision = useState<number>('sdk-element-revision', () => 0)
   const retrying = useState<boolean>('sdk-retrying', () => false)
   const restoring = useState<boolean>('sdk-restoring', () => false)
+  // Keep the browser request lock separate from server funds facts. A lost
+  // response cannot make the opposite action safe while recovery is unavailable.
+  const authorizationRequest = useState<{ attemptId: string, type: AuthorizationOperationType } | null>('sdk-authorization-request', () => null)
+  const authorizationSubmitting = useState<boolean>('sdk-authorization-submitting', () => false)
   const ownerRevision = useState<number>('sdk-owner-revision', () => 0)
   const takeoverStage = stage.value
   const takeoverRetrying = retrying.value
@@ -232,6 +237,7 @@ export function useSdk() {
   const takingOver = previousOwner > 0
   retrying.value = false
   restoring.value = false
+  authorizationSubmitting.value = false
   let createFlight: Promise<void> | null = null
   let createAbort: AbortController | null = null
   let resultFlight: Promise<void> | null = null
@@ -247,6 +253,11 @@ export function useSdk() {
   const canOpenCheckout = computed(() => Boolean(
     session.value?.attempt.integration === 'checkout'
     && !isTerminalStatus(session.value.attempt.status)
+    && (!session.value.attempt.authorization || (
+      session.value.attempt.authorization.fundsStatus === 'pending'
+      && !session.value.attempt.authorization.operation
+      && !session.value.attempt.authorization.conflict
+    ))
     && checkoutRedirect.value?.attemptId === session.value.attempt.id,
   ))
 
@@ -709,6 +720,58 @@ export function useSdk() {
     return await recoverOwned(orderId, returned) === 'restored'
   }
 
+  async function refreshAuthorization(navigate = true): Promise<void> {
+    const current = session.value
+    if (!ownsState() || !current?.attempt.authorization || authorizationSubmitting.value || restoring.value) return
+
+    if (await recoverOwned(current.order.id) === 'restored' && ownsState() && navigate && session.value) {
+      await navigateTo(paymentPath(session.value.attempt), { replace: true })
+    }
+  }
+
+  const operateAuthorization = singleFlight(async (type: AuthorizationOperationType): Promise<void> => {
+    const current = session.value
+    if (
+      !ownsState()
+      || !current?.attempt.authorization
+      || !canClaimAuthorizationOperation(current.attempt.authorization)
+      || authorizationRequest.value?.attemptId === current.attempt.id
+      || authorizationSubmitting.value
+      || restoring.value
+    ) return
+
+    authorizationRequest.value = { attemptId: current.attempt.id, type }
+    authorizationSubmitting.value = true
+    clearFailure()
+
+    try {
+      const response = await $fetch<RecoverSdkPaymentResponse>(`/api/payment/authorization/${encodeURIComponent(current.order.id)}`, {
+        method: 'POST',
+        body: { type },
+      })
+      if (!ownsState()) return
+      if (response.attempt.id !== current.attempt.id || !response.attempt.authorization) {
+        throw new TypeError('AUTHORIZATION_RESULT_MISMATCH')
+      }
+      const { submitted: wasSubmitted, ...next } = response
+      write(next, current.order.id)
+      submittedAttempt.value = wasSubmitted ? next.attempt.id : null
+      stage.value = next.attempt.status === 'succeeded' ? 'succeeded' : 'not_completed'
+    }
+    catch {
+      if (!ownsState()) return
+      // Read the persisted claim even after HTTP/network errors. Never replay
+      // the operation or replace the payment when its response is uncertain.
+      const recovery = await recoverOwned(current.order.id)
+      if (ownsState() && recovery !== 'restored') {
+        setNotice('The authorization operation is awaiting confirmation. Refresh status to restore this order before continuing.')
+      }
+    }
+    finally {
+      if (ownsState()) authorizationSubmitting.value = false
+    }
+  })
+
   async function navigateRecovered(orderId?: string): Promise<SdkRecoveryResult> {
     const recovery = await recoverOwned(orderId)
 
@@ -835,6 +898,7 @@ export function useSdk() {
       || !getRetryDecision(current.attempt).allowed
       || !current.attempt.paymentId
       || subscription.value !== null
+      || Boolean(current.attempt.authorization)
     ) {
       return
     }
@@ -910,6 +974,9 @@ export function useSdk() {
   })
 
   async function verify(maxChecks = 12, navigate = true): Promise<void> {
+    if (session.value?.attempt.authorization) {
+      return refreshAuthorization(navigate)
+    }
     if (queryFlight) {
       return queryFlight
     }
@@ -1311,6 +1378,10 @@ export function useSdk() {
     retrying: readonly(retrying),
     restoring: readonly(restoring),
     canOpenCheckout: readonly(canOpenCheckout),
+    authorizationRequest: readonly(authorizationRequest),
+    authorizationSubmitting: readonly(authorizationSubmitting),
+    operateAuthorization,
+    refreshAuthorization,
     openCheckout,
     start,
     startSubscription,

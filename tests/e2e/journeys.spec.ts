@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test'
 import {
+  gotoHydrated,
   installSimulationGate,
   startJourney,
   submitSimulation,
@@ -91,7 +92,7 @@ test.describe('deterministic payment journeys', () => {
   test('reloads the same simulated form before submitting', async ({ page }) => {
     const gate = await installSimulationGate(page)
 
-    await page.goto('/', { waitUntil: 'networkidle' })
+    await gotoHydrated(page)
     await page.locator('[role="radio"][value="form-load-recovery"]').click()
     await page.getByRole('button', { name: /start simulated checkout/i }).click()
     await expect(page.locator('[role="status"][data-stage="not_completed"]')).toBeVisible()

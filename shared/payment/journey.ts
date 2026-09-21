@@ -5,6 +5,7 @@ import type { DemoStage } from './state'
 export const JOURNEY_IDS = [
   'hosted-checkout',
   'hosted-checkout-three-ds',
+  'hosted-authorization',
   'standard-success',
   'three-ds-success',
   'processing-recovery',
@@ -34,6 +35,24 @@ export interface Journey {
 }
 
 export const JOURNEYS = Object.freeze({
+  'hosted-authorization': Object.freeze({
+    id: 'hosted-authorization',
+    label: 'USD 5.00 · Card pre-authorization',
+    description: 'Reserve funds on Onerway Checkout, then capture the full amount or release the hold.',
+    scene: 'ecommerce',
+    integration: 'checkout',
+    method: 'card',
+    sandboxMethods: Object.freeze(['card'] as const),
+    country: 'US',
+    currency: 'USD',
+    amount: 500,
+    orderId: 'HLD-AUTH-500',
+    sku: 'HL-AUTH-005',
+    item: 'Halden reservation',
+    variant: 'Card pre-authorization',
+    modes: Object.freeze(['sandbox'] as const),
+    stages: Object.freeze([]),
+  }),
   'hosted-checkout': Object.freeze({
     id: 'hosted-checkout',
     label: 'USD 5.00 · Hosted Checkout',

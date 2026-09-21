@@ -46,11 +46,28 @@ export function findProjectionEvent(
     return undefined
   }
 
-  return [...events].reverse().find(event =>
-    event.attemptId === attempt.id
-    && event.source === source
-    && event.status === attempt.status,
-  )
+  return [...events].reverse().find((event) => {
+    if (event.attemptId !== attempt.id || event.source !== source || event.status !== attempt.status) {
+      return false
+    }
+    const authorization = attempt.authorization
+    if (!authorization) return true
+    if (event.conflict) return false
+    if (authorization.fundsStatus === 'pending') return true
+    if (authorization.fundsStatus === 'authorized') {
+      return Boolean(authorization.authTransactionId)
+        && event.transactionId === authorization.authTransactionId
+        && event.rawStatus === 'AUTH:S:A'
+        && event.transactionStatus === 'S' && event.paymentStatus === 'A'
+    }
+    const operation = authorization.operation
+    const txnType = authorization.fundsStatus === 'captured' ? 'CAPTURE' : 'VOID'
+    const paymentStatus = authorization.fundsStatus === 'captured' ? 'S' : 'N'
+    return operation?.status === 'confirmed' && operation.type === txnType
+      && Boolean(operation.transactionId) && event.transactionId === operation.transactionId
+      && event.rawStatus === `${txnType}:S:${paymentStatus}`
+      && event.transactionStatus === 'S' && event.paymentStatus === paymentStatus
+  })
 }
 
 export function mapWebhookStatus(

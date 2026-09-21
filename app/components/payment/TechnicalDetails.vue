@@ -8,11 +8,12 @@ const props = defineProps<{
   id: string
   rows: readonly Detail[]
   mode?: 'simulation' | 'sandbox'
+  badgeLabel?: string
 }>()
 
 const open = ref(false)
 const contentId = computed(() => `${props.id}-content`)
-const badge = computed(() => props.mode === 'sandbox' ? 'Verified Sandbox outcome' : 'Simulated outcome')
+const badge = computed(() => props.badgeLabel ?? (props.mode === 'sandbox' ? 'Verified Sandbox outcome' : 'Simulated outcome'))
 const note = computed(() => props.mode === 'sandbox'
   ? 'Whitelisted identifiers and normalized states only; no raw provider payload.'
   : 'Whitelisted demo facts, not an Onerway response.')
