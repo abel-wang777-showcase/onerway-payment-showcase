@@ -31,7 +31,7 @@ import {
   recordQueryEvent,
 } from '../../utils/store'
 import { isMerchantCustomerInScope } from '../../utils/customer'
-import { toAuthorizationRecovery } from '../../utils/authorization'
+import { refreshAuthorizationRecovery, toAuthorizationRecovery } from '../../utils/authorization'
 import { refreshSubscription, subscriptionCreationRecoveryError } from '../../utils/subscription'
 
 function readOrderId(value: unknown): string {
@@ -132,7 +132,7 @@ export default defineEventHandler(async (event): Promise<
         if (!recovery.customer || !isMerchantCustomerInScope(recovery.customer, profile) || recovery.subscription) {
           throw createError({ statusCode: 409, statusMessage: 'PAYMENT_CUSTOMER_SCOPE_MISMATCH' })
         }
-        return toAuthorizationRecovery(recovery)
+        return toAuthorizationRecovery(await refreshAuthorizationRecovery(profile, recovery))
       }
 
       const recoveryError = subscriptionCreationRecoveryError(recovery)

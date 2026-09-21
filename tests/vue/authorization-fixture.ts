@@ -22,13 +22,25 @@ export function authorizationSession(overrides: Partial<AuthorizationState> = {}
     ...(authorization.paymentId ? { paymentId: authorization.paymentId } : {}),
     authorization, createdAt, updatedAt: createdAt,
   }
+  const transactionId = authorization.fundsStatus === 'authorized'
+    ? authorization.authTransactionId
+    : authorization.operation?.transactionId
+  const txnType = authorization.fundsStatus === 'captured' ? 'CAPTURE'
+    : authorization.fundsStatus === 'voided' ? 'VOID' : 'AUTH'
+  const paymentStatus = txnType === 'CAPTURE' ? 'S' as const : txnType === 'VOID' ? 'N' as const : 'A' as const
+  const events = authorization.fundsStatus !== 'pending' && transactionId
+    ? [{
+        id: `authorization-${txnType.toLowerCase()}`, attemptId: attempt.id, source: 'webhook' as const,
+        status, rawStatus: `${txnType}:S:${paymentStatus}`, transactionId, transactionStatus: 'S', paymentStatus, occurredAt: createdAt,
+      }]
+    : []
   return {
     order: {
       id: attempt.orderId, scene: 'ecommerce',
       item: { sku: 'HL-AUTH-005', name: 'Halden reservation', variant: 'Card pre-authorization', quantity: 1, unitAmount: { minor: 500, currency: 'USD' } },
       amount: { minor: 500, currency: 'USD' }, fulfillment: 'pending', createdAt,
     },
-    attempt, attempts: [attempt], events: [], paymentId: authorization.paymentId ?? null,
+    attempt, attempts: [attempt], events, paymentId: authorization.paymentId ?? null,
     query: null, submitted: true,
   }
 }

@@ -45,7 +45,7 @@ const view = computed(() => {
   }
   if (props.authorization.operation || props.requestedOperation) return {
     title: `${operationLabel.value} awaiting confirmation.`,
-    description: 'The final funds outcome is not confirmed. Both actions remain locked; refresh status to read the latest saved confirmation for this order.',
+    description: 'The final funds outcome is not confirmed. Both actions remain locked; refresh status to check the latest confirmed outcome for this order.',
     color: 'warning' as const,
     icon: 'i-lucide-clock-3',
   }
@@ -57,7 +57,7 @@ const view = computed(() => {
   }
   return {
     title: 'Authorization awaiting confirmation.',
-    description: 'Halden has not received confirmation that funds were authorized. Refresh status to read the latest saved confirmation; no new payment is created.',
+    description: 'Halden has not confirmed that funds were authorized. Refresh status to check the existing authorization.',
     color: 'warning' as const,
     icon: 'i-lucide-clock-3',
   }

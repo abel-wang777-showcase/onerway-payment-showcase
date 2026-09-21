@@ -24,10 +24,18 @@ export interface AuthorizationState {
   readonly updatedAt: string
 }
 
-// Only the verified notification adapter may produce authoritative facts until
-// the Provider's AUTH query contract has been confirmed.
+export interface AuthorizationQueryTarget {
+  readonly txnType: AuthorizationTransactionType
+  readonly merchantTxnId: string
+  readonly paymentId?: string
+  readonly transactionId?: string
+}
+
+// Query facts combine an exact transaction lookup with the current Payment
+// status and its matching lastTransactionId; transaction success alone is not
+// authoritative. Both adapters keep Provider identifiers on their own axis.
 export interface AuthorizationFact {
-  readonly source: 'webhook'
+  readonly source: 'webhook' | 'query'
   readonly txnType: AuthorizationTransactionType
   readonly transactionId: string
   readonly paymentId: string
@@ -145,7 +153,8 @@ export function mergeAuthorization(
     conflict,
   })
 
-  if (fact.source !== 'webhook') {
+  if (!['webhook', 'query'].includes(fact.source)
+    || (fact.source === 'query' && fact.transactionStatus !== 'S')) {
     return reject()
   }
 
@@ -191,8 +200,8 @@ export function mergeAuthorization(
   }
 
   const operation = authorization.operation
-  const merchantMatches = fact.merchantTxnId === authorization.authMerchantTxnId
-    || fact.merchantTxnId === operation?.merchantTxnId
+  const merchantMatches = fact.merchantTxnId === operation?.merchantTxnId
+    || (fact.source === 'webhook' && fact.merchantTxnId === authorization.authMerchantTxnId)
 
   if (!merchantMatches) {
     return reject()
@@ -217,7 +226,7 @@ export function mergeAuthorization(
   }
 
   // A missing Provider operation id is bound only after a local claim and the
-  // signed merchant id check above; unsigned origin fields are never consulted.
+  // adapter-specific merchant id check; unsigned origins are never consulted.
   return Object.freeze({
     authorization: Object.freeze({
       ...authorization,

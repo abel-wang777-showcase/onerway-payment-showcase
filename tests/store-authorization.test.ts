@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createAttempt, getRetryDecision } from '../shared/payment/attempt'
-import { createAuthorizationState, type AuthorizationState } from '../shared/payment/authorization'
+import { createAuthorizationState, type AuthorizationFact, type AuthorizationQueryTarget, type AuthorizationState } from '../shared/payment/authorization'
 import { createEvent } from '../shared/payment/event'
+import { findProjectionEvent } from '../shared/payment/merge'
 import { createOrder } from '../shared/payment/order'
 import { createMerchantCustomer } from '../server/utils/customer'
 import type { AuthorizationWebhook } from '../server/utils/webhook'
@@ -12,6 +13,8 @@ import {
   createPaymentRetry,
   getPaymentTimeline,
   recordAuthorizationOperationResponse,
+  recordAuthorizationQueryConflict,
+  recordAuthorizationQueryEvent,
   recordAuthorizationWebhookEvent,
   recordQueryEvent,
   recordReturnEvent,
@@ -73,6 +76,14 @@ function createResult() {
     status: 'processing', rawStatus: 'U', transactionId: '1001', occurredAt: now,
   })
 }
+
+function queryFact(overrides: Partial<AuthorizationFact> = {}): AuthorizationFact {
+  return { ...fact(), occurredAt: now, source: 'query', ...overrides }
+}
+
+const authTarget: AuthorizationQueryTarget = { txnType: 'AUTH', merchantTxnId }
+const knownAuthTarget: AuthorizationQueryTarget = { ...authTarget, paymentId: '1000', transactionId: '1002' }
+const operationTarget: AuthorizationQueryTarget = { txnType: 'CAPTURE', merchantTxnId: 'operation-1', paymentId: '1000' }
 
 describe('authorization persistence', () => {
   beforeEach(() => {
@@ -192,14 +203,231 @@ describe('authorization persistence', () => {
     expect(database.query.mock.calls.some(([sql]) => sql.includes('UPDATE payment_attempts'))).toBe(false)
   })
 
-  it('rolls back instead of acknowledging when the state write fails after event insertion', async () => {
+  it('stores AUTH query before create returns without replacing its successful anchor', async () => {
+    mockRow(pending)
+    const result = await recordAuthorizationQueryEvent('attempt-1', authTarget, queryFact(), now)
+    expect(result.attempt).toMatchObject({ status: 'processing', statusSource: 'query', authorization: authorized })
+    const completed = await completePaymentRecord('attempt-1', '1000', '1001', createResult())
+    expect(completed).toMatchObject({ statusSource: 'query', transactionId: '1001', authorization: authorized })
+    expect(database.query.mock.calls.some(([sql]) => sql.includes('WHERE a.id = $1') && sql.includes('FOR UPDATE OF a'))).toBe(true)
+  })
+
+  it('discovers the successful AUTH id after create without mistaking the create transaction for its anchor', async () => {
+    mockRow(pending)
+    await completePaymentRecord('attempt-1', '1000', '1001', createResult())
+    const result = await recordAuthorizationQueryEvent('attempt-1', { ...authTarget, paymentId: '1000' }, queryFact(), now)
+    expect(result.attempt).toMatchObject({ transactionId: '1001', authorization: authorized })
+  })
+
+  it('accepts an existing attempt Payment binding before the authorization projection has copied it', async () => {
+    const { saved } = mockRow(pending)
+    saved.payment_id = '1000'
+    const result = await recordAuthorizationQueryEvent('attempt-1', { ...authTarget, paymentId: '1000' }, queryFact(), now)
+    expect(result.attempt).toMatchObject({ paymentId: '1000', authorization: authorized })
+  })
+
+  it.each(['CAPTURE', 'VOID'] as const)('confirms an unknown %s via query and stores query/webhook evidence independently', async (type) => {
+    const { events } = mockRow()
+    await claimStoredAuthorizationOperation('attempt-1', type, 'operation-1', now)
+    await recordAuthorizationOperationResponse('attempt-1', 'operation-1', null, now)
+    const result = queryFact({ txnType: type, transactionId: '1003', merchantTxnId: 'operation-1', paymentStatus: type === 'CAPTURE' ? 'S' : 'N' })
+    const target = { ...operationTarget, txnType: type }
+    const first = await recordAuthorizationQueryEvent('attempt-1', target, result, now)
+    const later = '2026-09-18T08:02:00.000Z'
+    const duplicate = await recordAuthorizationQueryEvent('attempt-1', target, { ...result, occurredAt: later }, later)
+    expect(duplicate.duplicate).toBe(true)
+    expect(duplicate.event).toEqual(first.event)
+    expect(duplicate.attempt.updatedAt).toBe(first.attempt.updatedAt)
+    const notified = await recordAuthorizationWebhookEvent({ ...fact(), ...result, source: 'webhook' }, later)
+    expect(notified.attempt).toMatchObject({
+      status: type === 'CAPTURE' ? 'succeeded' : 'cancelled', statusSource: 'query', transactionId: '1001',
+      authorization: { fundsStatus: type === 'CAPTURE' ? 'captured' : 'voided', authTransactionId: '1002',
+        operation: { type, transactionId: '1003', status: 'confirmed' } },
+    })
+    expect(events.filter(event => event.source === 'query')).toHaveLength(1)
+    expect(events.filter(event => event.source === 'webhook')).toHaveLength(1)
+    expect((await claimStoredAuthorizationOperation('attempt-1', type, 'new-operation', later)).claimed).toBe(false)
+  })
+
+  it('accepts an operation query whose missing id was discovered by a webhook during the query', async () => {
+    mockRow()
+    await claimStoredAuthorizationOperation('attempt-1', 'CAPTURE', 'operation-1', now)
+    const notification = fact({ txnType: 'CAPTURE', transactionId: '1003', merchantTxnId: 'operation-1', paymentStatus: 'S' })
+    await recordAuthorizationWebhookEvent(notification, now)
+    const result = await recordAuthorizationQueryEvent('attempt-1', operationTarget, queryFact({ ...notification, source: 'query' }), now)
+    expect(result.attempt).toMatchObject({ status: 'succeeded', statusSource: 'query', authorization: { operation: { status: 'confirmed', transactionId: '1003' } } })
+  })
+
+  it('keeps a concurrent claim and its lock when an older AUTH query returns', async () => {
+    mockRow()
+    const claim = await claimStoredAuthorizationOperation('attempt-1', 'CAPTURE', 'operation-1', now)
+    const result = await recordAuthorizationQueryEvent('attempt-1', authTarget, queryFact(), now)
+    expect(result.attempt.authorization).toEqual(claim.attempt.authorization)
+    expect((await claimStoredAuthorizationOperation('attempt-1', 'VOID', 'other-operation', now)).claimed).toBe(false)
+  })
+
+  it('keeps final query provenance through delayed AUTH query, AUTH webhook and terminal conflict', async () => {
+    mockRow()
+    await claimStoredAuthorizationOperation('attempt-1', 'CAPTURE', 'operation-1', now)
+    const confirmed = await recordAuthorizationQueryEvent('attempt-1', operationTarget,
+      queryFact({ txnType: 'CAPTURE', transactionId: '1003', merchantTxnId: 'operation-1', paymentStatus: 'S' }), now)
+    const auth = await recordAuthorizationQueryEvent('attempt-1', authTarget, queryFact(), now)
+    const notification = await recordAuthorizationWebhookEvent(fact(), now)
+    const conflict = await recordAuthorizationWebhookEvent(fact({ txnType: 'VOID', merchantTxnId: 'operation-1', transactionId: '1004', paymentStatus: 'N' }), now)
+    expect(conflict.attempt).toMatchObject({ status: 'succeeded', statusSource: 'query', authorization: {
+      fundsStatus: 'captured', conflict: true, operation: { type: 'CAPTURE', status: 'confirmed', transactionId: '1003' },
+    } })
+    expect(findProjectionEvent(conflict.attempt!, [confirmed.event, auth.event, notification.event!, conflict.event!])).toEqual(confirmed.event)
+  })
+
+  it('attributes a new terminal webhook to itself after AUTH was confirmed by query', async () => {
+    mockRow(pending)
+    await recordAuthorizationQueryEvent('attempt-1', authTarget, queryFact(), now)
+    await claimStoredAuthorizationOperation('attempt-1', 'VOID', 'operation-1', now)
+    const notified = await recordAuthorizationWebhookEvent(fact({ txnType: 'VOID', merchantTxnId: 'operation-1', transactionId: '1003', paymentStatus: 'N' }), now)
+    expect(notified.attempt).toMatchObject({ status: 'cancelled', statusSource: 'webhook' })
+    expect(findProjectionEvent(notified.attempt!, [notified.event!])).toEqual(notified.event)
+  })
+
+  it.each([
+    { paymentId: '1999' }, { merchantTxnId: merchantTxnId }, { transactionId: '1002' },
+    { amountMinor: 501 }, { currency: 'EUR' }, { source: 'webhook' },
+    { txnType: 'VOID', paymentStatus: 'N' }, { transactionStatus: 'F' },
+  ])('rejects mismatched or unconfirmed query fields before writing: %j', async (overrides) => {
+    const { events, saved } = mockRow({ ...authorized, operation: { type: 'CAPTURE', merchantTxnId: 'operation-1', status: 'unknown' } })
+    const snapshot = structuredClone(saved)
+    await expect(recordAuthorizationQueryEvent('attempt-1', operationTarget,
+      queryFact({ txnType: 'CAPTURE', transactionId: '1003', merchantTxnId: 'operation-1', paymentStatus: 'S', ...overrides } as Partial<AuthorizationFact>), now))
+      .rejects.toMatchObject({ code: 'PAYMENT_ATTEMPT_MISMATCH' })
+    expect(events).toHaveLength(0)
+    expect(saved).toEqual(snapshot)
+  })
+
+  it('rejects stale operation ids, absent claims and empty query results without unlocking', async () => {
+    const completion = queryFact({ txnType: 'CAPTURE', transactionId: '1003', merchantTxnId: 'operation-1', paymentStatus: 'S' })
+    for (const authorization of [authorized, { ...authorized, operation: { type: 'CAPTURE' as const, merchantTxnId: 'operation-1', transactionId: '1004', status: 'unknown' as const } }]) {
+      const { saved, events } = mockRow(authorization)
+      const snapshot = structuredClone(saved)
+      await expect(recordAuthorizationQueryEvent('attempt-1', operationTarget, completion, now)).rejects.toMatchObject({ code: 'PAYMENT_ATTEMPT_MISMATCH' })
+      await expect(recordAuthorizationQueryEvent('attempt-1', operationTarget, null as unknown as AuthorizationFact, now)).rejects.toMatchObject({ code: 'PAYMENT_ATTEMPT_MISMATCH' })
+      expect(saved).toEqual(snapshot)
+      expect(events).toHaveLength(0)
+    }
+  })
+
+  it('preserves a newly bound AUTH anchor and persists a conflicting in-flight query', async () => {
+    const { events } = mockRow()
+    const conflict = await recordAuthorizationQueryEvent('attempt-1', authTarget, queryFact({ transactionId: '1004' }), now)
+    expect(conflict.attempt).toMatchObject({ statusSource: 'webhook', authorization: { authTransactionId: '1002', conflict: true } })
+    expect(conflict.event.conflict).toBe(true)
+    expect(events).toHaveLength(1)
+    expect((await claimStoredAuthorizationOperation('attempt-1', 'CAPTURE', 'operation-1', now)).claimed).toBe(false)
+  })
+
+  it('locks an unused authorized Payment after a verified current-Payment conflict without inventing final funds', async () => {
+    const { events } = mockRow()
+    const result = await recordAuthorizationQueryConflict('attempt-1', knownAuthTarget, now)
+    expect(result.attempt).toMatchObject({ status: 'processing', statusSource: 'webhook', authorization: {
+      fundsStatus: 'authorized', authTransactionId: '1002', conflict: true,
+    } })
+    expect(result.event).toMatchObject({ source: 'query', rawStatus: 'AUTH:CONFLICT', conflict: true })
+    expect(result.event?.transactionStatus).toBeUndefined()
+    expect(result.event?.paymentStatus).toBeUndefined()
+    const duplicate = await recordAuthorizationQueryConflict('attempt-1', knownAuthTarget, '2026-09-18T08:02:00.000Z')
+    expect(duplicate).toEqual({ attempt: result.attempt, event: result.event, duplicate: true })
+    for (const type of ['CAPTURE', 'VOID'] as const) {
+      expect((await claimStoredAuthorizationOperation('attempt-1', type, 'blocked-operation', now)).claimed).toBe(false)
+    }
+    expect(events).toHaveLength(1)
+  })
+
+  it('locks the matching AUTH established by a notification while an initially unanchored query was in flight', async () => {
+    mockRow(pending)
+    await recordAuthorizationWebhookEvent(fact(), now)
+    // The gateway supplies the actual ids it verified, not the empty ids from
+    // the recovery snapshot that existed before the query started.
+    const conflict = await recordAuthorizationQueryConflict('attempt-1', knownAuthTarget, now)
+    expect(conflict.attempt.authorization).toMatchObject({ fundsStatus: 'authorized', authTransactionId: '1002', conflict: true })
+    expect((await claimStoredAuthorizationOperation('attempt-1', 'CAPTURE', 'blocked-operation', now)).claimed).toBe(false)
+  })
+
+  it('rejects a conflict observation when a different successful AUTH anchor arrived during the query', async () => {
+    const { events, saved } = mockRow(pending)
+    await recordAuthorizationWebhookEvent(fact({ transactionId: '1004' }), now)
+    const snapshot = structuredClone(saved)
+    await expect(recordAuthorizationQueryConflict('attempt-1', knownAuthTarget, now)).rejects.toMatchObject({ code: 'PAYMENT_ATTEMPT_MISMATCH' })
+    expect(saved).toEqual(snapshot)
+    expect(events.filter(event => event.source === 'query')).toHaveLength(0)
+  })
+
+  it.each(['pending', 'unknown', 'confirmed'] as const)('does not overwrite a %s operation established while AUTH query was in flight', async (status) => {
+    const authorization: AuthorizationState = { ...authorized, fundsStatus: status === 'confirmed' ? 'captured' : 'authorized',
+      operation: { type: 'CAPTURE', merchantTxnId: 'operation-1', transactionId: '1003', status } }
+    const { events, saved } = mockRow(authorization)
+    const snapshot = structuredClone(saved)
+    const result = await recordAuthorizationQueryConflict('attempt-1', knownAuthTarget, now)
+    expect(result.attempt.authorization).toEqual(authorization)
+    expect(result.event).toBeUndefined()
+    expect(saved).toEqual(snapshot)
+    expect(events).toHaveLength(0)
+  })
+
+  it('keeps an unanchored conflict observation from changing the existing authorization', async () => {
+    const { events, saved } = mockRow(pending)
+    const snapshot = structuredClone(saved)
+    expect((await recordAuthorizationQueryConflict('attempt-1', authTarget, now)).event).toBeUndefined()
+    expect((await claimStoredAuthorizationOperation('attempt-1', 'CAPTURE', 'blocked-operation', now)).claimed).toBe(false)
+    expect(saved).toEqual(snapshot)
+    expect(events).toHaveLength(0)
+    mockRow()
+    expect((await recordAuthorizationQueryConflict('attempt-1', authTarget, now)).event).toBeUndefined()
+  })
+
+  it('retains a complete current-Payment conflict before AUTH arrives without inventing a successful anchor', async () => {
+    mockRow(pending)
+    const conflicted = await recordAuthorizationQueryConflict('attempt-1', knownAuthTarget, now)
+    expect(conflicted.attempt.authorization).toMatchObject({ fundsStatus: 'pending', conflict: true })
+    expect(conflicted.attempt.authorization?.authTransactionId).toBeUndefined()
+    expect(conflicted.attempt.authorization?.paymentId).toBeUndefined()
+    const notified = await recordAuthorizationWebhookEvent(fact(), now)
+    expect(notified.attempt?.authorization).toMatchObject({ fundsStatus: 'authorized', authTransactionId: '1002', conflict: true })
+    for (const type of ['CAPTURE', 'VOID'] as const) {
+      expect((await claimStoredAuthorizationOperation('attempt-1', type, 'blocked-operation', now)).claimed).toBe(false)
+    }
+  })
+
+  it.each([{ paymentId: '1999' }, { transactionId: '1999' }, { merchantTxnId: 'other-auth' }, { txnType: 'VOID' as const }])('rejects a current-Payment conflict outside the saved AUTH target: %j', async (overrides) => {
+    const { events, saved } = mockRow()
+    const snapshot = structuredClone(saved)
+    await expect(recordAuthorizationQueryConflict('attempt-1', { ...knownAuthTarget, ...overrides }, now))
+      .rejects.toMatchObject({ code: 'PAYMENT_ATTEMPT_MISMATCH' })
+    expect(saved).toEqual(snapshot)
+    expect(events).toHaveLength(0)
+  })
+
+  it('rolls back both the conflict event and lock when updating the authorization fails', async () => {
+    mockRow()
+    const query = database.query.getMockImplementation()!
+    database.query.mockImplementation(async (sql: string, values: unknown[]) => {
+      if (sql.includes('UPDATE payment_attempts')) throw new Error('simulated write failure')
+      return query(sql, values)
+    })
+    await expect(recordAuthorizationQueryConflict('attempt-1', knownAuthTarget, now)).rejects.toMatchObject({ code: 'PAYMENT_DATABASE_ERROR' })
+    expect(database.query.mock.calls.some(([sql]) => sql === 'ROLLBACK')).toBe(true)
+    expect(database.query.mock.calls.some(([sql]) => sql === 'COMMIT')).toBe(false)
+  })
+
+  it.each(['webhook', 'query'] as const)('rolls back %s when the state write fails after event insertion', async (source) => {
     mockRow(pending)
     const query = database.query.getMockImplementation()!
     database.query.mockImplementation(async (sql: string, values: unknown[]) => {
       if (sql.includes('UPDATE payment_attempts')) throw new Error('simulated write failure')
       return query(sql, values)
     })
-    await expect(recordAuthorizationWebhookEvent(fact(), now)).rejects.toMatchObject({ code: 'PAYMENT_DATABASE_ERROR' })
+    const recorded = source === 'webhook'
+      ? recordAuthorizationWebhookEvent(fact(), now)
+      : recordAuthorizationQueryEvent('attempt-1', authTarget, queryFact(), now)
+    await expect(recorded).rejects.toMatchObject({ code: 'PAYMENT_DATABASE_ERROR' })
     expect(database.query.mock.calls.some(([sql]) => sql === 'ROLLBACK')).toBe(true)
     expect(database.query.mock.calls.some(([sql]) => sql === 'COMMIT')).toBe(false)
   })

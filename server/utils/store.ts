@@ -15,7 +15,9 @@ import {
   claimAuthorizationOperation,
   mapAuthorizationStatus,
   mergeAuthorization,
+  type AuthorizationFact,
   type AuthorizationOperationType,
+  type AuthorizationQueryTarget,
   type AuthorizationState,
 } from '../../shared/payment/authorization'
 import type { Order } from '../../shared/payment/order'
@@ -1739,6 +1741,145 @@ export async function recordAuthorizationOperationResponse(
   })
 }
 
+async function persistAuthorizationFact(
+  client: PoolClient,
+  current: PaymentAttempt,
+  fact: AuthorizationFact,
+  observedAt: string,
+): Promise<{ readonly attempt: PaymentAttempt, readonly event: PaymentEvent, readonly duplicate: boolean }> {
+  if (!current.authorization) throw new PaymentStoreError('PAYMENT_ATTEMPT_MISMATCH')
+  const merged = mergeAuthorization(current.authorization, fact)
+  if (!merged.accepted && !merged.conflict) throw new PaymentStoreError('PAYMENT_ATTEMPT_MISMATCH')
+  const rawStatus = `${fact.txnType}:${fact.transactionStatus}:${fact.paymentStatus}`
+  const sourceKey = fact.source === 'webhook' ? fact.transactionId
+    : `authorization:${current.id}:${fact.paymentId}:${fact.transactionId}:${rawStatus}`
+  const duplicate = await findEvent(client, fact.source, sourceKey)
+  if (duplicate) {
+    if (duplicate.attemptId !== current.id || duplicate.rawStatus !== rawStatus) {
+      throw new PaymentStoreError('PAYMENT_ATTEMPT_MISMATCH')
+    }
+    return Object.freeze({ attempt: current, event: duplicate, duplicate: true })
+  }
+  const authorization = merged.authorization
+  const projection = mapAuthorizationStatus(fact.txnType, fact.transactionStatus, fact.paymentStatus)
+  const projectsCurrentFunds = merged.accepted && projection.fundsStatus === authorization.fundsStatus
+  // Stale AUTH and conflicting facts are audit evidence, not the source of the
+  // current funds projection. A corroborating webhook preserves a query source;
+  // a webhook advancing authorized funds to a terminal state becomes its source.
+  const preserveQuerySource = current.statusSource === 'query' && fact.source === 'webhook'
+    && current.authorization.fundsStatus === authorization.fundsStatus
+  const status: PaymentStatus = authorization.fundsStatus === 'captured' ? 'succeeded'
+    : authorization.fundsStatus === 'voided' ? 'cancelled' : 'processing'
+  const attempt = Object.freeze({
+    ...current,
+    authorization,
+    ...(authorization.paymentId ? { paymentId: authorization.paymentId } : {}),
+    // Operation ids belong only to the operation and its events. A create id
+    // remains a clue; the successful AUTH anchor is stored separately.
+    ...(!current.transactionId && authorization.authTransactionId ? { transactionId: authorization.authTransactionId } : {}),
+    status,
+    statusSource: projectsCurrentFunds && !preserveQuerySource ? fact.source : current.statusSource,
+    updatedAt: Date.parse(current.updatedAt) >= Date.parse(observedAt) ? current.updatedAt : observedAt,
+  })
+  const event = createEvent({
+    id: randomUUID(), attemptId: current.id, source: fact.source, sourceKey,
+    status: projection.status,
+    rawStatus, transactionId: fact.transactionId, transactionStatus: fact.transactionStatus,
+    paymentStatus: fact.paymentStatus, ...(merged.conflict ? { conflict: true } : {}),
+    occurredAt: fact.occurredAt,
+  })
+  await insertEvent(client, event)
+  await updateAttempt(client, attempt)
+  return Object.freeze({ attempt, event, duplicate: false })
+}
+
+export async function recordAuthorizationQueryEvent(
+  attemptId: string,
+  target: AuthorizationQueryTarget,
+  fact: AuthorizationFact,
+  observedAt: string,
+): Promise<{ readonly attempt: PaymentAttempt, readonly event: PaymentEvent, readonly duplicate: boolean }> {
+  return transaction(async (client) => {
+    const found = await client.query<CorrelatedAttemptRow>(`
+      SELECT a.*, o.amount_minor, o.currency
+      FROM payment_attempts a
+      JOIN payment_orders o ON o.id = a.order_id
+      WHERE a.id = $1
+      FOR UPDATE OF a
+    `, [attemptId])
+    const row = found.rows[0]
+    if (!row) throw new PaymentStoreError('PAYMENT_ATTEMPT_NOT_FOUND')
+    const current = attemptFromRow(row)
+    const authorization = current.authorization
+    const operation = authorization?.operation
+    // The query runs before this transaction. Revalidate its original target
+    // against current persisted bindings after locking, including ids discovered
+    // by a notification while the Provider query was in flight.
+    if (!authorization || !fact || fact.source !== 'query' || fact.transactionStatus !== 'S'
+      || fact.txnType !== target.txnType || fact.merchantTxnId !== target.merchantTxnId
+      || Number(row.amount_minor) !== fact.amountMinor || row.currency !== fact.currency
+      || (current.paymentId && current.paymentId !== fact.paymentId)
+      || (target.paymentId && (target.paymentId !== fact.paymentId
+        || (authorization.paymentId && target.paymentId !== authorization.paymentId)))
+      || (target.transactionId && target.transactionId !== fact.transactionId)
+      || (target.txnType === 'AUTH'
+        ? target.merchantTxnId !== authorization.authMerchantTxnId
+          || Boolean(target.transactionId && target.transactionId !== authorization.authTransactionId)
+        : !operation || operation.type !== target.txnType || operation.merchantTxnId !== target.merchantTxnId
+          || Boolean(target.transactionId && target.transactionId !== operation.transactionId))) {
+      throw new PaymentStoreError('PAYMENT_ATTEMPT_MISMATCH')
+    }
+    return persistAuthorizationFact(client, current, fact, observedAt)
+  })
+}
+
+export async function recordAuthorizationQueryConflict(
+  attemptId: string,
+  target: AuthorizationQueryTarget,
+  observedAt: string,
+): Promise<{ readonly attempt: PaymentAttempt, readonly event?: PaymentEvent, readonly duplicate: boolean }> {
+  return transaction(async (client) => {
+    const found = await client.query<AttemptRow>(`
+      SELECT * FROM payment_attempts WHERE id = $1 FOR UPDATE
+    `, [attemptId])
+    if (!found.rows[0]) throw new PaymentStoreError('PAYMENT_ATTEMPT_NOT_FOUND')
+    const current = attemptFromRow(found.rows[0])
+    const authorization = current.authorization
+    if (!authorization || target.txnType !== 'AUTH' || target.merchantTxnId !== authorization.authMerchantTxnId
+      || (target.paymentId && current.paymentId && target.paymentId !== current.paymentId)
+      || (target.paymentId && authorization.paymentId && target.paymentId !== authorization.paymentId)
+      || (target.transactionId && authorization.authTransactionId && target.transactionId !== authorization.authTransactionId)) {
+      throw new PaymentStoreError('PAYMENT_ATTEMPT_MISMATCH')
+    }
+    // Keep a verified contradiction even before the successful AUTH notification
+    // arrives, without using it to establish an AUTH anchor or funds state.
+    // An operation claimed or confirmed in flight retains its own reconciliation.
+    if (!['pending', 'authorized'].includes(authorization.fundsStatus) || authorization.operation
+      || !target.paymentId || !target.transactionId) {
+      return Object.freeze({ attempt: current, duplicate: false })
+    }
+    const sourceKey = `authorization-conflict:${attemptId}:${target.paymentId}:${target.transactionId}`
+    const duplicate = await findEvent(client, 'query', sourceKey)
+    if (duplicate) {
+      if (duplicate.attemptId !== attemptId) throw new PaymentStoreError('PAYMENT_ATTEMPT_MISMATCH')
+      return Object.freeze({ attempt: current, event: duplicate, duplicate: true })
+    }
+    const updatedAt = Date.parse(current.updatedAt) >= Date.parse(observedAt) ? current.updatedAt : observedAt
+    const attempt = Object.freeze({ ...current, updatedAt, authorization: Object.freeze({
+      ...authorization, conflict: true,
+      updatedAt: Date.parse(authorization.updatedAt) >= Date.parse(observedAt) ? authorization.updatedAt : observedAt,
+    }) })
+    const event = createEvent({
+      id: randomUUID(), attemptId, source: 'query', sourceKey,
+      status: 'processing', rawStatus: 'AUTH:CONFLICT', conflict: true,
+      transactionId: target.transactionId, occurredAt: observedAt,
+    })
+    await insertEvent(client, event)
+    await updateAttempt(client, attempt)
+    return Object.freeze({ attempt, event, duplicate: false })
+  })
+}
+
 export async function recordAuthorizationWebhookEvent(
   fact: AuthorizationWebhook,
   observedAt: string,
@@ -1762,7 +1903,7 @@ export async function recordAuthorizationWebhookEvent(
     const row = found.rows[0]
     if (!row) return Object.freeze({ correlated: false, duplicate: false })
     const current = attemptFromRow(row)
-    if (!current.authorization || fact.kind !== 'authorization'
+    if (!current.authorization || fact.kind !== 'authorization' || fact.source !== 'webhook'
       || Number(row.amount_minor) !== fact.amountMinor || row.currency !== fact.currency
       || (current.paymentId && current.paymentId !== fact.paymentId)) {
       throw new PaymentStoreError('PAYMENT_ATTEMPT_MISMATCH')
@@ -1770,40 +1911,8 @@ export async function recordAuthorizationWebhookEvent(
     // An operation notification without txnTime is timed by receipt. Duplicate
     // delivery still returns the original event below, preserving its first time.
     const occurredAt = fact.occurredAt ?? observedAt
-    const merged = mergeAuthorization(current.authorization, { ...fact, occurredAt })
-    if (!merged.accepted && !merged.conflict) throw new PaymentStoreError('PAYMENT_ATTEMPT_MISMATCH')
-    const rawStatus = `${fact.txnType}:${fact.transactionStatus}:${fact.paymentStatus}`
-    const duplicate = await findEvent(client, 'webhook', fact.transactionId)
-    if (duplicate) {
-      if (duplicate.attemptId !== current.id || duplicate.rawStatus !== rawStatus) {
-        throw new PaymentStoreError('PAYMENT_ATTEMPT_MISMATCH')
-      }
-      return Object.freeze({ correlated: true, duplicate: true, attempt: current, event: duplicate })
-    }
-    const authorization = merged.authorization
-    const status: PaymentStatus = authorization.fundsStatus === 'captured' ? 'succeeded'
-      : authorization.fundsStatus === 'voided' ? 'cancelled' : 'processing'
-    const attempt = Object.freeze({
-      ...current,
-      authorization,
-      ...(authorization.paymentId ? { paymentId: authorization.paymentId } : {}),
-      // Keep the ordinary transaction field on the AUTH/create axis. Operation
-      // ids live only in the separate operation record and audit events.
-      ...(!current.transactionId && authorization.authTransactionId ? { transactionId: authorization.authTransactionId } : {}),
-      status,
-      statusSource: 'webhook' as const,
-      updatedAt: Date.parse(current.updatedAt) >= Date.parse(observedAt) ? current.updatedAt : observedAt,
-    })
-    const event = createEvent({
-      id: randomUUID(), attemptId: current.id, source: 'webhook', sourceKey: fact.transactionId,
-      status: mapAuthorizationStatus(fact.txnType, fact.transactionStatus, fact.paymentStatus).status,
-      rawStatus, transactionId: fact.transactionId, transactionStatus: fact.transactionStatus,
-      paymentStatus: fact.paymentStatus, ...(merged.conflict ? { conflict: true } : {}),
-      occurredAt,
-    })
-    await insertEvent(client, event)
-    await updateAttempt(client, attempt)
-    return Object.freeze({ correlated: true, duplicate: false, attempt, event })
+    const recorded = await persistAuthorizationFact(client, current, { ...fact, occurredAt }, observedAt)
+    return Object.freeze({ correlated: true, ...recorded })
   })
 }
 

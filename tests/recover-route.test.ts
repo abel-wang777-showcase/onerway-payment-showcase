@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import type { AuthorizationQueryTarget, AuthorizationState } from '../shared/payment/authorization'
 
 const mocks = vi.hoisted(() => ({
+  queryAuthorization: vi.fn(),
   queryCheckoutPayment: vi.fn(),
   createQueryExpiry: vi.fn(),
   createQueryToken: vi.fn(),
@@ -14,19 +16,38 @@ const mocks = vi.hoisted(() => ({
   readPaymentRecovery: vi.fn(),
   recordSubscriptionQueryDetails: vi.fn(),
   recordQueryEvent: vi.fn(),
+  recordAuthorizationQueryEvent: vi.fn(),
+  recordAuthorizationQueryConflict: vi.fn(),
   requireServerProfile: vi.fn(),
   setPaymentRecovery: vi.fn(),
 }))
 
-vi.mock('../server/utils/gateway', () => ({
-  queryCheckoutPayment: mocks.queryCheckoutPayment,
-  createQueryExpiry: mocks.createQueryExpiry,
-  createQueryToken: mocks.createQueryToken,
-  GatewayError: class GatewayError extends Error {},
-  queryPayment: mocks.queryPayment,
-  queryPaymentCreation: mocks.queryPaymentCreation,
-  querySubscription: mocks.querySubscription,
-}))
+vi.mock('../server/utils/gateway', () => {
+  class GatewayError extends Error {
+    readonly code: string
+
+    constructor(code: string) {
+      super(code)
+      this.code = code
+    }
+  }
+  class AuthorizationQueryConflictError extends GatewayError {
+    constructor(readonly target: AuthorizationQueryTarget) {
+      super('AUTHORIZATION_QUERY_CONFLICT')
+    }
+  }
+  return {
+    queryAuthorization: mocks.queryAuthorization,
+    queryCheckoutPayment: mocks.queryCheckoutPayment,
+    createQueryExpiry: mocks.createQueryExpiry,
+    createQueryToken: mocks.createQueryToken,
+    GatewayError,
+    AuthorizationQueryConflictError,
+    queryPayment: mocks.queryPayment,
+    queryPaymentCreation: mocks.queryPaymentCreation,
+    querySubscription: mocks.querySubscription,
+  }
+})
 
 vi.mock('../server/utils/limit', () => ({
   withPaymentLimit: (_event: unknown, _kind: string, task: () => Promise<unknown>) => task(),
@@ -59,6 +80,8 @@ vi.mock('../server/utils/store', () => ({
   },
   recordSubscriptionQueryDetails: mocks.recordSubscriptionQueryDetails,
   recordQueryEvent: mocks.recordQueryEvent,
+  recordAuthorizationQueryEvent: mocks.recordAuthorizationQueryEvent,
+  recordAuthorizationQueryConflict: mocks.recordAuthorizationQueryConflict,
 }))
 
 function recovery(submissionStartedAt?: string) {
@@ -87,6 +110,34 @@ function recovery(submissionStartedAt?: string) {
   }
 }
 
+function authorizationRecovery(overrides: Partial<AuthorizationState> = {}, paymentId?: string) {
+  const stored = recovery()
+  const authorization: AuthorizationState = {
+    authMerchantTxnId: 'merchant-auth-1',
+    amountMinor: 500,
+    currency: 'USD',
+    fundsStatus: 'pending',
+    updatedAt: '2026-09-21T01:00:00.000Z',
+    ...overrides,
+  }
+  const attempt = { ...stored.attempt, integration: 'checkout', transactionId: 'create-transaction-1', paymentId, authorization }
+  return { ...stored, attempt, attempts: [attempt] }
+}
+
+function authorizationFact(txnType: 'AUTH' | 'CAPTURE' | 'VOID' = 'AUTH') {
+  return {
+    source: 'query',
+    txnType,
+    transactionId: txnType === 'AUTH' ? 'auth-transaction-1' : 'operation-transaction-1',
+    paymentId: '9000000000000000001',
+    merchantTxnId: txnType === 'AUTH' ? 'merchant-auth-1' : 'merchant-operation-1',
+    amountMinor: 500,
+    currency: 'USD',
+    transactionStatus: 'S',
+    paymentStatus: txnType === 'AUTH' ? 'A' : txnType === 'CAPTURE' ? 'S' : 'N',
+  }
+}
+
 beforeEach(() => {
   vi.clearAllMocks()
   vi.resetModules()
@@ -100,25 +151,187 @@ beforeEach(() => {
   mocks.createQueryExpiry.mockReturnValue('2026-08-10T08:05:00.000Z')
   mocks.createQueryToken.mockReturnValue('q'.repeat(43))
   mocks.getRetainedSubscriptionRecovery.mockResolvedValue(null)
+  mocks.queryAuthorization.mockReset().mockResolvedValue(undefined)
+  mocks.recordAuthorizationQueryEvent.mockReset()
+  mocks.recordAuthorizationQueryConflict.mockReset()
 })
 
 describe('payment recovery route', () => {
-  it.each([undefined, '9000000000000000001'])('restores AUTH locally without minting a query capability, paymentId=%s', async (paymentId) => {
-    const stored = recovery()
-    mocks.getPaymentRecovery.mockResolvedValue({
-      ...stored,
-      attempt: { ...stored.attempt, integration: 'checkout', paymentId, authorization: { fundsStatus: 'pending' } },
-    })
+  it.each([undefined, '9000000000000000001'])('queries the original AUTH without trusting the create transaction or minting a capability, paymentId=%s', async (paymentId) => {
+    mocks.getPaymentRecovery.mockResolvedValue(authorizationRecovery({}, paymentId))
     mocks.requireServerProfile.mockReturnValue({ profile: 'sandbox', secret: 'test-secret', merchantNo: 'private-merchant', appId: 'private-app' })
     const { default: handler } = await import('../server/api/payment/recover.get')
     const result = await (handler as (event: unknown) => Promise<Record<string, unknown>>)({})
     expect(result.query).toBeNull()
     expect(result.paymentId).toBe(paymentId ?? null)
     expect(result.attempt).toMatchObject({ authorization: { fundsStatus: 'pending' } })
+    expect(mocks.queryAuthorization).toHaveBeenCalledExactlyOnceWith(
+      mocks.requireServerProfile(),
+      { txnType: 'AUTH', merchantTxnId: 'merchant-auth-1', paymentId, transactionId: undefined, amountMinor: 500, currency: 'USD' },
+    )
+    expect(mocks.getPaymentRecovery).toHaveBeenCalledTimes(2)
+    expect(mocks.recordAuthorizationQueryEvent).not.toHaveBeenCalled()
     expect(mocks.queryCheckoutPayment).not.toHaveBeenCalled()
     expect(mocks.queryPaymentCreation).not.toHaveBeenCalled()
     expect(mocks.queryPayment).not.toHaveBeenCalled()
     expect(mocks.createQueryToken).not.toHaveBeenCalled()
+  })
+
+  it('persists a queried AUTH fact before returning the latest recovered session', async () => {
+    const pending = authorizationRecovery()
+    const confirmed = authorizationRecovery({ fundsStatus: 'authorized', authTransactionId: 'auth-transaction-1', paymentId: '9000000000000000001' }, '9000000000000000001')
+    mocks.getPaymentRecovery.mockResolvedValueOnce(pending).mockResolvedValue(confirmed)
+    mocks.queryAuthorization.mockResolvedValue(authorizationFact())
+    mocks.requireServerProfile.mockReturnValue({ profile: 'sandbox', secret: 'test-secret', merchantNo: 'private-merchant', appId: 'private-app' })
+    const { default: handler } = await import('../server/api/payment/recover.get')
+    const result = await (handler as (event: unknown) => Promise<Record<string, unknown>>)({})
+    expect(result.attempt).toEqual(confirmed.attempt)
+    expect(result.query).toBeNull()
+    expect(mocks.recordAuthorizationQueryEvent).toHaveBeenCalledExactlyOnceWith(
+      'attempt-1',
+      { txnType: 'AUTH', merchantTxnId: 'merchant-auth-1', transactionId: undefined, paymentId: undefined },
+      { ...authorizationFact(), occurredAt: expect.any(String) },
+      expect.any(String),
+    )
+    const [, , fact, observedAt] = mocks.recordAuthorizationQueryEvent.mock.calls[0]!
+    expect(fact.occurredAt).toBe(observedAt)
+    expect(mocks.recordAuthorizationQueryEvent.mock.invocationCallOrder[0]).toBeLessThan(mocks.getPaymentRecovery.mock.invocationCallOrder[1]!)
+  })
+
+  it.each(['CAPTURE', 'VOID'] as const)('queries only the claimed %s and preserves its lock when no final result exists', async (type) => {
+    const stored = authorizationRecovery({
+      fundsStatus: 'authorized', paymentId: '9000000000000000001', authTransactionId: 'auth-transaction-1',
+      operation: { type, merchantTxnId: 'merchant-operation-1', status: 'unknown' },
+    })
+    mocks.getPaymentRecovery.mockResolvedValue(stored)
+    mocks.requireServerProfile.mockReturnValue({ profile: 'sandbox', secret: 'test-secret', merchantNo: 'private-merchant', appId: 'private-app' })
+    const { default: handler } = await import('../server/api/payment/recover.get')
+    const result = await (handler as (event: unknown) => Promise<Record<string, unknown>>)({})
+    expect(mocks.queryAuthorization).toHaveBeenCalledExactlyOnceWith(mocks.requireServerProfile(), {
+      txnType: type, merchantTxnId: 'merchant-operation-1', transactionId: undefined,
+      paymentId: '9000000000000000001', amountMinor: 500, currency: 'USD', originTransactionId: 'auth-transaction-1',
+    })
+    expect(result.attempt).toEqual(stored.attempt)
+    expect(mocks.completePaymentRecord).not.toHaveBeenCalled()
+    expect(mocks.recordAuthorizationQueryEvent).not.toHaveBeenCalled()
+  })
+
+  it.each(['captured', 'voided'] as const)('does not query an unconflicted %s authorization again', async (fundsStatus) => {
+    const stored = authorizationRecovery({ fundsStatus })
+    mocks.getPaymentRecovery.mockResolvedValue(stored)
+    mocks.requireServerProfile.mockReturnValue({ profile: 'sandbox', secret: 'test-secret', merchantNo: 'private-merchant', appId: 'private-app' })
+    const { default: handler } = await import('../server/api/payment/recover.get')
+    const result = await (handler as (event: unknown) => Promise<Record<string, unknown>>)({})
+    expect(result.attempt).toEqual(stored.attempt)
+    expect(mocks.queryAuthorization).not.toHaveBeenCalled()
+    expect(mocks.getPaymentRecovery).toHaveBeenCalledTimes(1)
+  })
+
+  it('retains a terminal conflict while querying its saved operation', async () => {
+    const stored = authorizationRecovery({
+      fundsStatus: 'captured', conflict: true, paymentId: '9000000000000000001', authTransactionId: 'auth-transaction-1',
+      operation: { type: 'CAPTURE', merchantTxnId: 'merchant-operation-1', transactionId: 'operation-transaction-1', status: 'confirmed' },
+    })
+    mocks.getPaymentRecovery.mockResolvedValue(stored)
+    mocks.requireServerProfile.mockReturnValue({ profile: 'sandbox', secret: 'test-secret', merchantNo: 'private-merchant', appId: 'private-app' })
+    const { default: handler } = await import('../server/api/payment/recover.get')
+    const result = await (handler as (event: unknown) => Promise<Record<string, unknown>>)({})
+    expect(mocks.queryAuthorization).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ txnType: 'CAPTURE', transactionId: 'operation-transaction-1' }))
+    expect(result.attempt).toEqual(stored.attempt)
+  })
+
+  it.each(['empty', 'unavailable'] as const)('returns concurrent Webhook state after an %s query instead of its stale snapshot', async (outcome) => {
+    const pending = authorizationRecovery({ fundsStatus: 'authorized', authTransactionId: 'auth-transaction-1', operation: { type: 'VOID', merchantTxnId: 'merchant-operation-1', status: 'unknown' } })
+    const latest = authorizationRecovery({ ...pending.attempt.authorization, fundsStatus: 'voided', operation: { type: 'VOID', merchantTxnId: 'merchant-operation-1', transactionId: 'operation-transaction-1', status: 'confirmed' } })
+    mocks.getPaymentRecovery.mockResolvedValueOnce(pending).mockResolvedValue(latest)
+    if (outcome === 'unavailable') {
+      const { GatewayError } = await import('../server/utils/gateway')
+      mocks.queryAuthorization.mockRejectedValue(new GatewayError('PAYMENT_NETWORK_ERROR'))
+    }
+    mocks.requireServerProfile.mockReturnValue({ profile: 'sandbox', secret: 'test-secret', merchantNo: 'private-merchant', appId: 'private-app' })
+    const { default: handler } = await import('../server/api/payment/recover.get')
+    const result = await (handler as (event: unknown) => Promise<Record<string, unknown>>)({})
+    expect(result.attempt).toEqual(latest.attempt)
+    expect(mocks.getPaymentRecovery).toHaveBeenCalledTimes(2)
+    expect(mocks.recordAuthorizationQueryEvent).not.toHaveBeenCalled()
+    expect(mocks.recordAuthorizationQueryConflict).not.toHaveBeenCalled()
+  })
+
+  it('returns the latest locked state when a concurrent binding makes the query fact inapplicable', async () => {
+    const stored = authorizationRecovery({ fundsStatus: 'authorized', authTransactionId: 'auth-transaction-1', operation: { type: 'VOID', merchantTxnId: 'merchant-operation-1', status: 'unknown' } })
+    const latest = authorizationRecovery({ ...stored.attempt.authorization, conflict: true })
+    mocks.getPaymentRecovery.mockResolvedValueOnce(stored).mockResolvedValue(latest)
+    mocks.queryAuthorization.mockResolvedValue(authorizationFact('VOID'))
+    const { PaymentStoreError } = await import('../server/utils/store')
+    mocks.recordAuthorizationQueryEvent.mockRejectedValue(new PaymentStoreError('PAYMENT_ATTEMPT_MISMATCH'))
+    mocks.requireServerProfile.mockReturnValue({ profile: 'sandbox', secret: 'test-secret', merchantNo: 'private-merchant', appId: 'private-app' })
+    const { default: handler } = await import('../server/api/payment/recover.get')
+    const result = await (handler as (event: unknown) => Promise<Record<string, unknown>>)({})
+    expect(result.attempt).toEqual(latest.attempt)
+    expect(mocks.getPaymentRecovery).toHaveBeenCalledTimes(2)
+  })
+
+  it('locks a contradicted AUTH without inventing a captured or voided funds outcome', async () => {
+    const stored = authorizationRecovery({ fundsStatus: 'authorized', authTransactionId: 'auth-transaction-1', paymentId: '9000000000000000001' })
+    const latest = authorizationRecovery({ ...stored.attempt.authorization, conflict: true })
+    mocks.getPaymentRecovery.mockResolvedValueOnce(stored).mockResolvedValue(latest)
+    const { AuthorizationQueryConflictError } = await import('../server/utils/gateway')
+    mocks.queryAuthorization.mockRejectedValue(new AuthorizationQueryConflictError({
+      txnType: 'AUTH', merchantTxnId: 'merchant-auth-1', transactionId: 'auth-transaction-1', paymentId: '9000000000000000001',
+    }))
+    mocks.requireServerProfile.mockReturnValue({ profile: 'sandbox', secret: 'test-secret', merchantNo: 'private-merchant', appId: 'private-app' })
+    const { default: handler } = await import('../server/api/payment/recover.get')
+    const result = await (handler as (event: unknown) => Promise<Record<string, unknown>>)({})
+    expect(mocks.recordAuthorizationQueryConflict).toHaveBeenCalledExactlyOnceWith('attempt-1', {
+      txnType: 'AUTH', merchantTxnId: 'merchant-auth-1', transactionId: 'auth-transaction-1', paymentId: '9000000000000000001',
+    }, expect.any(String))
+    expect(result.attempt).toMatchObject({ authorization: { fundsStatus: 'authorized', conflict: true } })
+    expect(mocks.recordAuthorizationQueryEvent).not.toHaveBeenCalled()
+    expect(mocks.getPaymentRecovery).toHaveBeenCalledTimes(2)
+  })
+
+  it('returns a concurrently claimed operation when the earlier AUTH conflict no longer applies', async () => {
+    const stored = authorizationRecovery({ fundsStatus: 'authorized', authTransactionId: 'auth-transaction-1', paymentId: '9000000000000000001' })
+    const latest = authorizationRecovery({ ...stored.attempt.authorization, operation: { type: 'VOID', merchantTxnId: 'merchant-operation-1', status: 'unknown' } })
+    mocks.getPaymentRecovery.mockResolvedValueOnce(stored).mockResolvedValue(latest)
+    const { AuthorizationQueryConflictError } = await import('../server/utils/gateway')
+    const { PaymentStoreError } = await import('../server/utils/store')
+    mocks.queryAuthorization.mockRejectedValue(new AuthorizationQueryConflictError({
+      txnType: 'AUTH', merchantTxnId: 'merchant-auth-1', transactionId: 'auth-transaction-1', paymentId: '9000000000000000001',
+    }))
+    mocks.recordAuthorizationQueryConflict.mockRejectedValue(new PaymentStoreError('PAYMENT_ATTEMPT_MISMATCH'))
+    mocks.requireServerProfile.mockReturnValue({ profile: 'sandbox', secret: 'test-secret', merchantNo: 'private-merchant', appId: 'private-app' })
+    const { default: handler } = await import('../server/api/payment/recover.get')
+    const result = await (handler as (event: unknown) => Promise<Record<string, unknown>>)({})
+    expect(result.attempt).toEqual(latest.attempt)
+    expect(mocks.getPaymentRecovery).toHaveBeenCalledTimes(2)
+  })
+
+  it('uses query-verified identifiers to lock an AUTH bound by a concurrent Webhook', async () => {
+    const pending = authorizationRecovery()
+    const latest = authorizationRecovery({ fundsStatus: 'authorized', paymentId: '9000000000000000001', authTransactionId: 'auth-transaction-1', conflict: true })
+    mocks.getPaymentRecovery.mockResolvedValueOnce(pending).mockResolvedValue(latest)
+    const target = { txnType: 'AUTH' as const, merchantTxnId: 'merchant-auth-1', transactionId: 'auth-transaction-1', paymentId: '9000000000000000001' }
+    const { AuthorizationQueryConflictError } = await import('../server/utils/gateway')
+    mocks.queryAuthorization.mockRejectedValue(new AuthorizationQueryConflictError(target))
+    mocks.requireServerProfile.mockReturnValue({ profile: 'sandbox', secret: 'test-secret', merchantNo: 'private-merchant', appId: 'private-app' })
+    const { default: handler } = await import('../server/api/payment/recover.get')
+    const result = await (handler as (event: unknown) => Promise<Record<string, unknown>>)({})
+    expect(mocks.queryAuthorization).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ transactionId: undefined, paymentId: undefined }))
+    expect(mocks.recordAuthorizationQueryConflict).toHaveBeenCalledExactlyOnceWith('attempt-1', target, expect.any(String))
+    expect(result.attempt).toEqual(latest.attempt)
+    expect(mocks.getPaymentRecovery).toHaveBeenCalledTimes(2)
+  })
+
+  it('does not hide a database failure as a completed recovery', async () => {
+    mocks.getPaymentRecovery.mockResolvedValue(authorizationRecovery())
+    mocks.queryAuthorization.mockResolvedValue(authorizationFact())
+    const { PaymentStoreError } = await import('../server/utils/store')
+    mocks.recordAuthorizationQueryEvent.mockRejectedValue(new PaymentStoreError('PAYMENT_DATABASE_UNAVAILABLE'))
+    mocks.requireServerProfile.mockReturnValue({ profile: 'sandbox', secret: 'test-secret', merchantNo: 'private-merchant', appId: 'private-app' })
+    const { default: handler } = await import('../server/api/payment/recover.get')
+    await expect((handler as (event: unknown) => Promise<unknown>)({})).rejects.toMatchObject({ statusCode: 503, statusMessage: 'PAYMENT_DATABASE_UNAVAILABLE' })
+    expect(mocks.getPaymentRecovery).toHaveBeenCalledTimes(2)
   })
 
   it('rejects AUTH recovery from a different customer scope', async () => {
@@ -127,6 +340,7 @@ describe('payment recovery route', () => {
     mocks.requireServerProfile.mockReturnValue({ profile: 'sandbox', secret: 'test-secret', merchantNo: 'other-merchant', appId: 'private-app' })
     const { default: handler } = await import('../server/api/payment/recover.get')
     await expect((handler as (event: unknown) => Promise<unknown>)({})).rejects.toMatchObject({ statusCode: 409 })
+    expect(mocks.queryAuthorization).not.toHaveBeenCalled()
     expect(mocks.queryPayment).not.toHaveBeenCalled()
   })
 

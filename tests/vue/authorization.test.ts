@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AuthorizationState } from '../../shared/payment/authorization'
 import Authorization from '../../app/components/payment/Authorization.vue'
 import ResultPage from '../../app/pages/halden/result/[order].vue'
+import ReturnPage from '../../app/pages/halden/return/[order].vue'
 import Hosted from '../../app/components/payment/Hosted.vue'
 import { authorizationSession } from './authorization-fixture'
 
@@ -19,7 +20,7 @@ function state(overrides: Partial<AuthorizationState> = {}) {
     session: shallowRef(authorizationSession(overrides)), subscription: shallowRef(null),
     retainedSubscriptionOrderId: shallowRef(null), retainedSubscriptionPaymentStatus: shallowRef(null),
     authorizationRequest: shallowRef(null), authorizationSubmitting: shallowRef(false),
-    error: shallowRef(null), failure: shallowRef(null), recoveryFailure: shallowRef(null),
+    error: shallowRef(null), failure: shallowRef(null), recoveryFailure: shallowRef(null), recoveryError: shallowRef(null),
     stage: shallowRef('not_completed'), restoring: shallowRef(false), retrying: shallowRef(false),
     canOpenCheckout: shallowRef(false), openCheckout: vi.fn(), start: vi.fn(),
     recover: vi.fn(), verify: vi.fn(), retry: vi.fn(), refreshAuthorization: vi.fn(), operateAuthorization: vi.fn(),
@@ -83,11 +84,13 @@ describe('authorization funds presentation', () => {
   it('shows a conflict instead of available merchant operations', async () => {
     const wrapper = await mountSuspended(Authorization, { props: { authorization: authorizationSession({ conflict: true }).attempt.authorization!, amount: '$5.00' } })
     expect(wrapper.text()).toContain('needs review')
+    expect(wrapper.text()).not.toContain('Payment captured')
+    expect(wrapper.text()).not.toContain('Authorization released')
     expect(wrapper.findAll('button').map(button => button.text())).toEqual(['Refresh status'])
     wrapper.unmount()
   })
 
-  it('refreshes pending hosted authorization through local recovery', async () => {
+  it('refreshes pending hosted authorization through recovery', async () => {
     const sdk = state({ fundsStatus: 'pending', paymentId: undefined, authTransactionId: undefined })
     nuxt.useSdk.mockReturnValue(sdk)
     nuxt.useRoute.mockReturnValue({ params: { order: 'order-auth-1' }, path: '/halden/hosted/order-auth-1' })
@@ -98,6 +101,37 @@ describe('authorization funds presentation', () => {
     expect(sdk.refreshAuthorization).toHaveBeenCalledOnce()
     expect(sdk.verify).not.toHaveBeenCalled()
     expect(sdk.start).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it.each([
+    ['pending', 'hosted'],
+    ['authorized', 'result'],
+    ['captured', 'result'],
+    ['voided', 'result'],
+  ] as const)('restores the %s browser return once and opens its %s page', async (fundsStatus, page) => {
+    const sdk = state({ fundsStatus })
+    sdk.recover.mockResolvedValue(true)
+    nuxt.useSdk.mockReturnValue(sdk)
+    nuxt.useRoute.mockReturnValue({ params: { order: 'order-auth-1' }, path: '/halden/return/order-auth-1', query: {} })
+    const wrapper = await mountSuspended(ReturnPage)
+    await flushPromises()
+    expect(sdk.recover).toHaveBeenCalledExactlyOnceWith('order-auth-1', true)
+    expect(sdk.verify).not.toHaveBeenCalled()
+    expect(nuxt.navigateTo).toHaveBeenCalledExactlyOnceWith(`/halden/${page}/order-auth-1`, { replace: true })
+    wrapper.unmount()
+  })
+
+  it('keeps ordinary payment verification after a nonterminal browser return', async () => {
+    const sdk = state()
+    sdk.session.value = { ...sdk.session.value, attempt: { ...sdk.session.value.attempt, authorization: undefined } }
+    sdk.recover.mockResolvedValue(true)
+    nuxt.useSdk.mockReturnValue(sdk)
+    nuxt.useRoute.mockReturnValue({ params: { order: 'order-auth-1' }, path: '/halden/return/order-auth-1', query: {} })
+    const wrapper = await mountSuspended(ReturnPage)
+    await flushPromises()
+    expect(sdk.verify).toHaveBeenCalledOnce()
+    expect(nuxt.navigateTo).not.toHaveBeenCalled()
     wrapper.unmount()
   })
 })

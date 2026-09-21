@@ -55,6 +55,7 @@ export interface SubscriptionPaymentWebhook extends PaymentWebhook {
 }
 
 export interface AuthorizationWebhook extends Omit<AuthorizationFact, 'occurredAt'>, AuthorizationProjection {
+  readonly source: 'webhook'
   readonly kind: 'authorization'
   // CAPTURE/VOID may omit the transaction time. Persistence then records the
   // notification's server receipt time, not an invented Provider transaction time.

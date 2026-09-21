@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { paymentPath } from '#shared/payment/checkout'
 import { isTerminalStatus } from '#shared/payment/sdk'
 
 definePageMeta({
@@ -46,8 +47,9 @@ async function restore(): Promise<void> {
   await nextTick()
   title.value?.focus()
 
-  if (current.value && isTerminalStatus(current.value.attempt.status)) {
-    await navigateTo(`/halden/result/${current.value.order.id}`, { replace: true })
+  if (current.value && (current.value.attempt.authorization || isTerminalStatus(current.value.attempt.status))) {
+    // AUTH recovery already queried the saved transaction when needed.
+    await navigateTo(paymentPath(current.value.attempt), { replace: true })
     return
   }
 

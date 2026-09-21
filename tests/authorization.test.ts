@@ -120,10 +120,65 @@ describe('authorization funds projection', () => {
     })
   })
 
-  it.each(['server', 'client', 'return', 'simulation', 'query'])('rejects %s as a funds authority', (source) => {
+  it.each(['server', 'client', 'return', 'simulation'])('rejects %s as a funds authority', (source) => {
     const original = state()
     const result = mergeAuthorization(original, { ...fact(), source } as AuthorizationFact)
     expect(result).toEqual({ authorization: original, accepted: false, conflict: false })
+  })
+})
+
+describe('authorization query reconciliation', () => {
+  it('accepts a verified AUTH query as frozen funds and establishes its successful anchor', () => {
+    const pending = createAuthorizationState({ merchantTxnId: 'showcase-auth-1', amountMinor: 500, currency: 'USD', occurredAt: createdAt })
+    const result = mergeAuthorization(pending, fact({ source: 'query' }))
+    expect(result.authorization).toMatchObject({ fundsStatus: 'authorized', authTransactionId: fact().transactionId })
+    expect(canClaimAuthorizationOperation(result.authorization)).toBe(true)
+    expect(mapAuthorizationStatus('AUTH', 'S', 'A').status).toBe('processing')
+  })
+
+  it.each(['CAPTURE', 'VOID'] as const)('confirms the exact unknown %s operation while preserving the AUTH anchor', (type) => {
+    const original = claimed(type)
+    const unknown = { ...original, operation: { ...original.operation!, status: 'unknown' as const } }
+    const queried = { ...operationFact(type), source: 'query' as const, merchantTxnId: 'showcase-operation-1' }
+    const result = mergeAuthorization(unknown, queried)
+    expect(result.authorization).toMatchObject({
+      authTransactionId: original.authTransactionId,
+      fundsStatus: type === 'CAPTURE' ? 'captured' : 'voided',
+      operation: { merchantTxnId: 'showcase-operation-1', transactionId: queried.transactionId, status: 'confirmed' },
+    })
+    expect(canClaimAuthorizationOperation(result.authorization)).toBe(false)
+    expect(mergeAuthorization(result.authorization, fact({ source: 'query' })).authorization).toBe(result.authorization)
+  })
+
+  it('requires the operation merchant id for query even when the same id is allowed on a signed webhook', () => {
+    const original = claimed()
+    expect(mergeAuthorization(original, { ...operationFact(), source: 'query' }).accepted).toBe(false)
+    expect(mergeAuthorization(original, operationFact()).accepted).toBe(true)
+  })
+
+  it('never clears an existing claim when a delayed AUTH query completes', () => {
+    const original = claimed()
+    const result = mergeAuthorization(original, fact({ source: 'query' }))
+    expect(result.authorization).toBe(original)
+    expect(canClaimAuthorizationOperation(result.authorization)).toBe(false)
+  })
+
+  it('rejects transaction failure as an authoritative query fact', () => {
+    const original = claimed()
+    expect(mergeAuthorization(original, fact({ source: 'query', transactionStatus: 'F', paymentStatus: 'O' })))
+      .toEqual({ authorization: original, accepted: false, conflict: false })
+  })
+
+  it('keeps conflicting query evidence locked without replacing the successful anchor or final funds', () => {
+    const original = state({ fundsStatus: 'authorized' })
+    const conflict = mergeAuthorization(original, fact({ source: 'query', transactionId: '2000000000000000008' }))
+    expect(conflict.authorization).toMatchObject({ authTransactionId: original.authTransactionId, conflict: true })
+    const completed = mergeAuthorization(claimed(), operationFact()).authorization
+    const finalConflict = mergeAuthorization(completed, {
+      ...operationFact('VOID'), source: 'query', merchantTxnId: 'showcase-operation-1',
+    })
+    expect(finalConflict.authorization).toMatchObject({ fundsStatus: 'captured', conflict: true, operation: { type: 'CAPTURE' } })
+    expect(canClaimAuthorizationOperation(finalConflict.authorization)).toBe(false)
   })
 })
 

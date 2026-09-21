@@ -3,9 +3,11 @@ import {
   buildAuthorizationOperationPayload,
   buildCheckoutCreatePayload,
   executeAuthorizationOperation,
+  queryAuthorization,
   readAuthorizationOperationResponse,
   signPayload,
   type AuthorizationOperationContext,
+  type AuthorizationQueryContext,
 } from '../server/utils/gateway'
 import { getJourney } from '../shared/payment/journey'
 import type { ServerProfile } from '../server/utils/profile'
@@ -46,6 +48,132 @@ const response = (data: Record<string, unknown> = {}) => ({
 })
 
 afterEach(() => vi.unstubAllGlobals())
+
+describe('authorization query compensation', () => {
+  const queryContext: AuthorizationQueryContext = {
+    txnType: 'CAPTURE', merchantTxnId: context.merchantTxnId,
+    originTransactionId: context.originTransactionId,
+    paymentId: context.paymentId, amountMinor: 500, currency: 'USD',
+  }
+  const transaction = (overrides: Record<string, unknown> = {}) => ({
+    transactionId: '10002', paymentId: '20001', merchantTxnId: context.merchantTxnId,
+    originTransactionId: '10001', appId: profile.appId, productType: 'CARD', subProductType: 'DIRECT',
+    txnType: 'CAPTURE', status: 'S', orderAmount: '5.00', orderCurrency: 'USD', ...overrides,
+  })
+  const payment = (overrides: Record<string, unknown> = {}) => ({
+    paymentId: '20001', lastTransactionId: '10002', merchantTxnId: context.merchantTxnId,
+    appId: profile.appId, productType: 'CARD', subProductType: 'DIRECT',
+    paymentStatus: 'S', orderAmount: '5.00', orderCurrency: 'USD', ...overrides,
+  })
+  const page = (record: Record<string, unknown>) => ({
+    respCode: '20000', data: { content: [record], totalPages: 1, totalElements: 1 },
+  })
+  const mockQueries = (...responses: unknown[]) => {
+    const fetch = vi.fn()
+    for (const body of responses) fetch.mockResolvedValueOnce({ ok: true, json: async () => body })
+    vi.stubGlobal('fetch', fetch)
+    return fetch
+  }
+
+  it.each([
+    ['AUTH', 'A'], ['CAPTURE', 'S'], ['VOID', 'N'],
+  ] as const)('confirms %s only by matching transaction and current Payment facts', async (txnType, paymentStatus) => {
+    const target = { ...queryContext, txnType, originTransactionId: txnType === 'AUTH' ? undefined : '10001' }
+    const fetch = mockQueries(page(transaction({ txnType })), page(payment({ paymentStatus })))
+    expect(await queryAuthorization(profile, target)).toEqual({
+      source: 'query', txnType, transactionId: '10002', paymentId: '20001', merchantTxnId: target.merchantTxnId,
+      amountMinor: 500, currency: 'USD', transactionStatus: 'S', paymentStatus,
+    })
+    expect(fetch.mock.calls.map(call => call[0])).toEqual([
+      `${profile.apiBaseUrl}/v1/txn/list`, `${profile.apiBaseUrl}/v1/txn/queryPayments`,
+    ])
+    expect(JSON.parse(fetch.mock.calls[0]![1].body)).toEqual(signPayload({
+      current: '1', size: '10', merchantNo: profile.merchantNo, merchantTxnIds: target.merchantTxnId,
+    }, profile.secret))
+    expect(JSON.parse(fetch.mock.calls[1]![1].body)).toEqual(signPayload({
+      current: '1', size: '10', merchantNo: profile.merchantNo, paymentId: '20001',
+    }, profile.secret))
+  })
+
+  it('discovers the AUTH identifiers after a lost create response, without a create or operation call', async () => {
+    mockQueries(page(transaction({ txnType: 'AUTH' })), page(payment({ paymentStatus: 'A' })))
+    expect(await queryAuthorization(profile, {
+      ...queryContext, txnType: 'AUTH', paymentId: undefined, transactionId: undefined, originTransactionId: undefined,
+    })).toMatchObject({ transactionId: '10002', paymentId: '20001', paymentStatus: 'A' })
+  })
+
+  it.each(['F', 'P', 'R', 'N', 'I', 'U'])('keeps transaction %s unresolved and sends no funding request', async (status) => {
+    const fetch = mockQueries(page(transaction({ status })))
+    expect(await queryAuthorization(profile, queryContext)).toBeUndefined()
+    expect(fetch).toHaveBeenCalledTimes(1)
+  })
+
+  it.each(['A', 'O', 'P', 'N'])('does not manufacture captured funds from Payment %s', async (paymentStatus) => {
+    mockQueries(page(transaction()), page(payment({ paymentStatus })))
+    expect(await queryAuthorization(profile, queryContext)).toBeUndefined()
+  })
+
+  it('does not revive a historic successful AUTH after its Payment moved on', async () => {
+    mockQueries(page(transaction({ txnType: 'AUTH' })), page(payment({ lastTransactionId: '10003' })))
+    await expect(queryAuthorization(profile, { ...queryContext, txnType: 'AUTH', originTransactionId: undefined }))
+      .rejects.toMatchObject({ code: 'AUTHORIZATION_QUERY_CONFLICT', target: {
+        txnType: 'AUTH', merchantTxnId: context.merchantTxnId, paymentId: '20001', transactionId: '10002',
+      } })
+  })
+
+  it.each([
+    { paymentStatus: 'S' }, { paymentStatus: 'N' },
+    { paymentStatus: 'A', lastTransactionId: '10003', merchantTxnId: 'external-operation' },
+  ])('distinguishes a reliable loss of the current AUTH hold from an unavailable query: %j', async (current) => {
+    mockQueries(page(transaction({ txnType: 'AUTH' })), page(payment(current)))
+    await expect(queryAuthorization(profile, { ...queryContext, txnType: 'AUTH', originTransactionId: undefined }))
+      .rejects.toMatchObject({ code: 'AUTHORIZATION_QUERY_CONFLICT' })
+  })
+
+  it('never turns an unrelated Payment into an authorization conflict observation', async () => {
+    mockQueries(page(transaction({ txnType: 'AUTH' })), page(payment({ paymentId: '20002', paymentStatus: 'N' })))
+    await expect(queryAuthorization(profile, { ...queryContext, txnType: 'AUTH', originTransactionId: undefined }))
+      .rejects.toMatchObject({ code: 'PAYMENT_QUERY_RESPONSE_INVALID' })
+  })
+
+  it.each([
+    { transactionId: 'invalid' }, { paymentId: '20002' }, { merchantTxnId: 'other' },
+    { originTransactionId: '10003' }, { txnType: 'SALE' }, { orderAmount: '6.00' },
+    { orderCurrency: 'EUR' }, { appId: 'other-app' }, { subProductType: 'TOKEN' },
+    { productType: 'LPMS' }, { merchantNo: 'other-merchant' }, { status: 'UNKNOWN' },
+  ])('rejects an unrelated transaction before querying Payment: %j', async (overrides) => {
+    const fetch = mockQueries(page(transaction(overrides)))
+    await expect(queryAuthorization(profile, queryContext)).rejects.toMatchObject({ code: 'PAYMENT_QUERY_RESPONSE_INVALID' })
+    expect(fetch).toHaveBeenCalledTimes(1)
+  })
+
+  it.each([
+    { paymentId: '20002' }, { lastTransactionId: '10001' }, { merchantTxnId: 'other' },
+    { appId: 'other-app' }, { orderAmount: '4.00' }, { orderCurrency: 'EUR' },
+    { paymentStatus: 'UNKNOWN' }, { paymentStatus: undefined },
+  ])('rejects a mismatched current Payment: %j', async (overrides) => {
+    mockQueries(page(transaction()), page(payment(overrides)))
+    await expect(queryAuthorization(profile, queryContext)).rejects.toMatchObject({ code: 'PAYMENT_QUERY_RESPONSE_INVALID' })
+  })
+
+  it.each([
+    { respCode: '50134' },
+    { respCode: '20000', data: { content: [] } },
+    { respCode: '20000', data: { content: [transaction()] } },
+    { respCode: '20000', data: { content: [transaction(), transaction()] } },
+    { respCode: '20000', data: { content: [transaction()], totalPages: 2 } },
+  ])('rejects empty, denied, or ambiguous query results without claiming failure: %j', async (body) => {
+    mockQueries(body)
+    await expect(queryAuthorization(profile, queryContext)).rejects.toBeInstanceOf(Error)
+  })
+
+  it('requires known operation identity and preserves the known operation transaction ID', async () => {
+    const fetch = mockQueries(page(transaction()))
+    await expect(queryAuthorization(profile, { ...queryContext, originTransactionId: undefined })).rejects.toBeInstanceOf(Error)
+    expect(fetch).not.toHaveBeenCalled()
+    await expect(queryAuthorization(profile, { ...queryContext, transactionId: '10003' })).rejects.toBeInstanceOf(Error)
+  })
+})
 
 it('creates only the fixed hosted authorization journey as CARD DIRECT AUTH', () => {
   const journey = getJourney('hosted-authorization')

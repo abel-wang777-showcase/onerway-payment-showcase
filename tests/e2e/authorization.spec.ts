@@ -7,9 +7,21 @@ const BASE_URL = 'http://127.0.0.1:4173'
 const ORDER_ID = 'order-auth-1'
 const HOSTED_URL = 'https://sandbox-checkout.onerway.com/checkout?session=mock-authorization-only'
 
+function queriedSession(overrides: Partial<AuthorizationState> = {}) {
+  const session = authorizationSession(overrides)
+  const attempt = { ...session.attempt, statusSource: 'query' as const }
+  return {
+    ...session,
+    attempt,
+    attempts: [attempt],
+    events: session.events.map(event => ({ ...event, id: `query-${event.id}`, source: 'query' as const })),
+  }
+}
+
 async function installAuthorizationMock(page: Page, options: { restored?: Partial<AuthorizationState>, loseOperationResponse?: boolean } = {}) {
   let current = authorizationSession(options.restored ?? { fundsStatus: 'pending', authTransactionId: undefined, paymentId: undefined })
   let created = Boolean(options.restored)
+  let returned = false
   const calls: { path: string, body: unknown }[] = []
   const violations: string[] = []
 
@@ -53,12 +65,15 @@ async function installAuthorizationMock(page: Page, options: { restored?: Partia
         await route.fulfill({ json: { ...current, event, redirectUrl: HOSTED_URL } })
       }
       else if (url.pathname === '/api/payment/recover') {
+        // Model the server query recovering a missing AUTH notification. The
+        // browser return itself leaves the funds state untouched.
+        if (returned && current.attempt.authorization?.fundsStatus === 'pending') current = queriedSession()
         if (created) await route.fulfill({ json: current })
         else await route.fulfill({ status: 401, json: { statusMessage: 'PAYMENT_RECOVERY_UNAUTHORIZED' } })
       }
       else if (url.pathname === '/api/payment/return') {
         expect(body).toEqual({ orderId: ORDER_ID })
-        current = authorizationSession()
+        returned = true
         await route.fulfill({ json: { duplicate: false } })
       }
       else if (url.pathname === `/api/payment/authorization/${ORDER_ID}`) {
@@ -66,7 +81,14 @@ async function installAuthorizationMock(page: Page, options: { restored?: Partia
         expect(['CAPTURE', 'VOID']).toContain(type)
         expect(body).toEqual({ type })
         expect(current.attempt.authorization?.operation).toBeUndefined()
-        current = authorizationSession({ operation: { type, merchantTxnId: 'merchant-operation-1', status: options.loseOperationResponse ? 'unknown' : 'pending' } })
+        const attempt = {
+          ...current.attempt,
+          authorization: {
+            ...current.attempt.authorization!,
+            operation: { type, merchantTxnId: 'merchant-operation-1', status: options.loseOperationResponse ? 'unknown' as const : 'pending' as const },
+          },
+        }
+        current = { ...current, attempt, attempts: [attempt] }
         if (options.loseOperationResponse) await route.abort('connectionclosed')
         else await route.fulfill({ json: current })
       }
@@ -81,7 +103,7 @@ async function installAuthorizationMock(page: Page, options: { restored?: Partia
   return {
     calls,
     confirm(type: AuthorizationOperationType) {
-      current = authorizationSession({
+      current = queriedSession({
         fundsStatus: type === 'CAPTURE' ? 'captured' : 'voided',
         operation: { type, status: 'confirmed', merchantTxnId: 'merchant-operation-1', transactionId: 'transaction-operation-1' },
       })
@@ -123,6 +145,9 @@ test.describe('mock Checkout authorization', () => {
       await page.getByRole('link', { name: 'Return to Halden' }).click()
       await expect(page).toHaveURL(`/halden/result/${ORDER_ID}`)
       await expect(page.getByText('Funds authorized · Not charged.', { exact: true })).toBeVisible()
+      const returnIndex = mock.calls.findIndex(call => call.path === '/api/payment/return')
+      expect(returnIndex).toBeGreaterThanOrEqual(0)
+      expect(mock.calls.slice(returnIndex).map(call => call.path)).toEqual(['/api/payment/return', '/api/payment/recover'])
       await expect(page.getByRole('heading', { level: 1 })).toBeFocused()
       await expectNoHorizontalOverflow(page)
       await page.screenshot({ path: testInfo.outputPath(`authorized-${type.toLowerCase()}.png`), fullPage: true })
@@ -133,9 +158,13 @@ test.describe('mock Checkout authorization', () => {
       await expect(page.getByText(`${type === 'CAPTURE' ? 'Capture' : 'Void'} awaiting confirmation.`, { exact: true })).toBeVisible()
       await expect(page.getByRole('button', { name: 'Void authorization', exact: true })).toHaveCount(0)
       await expect(page.getByRole('button', { name: 'Capture $5.00', exact: true })).toHaveCount(0)
+      await page.screenshot({ path: testInfo.outputPath(`awaiting-${type.toLowerCase()}.png`), fullPage: true })
       mock.confirm(type)
       await page.getByRole('button', { name: 'Refresh status' }).click()
       await expect(page.getByText(type === 'CAPTURE' ? 'Payment captured.' : 'Authorization released.', { exact: true })).toBeVisible()
+      await page.getByRole('button', { name: 'Show Technical details' }).click()
+      await expect(page.getByText(`${type}:S:${type === 'CAPTURE' ? 'S' : 'N'}`, { exact: true })).toBeVisible()
+      await expect(page.getByText('query', { exact: true })).toBeVisible()
       await page.reload()
       await expect(page.getByText(type === 'CAPTURE' ? 'Payment captured.' : 'Authorization released.', { exact: true })).toBeVisible()
       await expect(page.getByRole('button', { name: 'Retry payment', exact: true })).toHaveCount(0)
@@ -155,6 +184,10 @@ test.describe('mock Checkout authorization', () => {
     await page.getByRole('button', { name: 'Refresh status' }).click()
     await expect(page.getByRole('button', { name: 'Void authorization', exact: true })).toHaveCount(0)
     await expect(page.getByRole('button', { name: 'Capture $5.00', exact: true })).toHaveCount(0)
+    mock.confirm('VOID')
+    await page.getByRole('button', { name: 'Refresh status' }).click()
+    await expect(page.getByText('Authorization released.', { exact: true })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Refresh status' })).toHaveCount(0)
     expect(mock.calls.filter(call => call.path.startsWith('/api/payment/authorization/'))).toHaveLength(1)
     mock.assertClean()
   })

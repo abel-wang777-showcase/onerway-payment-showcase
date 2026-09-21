@@ -98,6 +98,28 @@ describe('authorization request ownership', () => {
     wrapper.unmount()
   })
 
+  it.each(['CAPTURE', 'VOID'] as const)('accepts queried %s confirmation through recovery without replaying the operation', async (type) => {
+    state.set('sdk-session', shallowRef(authorizationSession({ operation: { type, merchantTxnId: 'operation-1', status: 'unknown' } })))
+    const confirmed = authorizationSession({
+      fundsStatus: type === 'CAPTURE' ? 'captured' : 'voided',
+      operation: { type, merchantTxnId: 'operation-1', transactionId: 'operation-transaction-1', status: 'confirmed' },
+    })
+    const fetch = nuxt.fetch.mockResolvedValue({
+      ...confirmed,
+      attempt: { ...confirmed.attempt, statusSource: 'query' },
+      events: confirmed.events.map(event => ({ ...event, source: 'query' })),
+    })
+    const wrapper = await mountSuspended(Harness)
+    await sdk.refreshAuthorization()
+    expect(fetch).toHaveBeenCalledExactlyOnceWith('/api/payment/recover', { query: { orderId: 'order-auth-1' } })
+    expect(sdk.session.value?.attempt.authorization?.fundsStatus).toBe(type === 'CAPTURE' ? 'captured' : 'voided')
+    expect(sdk.session.value?.attempt.statusSource).toBe('query')
+    expect(nuxt.navigateTo).toHaveBeenCalledExactlyOnceWith('/halden/result/order-auth-1', { replace: true })
+    await sdk.operateAuthorization(type)
+    expect(fetch).toHaveBeenCalledTimes(1)
+    wrapper.unmount()
+  })
+
   it('prevents ordinary Retry after a voided authorization', async () => {
     state.set('sdk-session', shallowRef(authorizationSession({ fundsStatus: 'voided' })))
     const fetch = nuxt.fetch

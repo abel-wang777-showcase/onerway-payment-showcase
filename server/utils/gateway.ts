@@ -2,7 +2,7 @@ import { createHash, createHmac, timingSafeEqual } from 'node:crypto'
 import { mapCheckoutTransactionStatus, readCheckoutRedirectUrl } from '../../shared/payment/checkout'
 import { mapQueryStatus } from '../../shared/payment/sdk'
 import type { PaymentStatus } from '../../shared/payment/attempt'
-import type { AuthorizationOperationType } from '../../shared/payment/authorization'
+import type { AuthorizationFact, AuthorizationOperationType, AuthorizationQueryTarget, AuthorizationTransactionType } from '../../shared/payment/authorization'
 import type { WalletPaymentMethodId } from '../../shared/payment/capability'
 import { findOrderJourney } from '../../shared/payment/journey'
 import type { Order } from '../../shared/payment/order'
@@ -118,6 +118,7 @@ export type GatewayErrorCode
     | 'AUTHORIZATION_OPERATION_INVALID'
     | 'AUTHORIZATION_OPERATION_REJECTED'
     | 'AUTHORIZATION_OPERATION_RESPONSE_INVALID'
+    | 'AUTHORIZATION_QUERY_CONFLICT'
 
 export class GatewayError extends Error {
   readonly code: GatewayErrorCode
@@ -126,6 +127,15 @@ export class GatewayError extends Error {
     super(code)
     this.name = 'GatewayError'
     this.code = code
+  }
+}
+
+export class AuthorizationQueryConflictError extends GatewayError {
+  readonly target: AuthorizationQueryTarget
+
+  constructor(target: AuthorizationQueryTarget) {
+    super('AUTHORIZATION_QUERY_CONFLICT')
+    this.target = Object.freeze({ ...target })
   }
 }
 
@@ -631,6 +641,107 @@ export async function queryCheckoutPayment(
     profile.merchantNo,
     context,
   )
+}
+
+export interface AuthorizationQueryContext extends Omit<CheckoutQueryContext, 'subscription'> {
+  readonly txnType: AuthorizationTransactionType
+  readonly originTransactionId?: string
+}
+
+export type QueriedAuthorization = Omit<AuthorizationFact, 'occurredAt' | 'source'> & { readonly source: 'query' }
+
+function readAuthorizationQueryRecord(value: unknown): Record<string, unknown> {
+  const response = readResponse(value, 'PAYMENT_QUERY_REJECTED')
+  const data = response.data
+  if (!isRecord(data) || !Array.isArray(data.content)) {
+    throw new GatewayError('PAYMENT_QUERY_RESPONSE_INVALID')
+  }
+  if (data.content.length === 0) throw new GatewayError('PAYMENT_QUERY_NOT_FOUND')
+  if (data.content.length !== 1 || !isRecord(data.content[0])
+    || Number(data.totalPages) !== 1 || Number(data.totalElements) !== 1) {
+    throw new GatewayError('PAYMENT_QUERY_RESPONSE_INVALID')
+  }
+  return data.content[0]
+}
+
+function validateAuthorizationQueryRecord(
+  record: Record<string, unknown>,
+  profile: Extract<ServerProfile, { profile: 'sandbox' }>,
+  context: AuthorizationQueryContext,
+): void {
+  if ((record.merchantNo !== undefined && record.merchantNo !== profile.merchantNo)
+    || record.appId !== profile.appId
+    || record.productType !== 'CARD' || record.subProductType !== 'DIRECT'
+    || readUsdMinor(readText(record, 'orderAmount')) !== context.amountMinor
+    || record.orderCurrency !== context.currency) {
+    throw new GatewayError('PAYMENT_QUERY_RESPONSE_INVALID')
+  }
+}
+
+/** Reconcile the exact transaction with its current Payment, never an old AUTH alone. */
+export async function queryAuthorization(
+  profile: Extract<ServerProfile, { profile: 'sandbox' }>,
+  context: AuthorizationQueryContext,
+): Promise<QueriedAuthorization | undefined> {
+  validateCheckoutQueryContext(context)
+  if (!['AUTH', 'CAPTURE', 'VOID'].includes(context.txnType)
+    || (context.txnType === 'AUTH' && context.originTransactionId !== undefined)
+    || (context.txnType !== 'AUTH' && (!isProviderId(context.originTransactionId ?? null) || !context.paymentId))) {
+    throw new GatewayError('PAYMENT_QUERY_RESPONSE_INVALID')
+  }
+
+  const transaction = readAuthorizationQueryRecord(
+    await post(profile, '/v1/txn/list', buildCreationQueryPayload(profile, context.merchantTxnId)),
+  )
+  validateAuthorizationQueryRecord(transaction, profile, context)
+  const transactionId = readText(transaction, 'transactionId')
+  const paymentId = readText(transaction, 'paymentId')
+  const transactionStatus = readText(transaction, 'status')
+  if (!isProviderId(transactionId) || !isProviderId(paymentId)
+    || transaction.merchantTxnId !== context.merchantTxnId
+    || transaction.txnType !== context.txnType
+    || (context.transactionId !== undefined && transactionId !== context.transactionId)
+    || (context.paymentId !== undefined && paymentId !== context.paymentId)
+    || (context.txnType !== 'AUTH' && (transaction.originTransactionId !== context.originTransactionId
+      || transactionId === context.originTransactionId))
+    || !transactionStatus || !['S', 'F', 'P', 'R', 'N', 'I', 'U'].includes(transactionStatus)) {
+    throw new GatewayError('PAYMENT_QUERY_RESPONSE_INVALID')
+  }
+  // Failed, pending, or canceled operation records never unlock a funding claim.
+  if (transactionStatus !== 'S') return undefined
+
+  const payment = readAuthorizationQueryRecord(
+    await post(profile, '/v1/txn/queryPayments', buildQueryPayload(profile, paymentId)),
+  )
+  validateAuthorizationQueryRecord(payment, profile, context)
+  const paymentStatus = readText(payment, 'paymentStatus')
+  const lastTransactionId = readText(payment, 'lastTransactionId')
+  const paymentMerchantTxnId = readText(payment, 'merchantTxnId')
+  if (payment.paymentId !== paymentId || !isProviderId(lastTransactionId)
+    || !paymentMerchantTxnId || !/^[A-Za-z0-9_-]{1,128}$/.test(paymentMerchantTxnId)
+    || !paymentStatus || !['I', 'U', 'P', 'R', 'A', 'O', 'S', 'N'].includes(paymentStatus)) {
+    throw new GatewayError('PAYMENT_QUERY_RESPONSE_INVALID')
+  }
+  // This current Payment is reliably associated, but no longer confirms the
+  // original hold. Preserve its last known funds state and close operation
+  // eligibility; a historical AUTH success must not reopen it.
+  if (context.txnType === 'AUTH' && (paymentStatus !== 'A'
+    || lastTransactionId !== transactionId || paymentMerchantTxnId !== context.merchantTxnId)) {
+    throw new AuthorizationQueryConflictError({
+      txnType: 'AUTH', merchantTxnId: context.merchantTxnId, paymentId, transactionId,
+    })
+  }
+  if (lastTransactionId !== transactionId || paymentMerchantTxnId !== context.merchantTxnId) {
+    throw new GatewayError('PAYMENT_QUERY_RESPONSE_INVALID')
+  }
+  const expectedStatus = context.txnType === 'AUTH' ? 'A' : context.txnType === 'CAPTURE' ? 'S' : 'N'
+  if (paymentStatus !== expectedStatus) return undefined
+
+  return Object.freeze({
+    source: 'query', txnType: context.txnType, merchantTxnId: context.merchantTxnId,
+    transactionId, paymentId, amountMinor: context.amountMinor, currency: 'USD',
+    transactionStatus: 'S', paymentStatus: expectedStatus,
+  })
 }
 
 export function buildQueryPayload(profile: Extract<ServerProfile, { profile: 'sandbox' }>, paymentId: string): Payload {
