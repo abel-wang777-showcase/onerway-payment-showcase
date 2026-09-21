@@ -294,6 +294,8 @@ Card merchant confirm 使用独立的持久化 submission latch：浏览器在�
 
 Retry 由服务端在单一数据库事务中锁定 parent、重新计算资格并 get-or-create 唯一直接 child；数据库以非空 `retry_of` 唯一索引防止多击、请求重放或跨实例并发产生兄弟 Attempt。child 继承 parent 的 integration / method，使用新的 `merchantTxnId`，不覆盖旧 Attempt/Event。切换 recovery cookie 前 child 记录必须已完成数据库提交；响应丢失后，无论浏览器仍持有旧 parent cookie，还是已经收到响应头并切换为该 child cookie，重放同一个 parent retry 请求都只回读同一 child，其他 cookie lineage 一律拒绝。child 调用 Provider create 前必须再次锁定并核验 parent 资格，防止 parent 在建 child 后被 fresh query 调和为 `succeeded` 仍产生新扣款；一旦 child 已有 create claim 或 Provider 标识，后续只恢复该 child，不能重放 create。若 pre-create child 因 parent 真值变化而不再具有 Retry 资格，claim 事务必须先持久化本地、非投影且不可逆的拒绝事件，再永久关闭该 child；recovery 只在该拒绝事实存在时恢复并重绑 direct parent，不查询被拒 child 的 Provider creation、不删除 child 历史，也不把 child 伪装为 Provider `cancelled / failed`。
 
+Demo Hub 初始化探测恢复会话期间，普通支付的恢复与新单入口保持禁用，并明确显示正在检查。恢复与创建独立订单使用固定、分离的动作：用户点击恢复后，即使会话缺失、失效或异步状态变化，也不得自动转为创建 Order / Attempt 或调用 Provider create；只有明确的新订单入口可以创建独立 Sandbox 订单。
+
 客户端异常动作使用结构化 operation + action 契约，不从任意错误 message 或 HTTP 状态单独猜测：pre-confirm SDK / Element load 失败只重载同一个 `paymentId`；create 结果未知只恢复已有 Attempt；query / confirm 结果未知只核验已有 Attempt；暂时性 recovery 失败只重试 restoration；只有服务端权威允许的终态才显示同 Order Retry；clean-run 始终创建独立 Order。query capability 被拒绝时最多先通过 HttpOnly recovery 刷新一次 capability，再查询同一 Attempt，不循环复用旧 token。Retry 或 child create 响应未知时优先恢复 cookie 当前绑定的 parent/child；不得因此再次 confirm 或无条件重放 Provider create。
 
 授权 recovery 同时返回该 Order 的白名单 Attempt 历史，并显式保留 cookie 当前绑定的 active Attempt；客户端不得用数组末项猜 active。历史只展示 Attempt id、标准状态、active 标记与 `retryOf` 关系，不新增原始 Event/provider payload 暴露面。

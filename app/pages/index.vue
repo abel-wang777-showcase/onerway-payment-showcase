@@ -83,6 +83,7 @@ const journeyId = shallowRef<JourneyId>(
 )
 const currentOrigin = shallowRef<string | null>(null)
 const startingNewSubscriptionCustomer = shallowRef(false)
+const checkingRecovery = shallowRef(profile.value?.profile === 'sandbox')
 
 const sceneLabels: Record<SceneId, string> = {
   ecommerce: 'E-commerce',
@@ -240,7 +241,8 @@ const canStartSimulation = computed(() =>
   && journey.value.modes.includes('simulation'),
 )
 const canStartSdk = computed(() =>
-  profile.value?.profile === 'sandbox'
+  !checkingRecovery.value
+  && profile.value?.profile === 'sandbox'
   && (journey.value.integration === 'checkout' || profile.value.sdk?.release === 'v4/latest')
   && (
     restoringSdk.value
@@ -253,6 +255,7 @@ const canStartSdk = computed(() =>
 )
 const canStartSeparateSandboxOrder = computed(() =>
   billingMode.value === 'payment'
+  && !checkingRecovery.value
   && restoringSdk.value
   && !canonicalSandboxHref.value
   && profile.value?.profile === 'sandbox'
@@ -263,6 +266,10 @@ const canStartSeparateSandboxOrder = computed(() =>
 const launching = computed(() => sdkStage.value === 'creating')
 const separateSandboxOrderPending = computed(() => launching.value || sdkRestoring.value)
 const sdkLabel = computed(() => {
+  if (checkingRecovery.value) {
+    return 'Checking for an existing Sandbox checkout…'
+  }
+
   if (canonicalSandboxHref.value) {
     return 'Continue on canonical Production'
   }
@@ -303,18 +310,20 @@ async function startDemo(): Promise<void> {
 }
 
 async function startSandbox(): Promise<void> {
-  if (canStartSdk.value && !launching.value) {
+  if (canStartSdk.value && !launching.value && !sdkRestoring.value) {
     if (canonicalSandboxHref.value) {
       await navigateTo(canonicalSandboxHref.value, { external: true })
       return
     }
 
-    if (restoringSdk.value) {
-      await restoreSdk()
-    }
-    else {
-      await startSdk(journeyId.value, true, selection.value.method)
-    }
+    if (restoringSdk.value) return
+    await startSdk(journeyId.value, true, selection.value.method)
+  }
+}
+
+async function restoreSandbox(): Promise<void> {
+  if (canStartSdk.value && !launching.value && !sdkRestoring.value && !canonicalSandboxHref.value) {
+    await restoreSdk()
   }
 }
 
@@ -357,8 +366,13 @@ const resumableSubscription = computed(() => {
 onMounted(async () => {
   currentOrigin.value = window.location.origin
 
-  if (profile.value?.profile === 'sandbox') {
-    await probeRecovery()
+  try {
+    if (profile.value?.profile === 'sandbox') {
+      await probeRecovery()
+    }
+  }
+  finally {
+    checkingRecovery.value = false
   }
 })
 
@@ -455,7 +469,8 @@ watch(() => selection.value.method, (method) => {
             @click="startDemo"
           />
           <UButton
-            v-if="billingMode === 'payment'"
+            v-if="billingMode === 'payment' && restoringSdk && !canonicalSandboxHref"
+            key="sandbox-restoration"
             :label="sdkLabel"
             trailing-icon="i-lucide-circle-check"
             color="neutral"
@@ -463,8 +478,22 @@ watch(() => selection.value.method, (method) => {
             size="xl"
             block
             class="mt-3 min-h-11"
-            :disabled="!canStartSdk || launching"
-            :loading="launching"
+            :disabled="!canStartSdk || launching || sdkRestoring"
+            :loading="checkingRecovery || launching || sdkRestoring"
+            @click="restoreSandbox"
+          />
+          <UButton
+            v-else-if="billingMode === 'payment'"
+            key="sandbox-start"
+            :label="sdkLabel"
+            trailing-icon="i-lucide-circle-check"
+            color="neutral"
+            variant="outline"
+            size="xl"
+            block
+            class="mt-3 min-h-11"
+            :disabled="!canStartSdk || launching || sdkRestoring"
+            :loading="checkingRecovery || launching || sdkRestoring"
             @click="startSandbox"
           />
           <UButton
@@ -528,7 +557,7 @@ watch(() => selection.value.method, (method) => {
             {{ startingNewSubscriptionCustomer
               ? 'Creating a separate Sandbox customer and signed Order. The existing subscription is not cancelled or modified.'
               : restoringSdk
-              ? 'Restoring the existing authorized PaymentAttempt. No new Order or provider create will be requested unless the server confirms the original create never started.'
+              ? 'Restoring the existing authorized PaymentAttempt. No new Order or provider create will be requested.'
               : 'Creating and persisting a separate signed Sandbox order. This may take several seconds; the previous payment is not cancelled or overwritten.' }}
           </p>
           <UAlert

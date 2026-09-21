@@ -691,6 +691,58 @@ describe('payment restoration pages', () => {
     expect(wrapper.get('[role="alert"]').text()).toContain('Sandbox restoration is still unavailable')
   })
 
+  it('keeps a rendered restoration action read-only when recovery state changes before its click', async () => {
+    const failure = shallowRef<ReturnType<typeof getPaymentFailure> | null>(getPaymentFailure('create'))
+    const restore = vi.fn()
+    const start = vi.fn()
+    nuxt.useSdk.mockReturnValue(sdkState({ failure, restore, start }))
+    const wrapper = await mountSuspended(HubPage)
+    await flushPromises()
+    const action = wrapper.findAll('button').find(button => button.text() === 'Restore existing Sandbox checkout')!
+
+    // The recovery response can change reactive state before Vue patches the
+    // button the user has already seen. Its existing action must remain restore.
+    failure.value = null
+    action.element.click()
+    await flushPromises()
+
+    expect(restore).toHaveBeenCalledOnce()
+    expect(start).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('waits for the initial recovery probe before offering an explicit new order', async () => {
+    const request = deferred<boolean>()
+    const restoring = shallowRef(false)
+    const restore = vi.fn()
+    const start = vi.fn()
+    const probeRecovery = vi.fn(() => {
+      restoring.value = true
+      return request.promise.finally(() => { restoring.value = false })
+    })
+    nuxt.useSdk.mockReturnValue(sdkState({ restore, restoring, start, probeRecovery }))
+    const wrapper = await mountSuspended(HubPage)
+    await nextTick()
+
+    const pending = wrapper.findAll('button').find(button => button.text().includes('Checking for an existing Sandbox checkout'))!
+    expect(pending?.exists()).toBe(true)
+    expect(pending.attributes('disabled')).toBeDefined()
+    pending.element.click()
+    expect(start).not.toHaveBeenCalled()
+    expect(restore).not.toHaveBeenCalled()
+
+    request.resolve(false)
+    await flushPromises()
+    expect(start).not.toHaveBeenCalled()
+    expect(restore).not.toHaveBeenCalled()
+    const create = wrapper.findAll('button').find(button => button.text() === 'Start a new real Sandbox checkout')!
+    expect(create.attributes('disabled')).toBeUndefined()
+    create.element.click()
+    await flushPromises()
+    expect(start).toHaveBeenCalledExactlyOnceWith('standard-success', true, 'card')
+    wrapper.unmount()
+  })
+
   it('starts a separate Sandbox order without replacing the original restoration action', async () => {
     const failure = shallowRef<ReturnType<typeof getPaymentFailure> | null>(null)
     const restoring = shallowRef(true)
