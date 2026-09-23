@@ -3,6 +3,7 @@ import type { Currency, Order } from './order'
 import type { DemoStage } from './state'
 
 export const JOURNEY_IDS = [
+  'apple-pay-direct',
   'hosted-checkout',
   'hosted-checkout-three-ds',
   'hosted-authorization',
@@ -35,6 +36,24 @@ export interface Journey {
 }
 
 export const JOURNEYS = Object.freeze({
+  'apple-pay-direct': Object.freeze({
+    id: 'apple-pay-direct',
+    label: 'USD 5.00 · Apple Pay Direct',
+    description: 'Authorize with Apple Pay and follow the merchant validation, Direct API payment and server verification steps.',
+    scene: 'ecommerce',
+    integration: 'direct-api',
+    method: 'apple-pay',
+    sandboxMethods: Object.freeze(['apple-pay'] as const),
+    country: 'US',
+    currency: 'USD',
+    amount: 500,
+    orderId: 'HLD-APPLE-500',
+    sku: 'HL-APPLE-005',
+    item: 'Halden sample',
+    variant: 'Apple Pay Direct',
+    modes: Object.freeze(['sandbox'] as const),
+    stages: Object.freeze([]),
+  }),
   'hosted-authorization': Object.freeze({
     id: 'hosted-authorization',
     label: 'USD 5.00 · Card pre-authorization',

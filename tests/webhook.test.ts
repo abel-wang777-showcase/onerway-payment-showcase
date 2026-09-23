@@ -206,3 +206,21 @@ describe('Onerway payment webhook boundary', () => {
       .toThrow('PAYMENT_WEBHOOK_FIELDS_INVALID')
   })
 })
+
+
+describe('Direct Apple Pay webhook projection', () => {
+  it.each([['S', 'succeeded'], ['F', 'failed'], ['N', 'cancelled']])('reads transaction %s independently from paymentStatus', (status, expected) => {
+    const body = payload({ status, paymentStatus: 'unrecognized', paymentId: undefined })
+    const result = readWebhook(body, secret, 'merchant', `v1=${sign(body)}`, true)
+    expect(result).toMatchObject({ kind: 'direct', status: expected, transactionStatus: status })
+    expect(result).not.toHaveProperty('paymentStatus')
+    expect(result).not.toHaveProperty('paymentId')
+  })
+  it('still requires valid signature and known terminal notification status', () => {
+    const pending = payload({ status: 'P' })
+    expect(() => readWebhook(pending, secret, 'merchant', `v1=${sign(pending)}`, true)).toThrow('PAYMENT_WEBHOOK_FIELDS_INVALID')
+    const body = payload({ status: 'X' })
+    expect(() => readWebhook(body, secret, 'merchant', `v1=${sign(body)}`, true)).toThrow('PAYMENT_WEBHOOK_FIELDS_INVALID')
+    expect(() => readWebhook(payload(), secret, 'merchant', 'invalid', true)).toThrow('PAYMENT_WEBHOOK_SIGNATURE_INVALID')
+  })
+})

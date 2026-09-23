@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto'
 
 const mocks = vi.hoisted(() => ({
   isSubscriptionWebhookProcessed: vi.fn(),
+  getPaymentTimeline: vi.fn(),
   querySubscription: vi.fn(),
   readPaymentWebhook: vi.fn(),
   readAuthorizationWebhook: vi.fn(),
@@ -25,6 +26,7 @@ vi.mock('../server/utils/profile', () => ({
 
 vi.mock('../server/utils/store', () => ({
   isSubscriptionWebhookProcessed: mocks.isSubscriptionWebhookProcessed,
+  getPaymentTimeline: mocks.getPaymentTimeline,
   PaymentStoreError: class PaymentStoreError extends Error { readonly code: string; constructor(code: string) { super(code); this.code = code } },
   recordAuthorizationWebhookEvent: mocks.recordAuthorizationWebhookEvent,
   recordSubscriptionWebhookEvent: mocks.recordSubscriptionWebhookEvent,
@@ -36,6 +38,7 @@ vi.mock('../server/utils/webhook', async (importOriginal) => ({
   readAuthorizationWebhook: mocks.readAuthorizationWebhook,
   readSubscriptionPaymentWebhook: mocks.readSubscriptionPaymentWebhook,
   readWebhookBody: mocks.readWebhookBody,
+  verifyWebhookSignature: (await importOriginal<typeof import('../server/utils/webhook')>()).verifyWebhookSignature,
   WebhookError: (await importOriginal<typeof import('../server/utils/webhook')>()).WebhookError,
 }))
 
@@ -64,6 +67,7 @@ beforeEach(() => {
   })
   mocks.readWebhookBody.mockResolvedValue({ scenarios: 'SUBSCRIPTION_INITIAL' })
   mocks.readSubscriptionPaymentWebhook.mockReturnValue(fact)
+  mocks.getPaymentTimeline.mockResolvedValue(null)
   mocks.isSubscriptionWebhookProcessed.mockResolvedValue(false)
   mocks.querySubscription.mockResolvedValue({ contractId: 'contract_1' })
   mocks.recordSubscriptionWebhookEvent.mockResolvedValue({ duplicate: false })
@@ -124,6 +128,28 @@ describe('subscription webhook route', () => {
     expect(mocks.recordSubscriptionWebhookEvent).not.toHaveBeenCalled()
     expect(mocks.querySubscription).not.toHaveBeenCalled()
     expect(setResponseStatus).toHaveBeenCalledWith(expect.anything(), 200)
+  })
+
+  it('selects Direct transaction truth from the stored attempt after verifying the signature', async () => {
+    const body = {
+      notifyType: 'TXN', txnType: 'SALE', merchantNo: 'merchant',
+      transactionId: '10001', merchantTxnId: 'showcase-direct',
+      orderAmount: '5.00', orderCurrency: 'USD', status: 'F', paymentStatus: 'S',
+      txnTime: '2026-09-15 08:57:51', txnTimeZone: '+08:00',
+    }
+    const digest = createHash('sha256').update(Object.entries(body)
+      .sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0)
+      .map(([, value]) => value).join('') + 'secret').digest('hex')
+    const real = await vi.importActual<typeof import('../server/utils/webhook')>('../server/utils/webhook')
+    mocks.readWebhookBody.mockResolvedValue(body)
+    mocks.readPaymentWebhook.mockImplementation(real.readPaymentWebhook)
+    mocks.getPaymentTimeline.mockResolvedValue({ attempt: { merchantTxnId: body.merchantTxnId, integration: 'direct-api', method: 'apple-pay' } })
+    vi.mocked(getHeader).mockImplementation((_event, name) => name === 'x-rh-signature' ? `v1=${digest}` : undefined)
+    const { default: handler } = await import('../server/api/webhooks/onerway/payment.post')
+    await expect((handler as (event: unknown) => Promise<string>)({ node: { req: {} } })).resolves.toBe('10001')
+    expect(mocks.recordWebhookEvent).toHaveBeenCalledWith(expect.objectContaining({ kind: 'direct', status: 'failed', transactionStatus: 'F' }))
+    expect(mocks.recordWebhookEvent.mock.calls[0]![0]).not.toHaveProperty('paymentStatus')
+    expect(mocks.recordWebhookEvent.mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(setResponseStatus).mock.invocationCallOrder[0]!)
   })
 
   it('ACKs a locally processed retry without depending on Provider Query', async () => {
@@ -187,6 +213,7 @@ describe('subscription webhook route', () => {
       statusCode: 400,
       statusMessage: 'PAYMENT_WEBHOOK_SIGNATURE_INVALID',
     })
+    expect(mocks.getPaymentTimeline).not.toHaveBeenCalled()
     expect(warning).toHaveBeenCalledOnce()
     expect(warning).toHaveBeenCalledWith(
       '[payment-webhook] rejected',

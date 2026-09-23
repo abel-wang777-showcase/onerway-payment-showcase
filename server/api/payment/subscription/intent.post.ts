@@ -1,3 +1,4 @@
+import { isTerminalStatus } from '../../../../shared/payment/sdk'
 import { randomUUID } from 'node:crypto'
 import { createAttempt } from '../../../../shared/payment/attempt'
 import { createOrder } from '../../../../shared/payment/order'
@@ -98,6 +99,11 @@ export default defineEventHandler(async (event): Promise<CreateSubscriptionInten
       const plan = getSubscriptionPlan(input.planId)
       const ref = readPaymentRecovery(event, profile.secret)
       const previous = ref ? await getPaymentRecovery(ref.orderId, ref.attemptId) : null
+      if (previous?.attempt.integration === 'direct-api' && !isTerminalStatus(previous.attempt.status)
+        && (previous.attempt.paymentId || previous.attempt.transactionId
+          || previous.events.some(item => item.source === 'server' && item.sourceKey === `create-claim:${previous.attempt.id}`))) {
+        throw createError({ statusCode: 409, statusMessage: 'APPLE_PAY_RECOVERY_REQUIRED' })
+      }
       const retained = ref && !previous
         ? await getRetainedSubscriptionRecovery(ref.orderId, ref.attemptId)
         : null

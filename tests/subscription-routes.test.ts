@@ -124,6 +124,19 @@ beforeEach(() => {
 })
 
 describe('subscription intent route', () => {
+  it.each(['web-js-sdk', 'checkout'])('preserves the unknown Direct recovery cookie before a new %s subscription', async (integration) => {
+    mocks.getPaymentRecovery.mockResolvedValue({
+      order: { id: 'order-direct' },
+      attempt: { id: 'attempt-direct', integration: 'direct-api', method: 'apple-pay', status: 'processing', transactionId: '12345' },
+    })
+    mocks.readPaymentRecovery.mockReturnValue({ orderId: 'order-direct', attemptId: 'attempt-direct' })
+    vi.stubGlobal('readBody', vi.fn().mockResolvedValue({ planId: 'halden-daily-essentials-v1', integration }))
+    const { default: handler } = await import('../server/api/payment/subscription/intent.post')
+    await expect((handler as (event: unknown) => Promise<unknown>)({})).rejects.toMatchObject({ statusCode: 409, statusMessage: 'APPLE_PAY_RECOVERY_REQUIRED' })
+    expect(mocks.createSubscriptionPaymentRecord).not.toHaveBeenCalled()
+    expect(mocks.setPaymentRecovery).not.toHaveBeenCalled()
+  })
+
   it('reuses the retained customer and blocks the same active plan after Payment cleanup', async () => {
     vi.stubGlobal('readBody', vi.fn().mockResolvedValue({
       planId: 'halden-daily-essentials-v1',

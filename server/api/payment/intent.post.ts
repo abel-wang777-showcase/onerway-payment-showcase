@@ -88,7 +88,13 @@ export default defineEventHandler(async (event): Promise<CreatePaymentIntentResp
         ? isMerchantCustomerInScope(previous.customer, profile)
         : null
 
-      if (ref && !input.restart) {
+      // Unknown Direct submissions must retain their recovery binding even if
+      // the caller asks to restart or selects another integration.
+      const pendingDirect = previous?.attempt.integration === 'direct-api'
+        && !isTerminalStatus(previous.attempt.status)
+        && Boolean(input.journeyId === 'apple-pay-direct' || previous.attempt.paymentId || previous.attempt.transactionId
+          || previous.events.some(item => item.source === 'server' && item.sourceKey === `create-claim:${previous.attempt.id}`))
+      if (ref && (!input.restart || pendingDirect)) {
         const existing = previous
 
         if (existing && !isTerminalStatus(existing.attempt.status)) {
@@ -102,7 +108,7 @@ export default defineEventHandler(async (event): Promise<CreatePaymentIntentResp
 
           return Object.freeze({
             orderId: existing.order.id,
-            create: !existing.attempt.paymentId && !existing.attempt.transactionId && !claimed,
+            create: existing.attempt.integration !== 'direct-api' && !existing.attempt.paymentId && !existing.attempt.transactionId && !claimed,
           })
         }
       }

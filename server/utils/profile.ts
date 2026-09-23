@@ -5,6 +5,7 @@ type Env = Readonly<Record<string, string | undefined>>
 
 export type ProfileErrorCode
   = | 'PROFILE_API_BASE_MISMATCH'
+    | 'PROFILE_APPLE_PAY_INVALID'
     | 'PROFILE_ENABLED_INVALID'
     | 'PROFILE_IP_INVALID'
     | 'PROFILE_INVALID'
@@ -16,7 +17,15 @@ export type ProfileErrorCode
     | 'PROFILE_SDK_URL_MISMATCH'
     | 'PROFILE_URL_INVALID'
 
+export interface ApplePayIdentity {
+  readonly merchantIdentifier: string
+  readonly certificatePem: string
+  readonly privateKeyPem: string
+}
+
 interface SandboxProfile {
+  applePay?: ApplePayIdentity
+
   profile: 'sandbox'
   apiBaseUrl: 'https://sandbox-acq.onerway.com'
   sdkUrl: string
@@ -258,7 +267,21 @@ function readSandbox(env: Env): ServerProfile {
     appId: required(env, profileKeys.appId),
     secret: required(env, profileKeys.secret),
     transactionPolicy: 'sandbox-only',
+    ...readApplePayIdentity(env),
   }
+}
+
+function readApplePayIdentity(env: Env): { applePay?: ApplePayIdentity } {
+  const fields = ['ONERWAY_SANDBOX_APPLE_PAY_MERCHANT_ID', 'ONERWAY_SANDBOX_APPLE_PAY_CERTIFICATE_PEM', 'ONERWAY_SANDBOX_APPLE_PAY_PRIVATE_KEY_PEM'] as const
+  const [merchantIdentifier, certificatePem, privateKeyPem] = fields.map(field => optional(env, field))
+  if (!merchantIdentifier && !certificatePem && !privateKeyPem) return {}
+  if (!merchantIdentifier || !certificatePem || !privateKeyPem
+    || !/^merchant\.[A-Za-z0-9.-]+$/.test(merchantIdentifier)
+    || !certificatePem.startsWith('-----BEGIN CERTIFICATE-----')
+    || !/^-----BEGIN (?:RSA )?PRIVATE KEY-----/.test(privateKeyPem)) {
+    fail('PROFILE_APPLE_PAY_INVALID', ...fields)
+  }
+  return { applePay: { merchantIdentifier, certificatePem, privateKeyPem } }
 }
 
 function readProductionEnabled(env: Env): boolean {

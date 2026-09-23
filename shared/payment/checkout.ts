@@ -24,6 +24,7 @@ export function readCheckoutRedirectUrl(value: unknown): string | null {
 }
 
 export function paymentPath(attempt: PaymentAttempt): string {
+  if (attempt.integration === 'direct-api') return `/halden/direct/${attempt.orderId}`
   if (attempt.authorization && (
     attempt.authorization.fundsStatus !== 'pending'
     || attempt.authorization.operation

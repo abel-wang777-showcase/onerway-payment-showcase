@@ -88,6 +88,7 @@ export function hasCompletePaymentMethodAttribution(attempt: PaymentAttempt): bo
 
 export const RETRY_REASONS = [
   'authorization',
+  'direct_api',
   'eligible',
   'pending',
   'succeeded',
@@ -103,6 +104,9 @@ export interface RetryDecision {
 const trustedTerminalSources = new Set<PaymentEventSource>(['query', 'webhook'])
 
 export function getRetryDecision(attempt: PaymentAttempt): RetryDecision {
+  if (isDirectApplePayAttempt(attempt)) {
+    return Object.freeze({ allowed: false, reason: 'direct_api' })
+  }
   if (attempt.authorization) {
     return Object.freeze({ allowed: false, reason: 'authorization' })
   }
@@ -119,4 +123,8 @@ export function getRetryDecision(attempt: PaymentAttempt): RetryDecision {
   }
 
   return Object.freeze({ allowed: true, reason: 'eligible' })
+}
+
+export function isDirectApplePayAttempt(attempt: Pick<PaymentAttempt, 'integration' | 'method'>): boolean {
+  return attempt.integration === 'direct-api' && attempt.method === 'apple-pay'
 }

@@ -1,3 +1,4 @@
+import { directFailure, refreshDirectRecovery } from '../../utils/direct'
 import { randomUUID } from 'node:crypto'
 import {
   getRetryDecision,
@@ -127,6 +128,8 @@ export default defineEventHandler(async (event): Promise<
           subscription: toSubscriptionSummary(contract),
         })
       }
+
+      if (recovery.attempt.integration === 'direct-api') return refreshDirectRecovery(profile, recovery).catch(directFailure)
 
       if (recovery.attempt.authorization) {
         if (!recovery.customer || !isMerchantCustomerInScope(recovery.customer, profile) || recovery.subscription) {

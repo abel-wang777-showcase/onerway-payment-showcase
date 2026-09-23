@@ -40,7 +40,7 @@ export default defineNuxtConfig({
   icon: {
     fallbackToApi: false,
     clientBundle: {
-      icons: ['lucide:package-check', 'lucide:refresh-cw'],
+      icons: ['lucide:package-check', 'lucide:refresh-cw', 'lucide:external-link'],
     },
   },
 

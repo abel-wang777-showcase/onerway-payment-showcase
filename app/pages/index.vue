@@ -50,7 +50,7 @@ const {
 
 const initialJourney = getJourney(isJourneyId(route.query.journey) ? route.query.journey : 'standard-success')
 const billingMode = shallowRef<'payment' | 'subscription'>(
-  route.query.mode === 'subscription' ? 'subscription' : 'payment',
+  route.query.mode === 'subscription' && initialJourney.integration !== 'direct-api' ? 'subscription' : 'payment',
 )
 const subscriptionPlanId = shallowRef<SubscriptionPlanId>(
   isSubscriptionPlanId(route.query.plan) ? route.query.plan : 'halden-daily-essentials-v1',
@@ -76,7 +76,7 @@ function readRoutePaymentMethod(value: unknown): PaymentMethodId {
 const selection = ref({
   scene: initialJourney.scene as SceneId,
   integration: initialJourney.integration as IntegrationId,
-  method: initialJourney.integration === 'checkout' ? initialJourney.method : readRoutePaymentMethod(route.query.method),
+  method: initialJourney.integration !== 'web-js-sdk' ? initialJourney.method : readRoutePaymentMethod(route.query.method),
 })
 const journeyId = shallowRef<JourneyId>(
   isJourneyId(route.query.journey) ? route.query.journey : 'standard-success',
@@ -138,7 +138,7 @@ const scenes = computed<RadioGroupItem[]>(() => SCENES.map((scene) => {
 }))
 
 const integrations = computed<RadioGroupItem[]>(() => INTEGRATIONS.map((integration) => {
-  const method = integration === 'checkout' ? 'all' : selection.value.method === 'all' ? 'card' : selection.value.method
+  const method = integration === 'direct-api' ? 'apple-pay' : integration === 'checkout' ? 'all' : selection.value.method === 'all' ? 'card' : selection.value.method
   const capability = getCapability(selection.value.scene, integration, method)
   return option(integration, integrationLabels[integration], capability.status, capability.runnable, capability.condition)
 }))
@@ -150,8 +150,8 @@ const methods = computed<RadioGroupItem[]>(() => PAYMENT_METHODS.map((method) =>
 
 watch(() => selection.value.integration, (integration) => {
   if (integration === 'direct-api') billingMode.value = 'payment'
-  selection.value.method = integration === 'checkout' ? 'all' : 'card'
-  journeyId.value = integration === 'checkout' ? 'hosted-checkout' : 'standard-success'
+  selection.value.method = integration === 'direct-api' ? 'apple-pay' : integration === 'checkout' ? 'all' : 'card'
+  journeyId.value = integration === 'direct-api' ? 'apple-pay-direct' : integration === 'checkout' ? 'hosted-checkout' : 'standard-success'
 })
 
 const journeyItems = computed<RadioGroupItem[]>(() => JOURNEY_IDS
@@ -243,7 +243,7 @@ const canStartSimulation = computed(() =>
 const canStartSdk = computed(() =>
   !checkingRecovery.value
   && profile.value?.profile === 'sandbox'
-  && (journey.value.integration === 'checkout' || profile.value.sdk?.release === 'v4/latest')
+  && (journey.value.integration !== 'web-js-sdk' || profile.value.sdk?.release === 'v4/latest')
   && (
     restoringSdk.value
     || billingMode.value === 'subscription'
@@ -259,7 +259,7 @@ const canStartSeparateSandboxOrder = computed(() =>
   && restoringSdk.value
   && !canonicalSandboxHref.value
   && profile.value?.profile === 'sandbox'
-  && (billingMode.value === 'payment' && journey.value.integration === 'checkout' || profile.value.sdk?.release === 'v4/latest')
+  && (billingMode.value === 'payment' && journey.value.integration !== 'web-js-sdk' || profile.value.sdk?.release === 'v4/latest')
   && selectedCapability.value.runnable
   && supportsSandboxMethod(journey.value, selection.value.method),
 )

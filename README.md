@@ -31,6 +31,9 @@ Checkout、Direct API，以及游戏、直播、AI 等场景会沿用同一产�
 
 本地配置从 `.env.example` 复制到 `.env.local`。`pnpm dev` 和 `pnpm preview` 会显式加载该文件；构建与部署则从执行环境读取配置。
 
+Apple Pay Direct 另需完整配置服务端 `ONERWAY_SANDBOX_APPLE_PAY_MERCHANT_ID`、`ONERWAY_SANDBOX_APPLE_PAY_CERTIFICATE_PEM` 和 `ONERWAY_SANDBOX_APPLE_PAY_PRIVATE_KEY_PEM`。PEM 是带真实换行的证书及配对私钥，由本机安全输入/受控部署环境注入；不要把 p12 密码、PEM 或支付 token 粘贴到聊天、命令参数、日志或提交。三项全未配时其他支付路径仍可运行；部分配置会拒绝启动。Merchant Identity 只用于 Apple mTLS，不承担 Onerway 的支付解密。配置、设备与真实支付验收边界见 [长期契约](docs/showcase-contract.md#apple-pay-direct-apiissue-17)。
+
+
 `ONERWAY_PROFILE` 必须明确设为 `sandbox` 或 `production`，不能由浏览器请求切换：
 
 - Sandbox 使用 `https://sandbox-acq.onerway.com`；Web SDK 当前使用可替换的 `https://sandbox-checkout-sdk.onerway.com/v4/latest/onerway.js`，不得回退 v3。启动时要求当前 profile 的 SDK URL、canonical Showcase origin、正式 Payment result Webhook URL、`merchantNo`、`appId` 和 `secret` 完整。Webhook 默认直接投递 canonical `/api/webhooks/onerway/payment`；只有 `ONERWAY_SANDBOX_NOTIFY_RELAY=true` 时才接受外部公开 HTTPS Relay，且路径必须精确为 `/onerway/payment`。

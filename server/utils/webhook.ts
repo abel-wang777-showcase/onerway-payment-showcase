@@ -1,5 +1,5 @@
 import { createHash, timingSafeEqual } from 'node:crypto'
-import { mapWebhookStatus } from '../../shared/payment/merge'
+import { mapDirectTransactionStatus, mapWebhookStatus } from '../../shared/payment/merge'
 import type { PaymentStatus } from '../../shared/payment/attempt'
 import {
   mapAuthorizationStatus,
@@ -30,6 +30,7 @@ const WEBHOOK_EXCLUDED_FIELDS = new Set([
 const MAX_WEBHOOK_BYTES = 64 * 1024
 
 export interface PaymentWebhook {
+  readonly kind?: 'direct' | 'subscription'
   readonly transactionId: string
   readonly paymentId?: string
   readonly merchantTxnId: string
@@ -356,6 +357,7 @@ export function readPaymentWebhook(
   secret: string,
   merchantNo: string,
   signatureHeader: string | undefined,
+  direct = false,
 ): PaymentWebhook {
   if (!verifyWebhookSignature(body, secret, signatureHeader)) {
     throw new WebhookError('PAYMENT_WEBHOOK_SIGNATURE_INVALID')
@@ -368,8 +370,8 @@ export function readPaymentWebhook(
   const merchantTxnId = readText(body, 'merchantTxnId', /^[A-Za-z0-9_-]{1,64}$/)!
   const amount = readText(body, 'orderAmount', /^(?:0|[1-9]\d{0,13})\.\d{2}$/)!
   const currency = readText(body, 'orderCurrency', /^USD$/) as 'USD'
-  const transactionStatus = readText(body, 'status', /^[SFN]$/) as 'S' | 'F' | 'N'
-  const paymentStatus = readText(body, 'paymentStatus', /^[SON]$/, true) as 'S' | 'O' | 'N' | undefined
+  const transactionStatus = readText(body, 'status', /^[SFN]$/) as PaymentWebhook['transactionStatus']
+  const paymentStatus = direct ? undefined : readText(body, 'paymentStatus', /^[SON]$/, true) as 'S' | 'O' | 'N' | undefined
 
   return Object.freeze({
     transactionId,
@@ -379,7 +381,8 @@ export function readPaymentWebhook(
     currency,
     transactionStatus,
     ...(paymentStatus ? { paymentStatus } : {}),
-    status: mapWebhookStatus(transactionStatus, paymentStatus),
+    ...(direct ? { kind: 'direct' as const } : {}),
+    status: direct ? mapDirectTransactionStatus(transactionStatus) : mapWebhookStatus(transactionStatus, paymentStatus),
     occurredAt: readOccurredAt(body),
   })
 }

@@ -4,12 +4,13 @@ import type { PoolClient, QueryResultRow } from '@neondatabase/serverless'
 import {
   createAttempt,
   getRetryDecision,
+  isDirectApplePayAttempt,
   type PaymentAttempt,
   type PaymentStatus,
 } from '../../shared/payment/attempt'
 import type { PaymentEvent, PaymentEventSource } from '../../shared/payment/event'
 import { createEvent } from '../../shared/payment/event'
-import { mergeAttempt } from '../../shared/payment/merge'
+import { mapDirectTransactionStatus, mergeAttempt } from '../../shared/payment/merge'
 import {
   canClaimAuthorizationOperation,
   claimAuthorizationOperation,
@@ -1195,15 +1196,22 @@ export async function completePaymentRecord(
       return attempt
     }
 
+    const direct = isDirectApplePayAttempt(current)
+    if (direct && (event.transactionId !== transactionId
+      || !event.transactionStatus
+      || mapDirectTransactionStatus(event.transactionStatus) !== event.status)) {
+      throw new PaymentStoreError('PAYMENT_ATTEMPT_MISMATCH')
+    }
+
     if (
       (current.paymentId && paymentId && current.paymentId !== paymentId)
-      || (!paymentId && (
+      || (!paymentId && !direct && (
         current.integration !== 'checkout'
         || event.status !== 'cancelled'
         || event.transactionStatus !== 'N'
         || event.paymentStatus !== undefined
       ))
-      || (current.integration === 'checkout' && current.transactionId && current.transactionId !== transactionId)
+      || ((current.integration === 'checkout' || direct) && current.transactionId && current.transactionId !== transactionId)
     ) {
       throw new PaymentStoreError('PAYMENT_ATTEMPT_MISMATCH')
     }
@@ -1250,7 +1258,7 @@ export async function completePaymentRecord(
       `, [contract.id, paymentId, event.occurredAt])
     }
 
-    await insertEvent(client, event)
+    await insertEvent(client, createEvent({ ...event, ...(merged.conflict ? { conflict: true } : {}) }))
     return merged.attempt
   })
 }
@@ -1276,10 +1284,16 @@ export async function recordQueryEvent(
     if (current.authorization) throw new PaymentStoreError('PAYMENT_ATTEMPT_MISMATCH')
 
     const checkout = current.integration === 'checkout'
+    const direct = isDirectApplePayAttempt(current)
 
     if (
       current.paymentId !== paymentId
-      || (!checkout && (!paymentId || result.paymentId !== paymentId))
+      || (!checkout && !direct && (!paymentId || result.paymentId !== paymentId))
+      || (direct && (result.merchantTxnId !== current.merchantTxnId
+        || !result.transactionId || !result.transactionStatus
+        || mapDirectTransactionStatus(result.transactionStatus) !== result.status
+        || (current.transactionId && result.transactionId !== current.transactionId)
+        || (current.paymentId && result.paymentId && result.paymentId !== current.paymentId)))
       || (checkout && (
         result.merchantTxnId !== current.merchantTxnId
         || (!result.paymentId && (
@@ -1334,7 +1348,7 @@ export async function recordQueryEvent(
       return Object.freeze({ attempt: correlated, event: duplicate, duplicate: true })
     }
 
-    const paymentStatus = result.paymentStatus ?? (checkout ? undefined : result.rawStatus)
+    const paymentStatus = direct ? undefined : result.paymentStatus ?? (checkout ? undefined : result.rawStatus)
     const incoming = createEvent({
       id: randomUUID(),
       attemptId,
@@ -1366,8 +1380,8 @@ export async function recordQueryEvent(
 
 export async function recordPaymentMethodDetails(
   attemptId: string,
-  paymentId: string,
-  details: QueriedPaymentMethod,
+  paymentId: string | undefined,
+  details: Omit<QueriedPaymentMethod, 'paymentId'> & { readonly paymentId?: string },
   occurredAt: string,
 ): Promise<PaymentAttempt> {
   return transaction(async (client) => {
@@ -1384,10 +1398,13 @@ export async function recordPaymentMethodDetails(
 
     if (current.authorization) throw new PaymentStoreError('PAYMENT_ATTEMPT_MISMATCH')
 
+    const direct = isDirectApplePayAttempt(current)
     if (
       current.paymentId !== paymentId
-      || details.paymentId !== paymentId
-      || current.transactionId !== details.transactionId
+      || (!direct && (!paymentId || details.paymentId !== paymentId))
+      || (direct && ((current.paymentId && details.paymentId && details.paymentId !== current.paymentId)
+        || details.actualWallet !== 'apple-pay' || !details.fundingNetwork))
+      || !current.transactionId || current.transactionId !== details.transactionId
     ) {
       throw new PaymentStoreError('PAYMENT_ATTEMPT_MISMATCH')
     }
@@ -1936,6 +1953,7 @@ export async function recordWebhookEvent(
     const current = attemptFromRow(row)
 
     if (current.authorization) throw new PaymentStoreError('PAYMENT_ATTEMPT_MISMATCH')
+    const direct = isDirectApplePayAttempt(current)
     const checkoutCancellation = current.integration === 'checkout'
       && fact.transactionStatus === 'N'
       && fact.paymentStatus === undefined
@@ -1943,7 +1961,9 @@ export async function recordWebhookEvent(
     if (
       Number(row.amount_minor) !== fact.amountMinor
       || row.currency !== fact.currency
-      || (!fact.paymentId && !checkoutCancellation)
+      || (!fact.paymentId && !checkoutCancellation && !direct)
+      || (direct && current.transactionId && current.transactionId !== fact.transactionId)
+      || (direct !== (fact.kind === 'direct'))
       || (fact.paymentId && current.paymentId && current.paymentId !== fact.paymentId)
       || (!fact.paymentId && current.transactionId && current.transactionId !== fact.transactionId)
     ) {
@@ -1968,11 +1988,11 @@ export async function recordWebhookEvent(
       attemptId: current.id,
       source: 'webhook',
       sourceKey: fact.transactionId,
-      status: fact.status,
-      rawStatus: fact.paymentStatus ?? fact.transactionStatus,
+      status: direct ? mapDirectTransactionStatus(fact.transactionStatus) : fact.status,
+      rawStatus: direct ? fact.transactionStatus : fact.paymentStatus ?? fact.transactionStatus,
       transactionId: fact.transactionId,
       transactionStatus: fact.transactionStatus,
-      ...(fact.paymentStatus ? { paymentStatus: fact.paymentStatus } : {}),
+      ...(!direct && fact.paymentStatus ? { paymentStatus: fact.paymentStatus } : {}),
       occurredAt: fact.occurredAt,
     })
     const merged = mergeAttempt(correlated, incoming)

@@ -36,3 +36,18 @@
 .demo-capability-legend [data-slot="label"] {
   white-space: normal;
 }
+
+.apple-pay-control {
+  --apple-pay-button-width: 100%;
+  --apple-pay-button-height: 3rem;
+  --apple-pay-button-border-radius: var(--radius-sm);
+  display: block;
+  width: 100%;
+  min-height: 3rem;
+  touch-action: manipulation;
+}
+
+.apple-pay-control:focus-visible {
+  outline: 2px solid var(--ui-primary);
+  outline-offset: 2px;
+}
