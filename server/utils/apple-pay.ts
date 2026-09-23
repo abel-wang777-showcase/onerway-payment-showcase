@@ -53,11 +53,37 @@ export function readApplePayValidationUrl(value: unknown): URL {
   return url
 }
 
+type ValidationDiagnostic = 'url-invalid' | 'production-url' | 'not-configured' | 'http-rejected' | 'response-too-large' | 'response-invalid' | 'transport-error' | 'timeout' | 'tls-error'
+function validationDiagnostic(reason: ValidationDiagnostic, status?: number): void {
+  // Fixed categories only: never log an event URL, identity, body, session or raw error.
+  console.warn('[apple-pay-validation]', { reason, ...(status !== undefined ? { status } : {}) })
+}
+function transportDiagnostic(error: unknown): ValidationDiagnostic {
+  const code = record(error) && typeof error.code === 'string' ? error.code : ''
+  if (code === 'ABORT_ERR' || code === 'ETIMEDOUT') return 'timeout'
+  if (code.startsWith('ERR_SSL_') || code.startsWith('ERR_TLS_') || code === 'CERT_HAS_EXPIRED' || code === 'UNABLE_TO_VERIFY_LEAF_SIGNATURE') return 'tls-error'
+  return 'transport-error'
+}
+
 /** Node https does not follow redirects. A total deadline includes DNS and TLS. */
 export async function validateApplePayMerchant(profile: SandboxProfile, validationURL: unknown): Promise<Record<string, unknown>> {
   sandbox(profile)
-  const url = readApplePayValidationUrl(validationURL)
-  if (!profile.applePay) fail('APPLE_PAY_NOT_CONFIGURED')
+  let url: URL
+  try { url = readApplePayValidationUrl(validationURL) }
+  catch (error) {
+    let production = false
+    try {
+      const candidate = new URL(typeof validationURL === 'string' ? validationURL : '')
+      production = ['apple-pay-gateway.apple.com', 'cn-apple-pay-gateway.apple.com'].includes(candidate.hostname)
+    }
+    catch { /* Invalid input remains an opaque category. */ }
+    validationDiagnostic(production ? 'production-url' : 'url-invalid')
+    throw error
+  }
+  if (!profile.applePay) {
+    validationDiagnostic('not-configured')
+    fail('APPLE_PAY_NOT_CONFIGURED')
+  }
   const body = JSON.stringify({ merchantIdentifier: profile.applePay.merchantIdentifier, displayName: 'Halden', initiative: 'web', initiativeContext: new URL(profile.showcaseOrigin).hostname })
   try {
     return await new Promise((resolve, reject) => {
@@ -68,6 +94,7 @@ export async function validateApplePayMerchant(profile: SandboxProfile, validati
         headers: { 'content-type': 'application/json', 'content-length': Buffer.byteLength(body) },
       }, (res) => {
         if (res.statusCode !== 200) {
+          validationDiagnostic('http-rejected', res.statusCode)
           res.destroy()
           reject(new ApplePayError('APPLE_PAY_VALIDATION_FAILED'))
           return
@@ -77,26 +104,39 @@ export async function validateApplePayMerchant(profile: SandboxProfile, validati
         res.on('data', (chunk: Buffer) => {
           bytes += chunk.length
           if (bytes > 65_536) {
+            validationDiagnostic('response-too-large')
             res.destroy()
             reject(new ApplePayError('APPLE_PAY_VALIDATION_FAILED'))
           }
           else chunks.push(chunk)
         })
-        res.on('error', () => reject(new ApplePayError('APPLE_PAY_VALIDATION_FAILED')))
+        res.on('error', (error) => {
+          validationDiagnostic(transportDiagnostic(error))
+          reject(new ApplePayError('APPLE_PAY_VALIDATION_FAILED'))
+        })
         res.on('end', () => {
           try {
             const session: unknown = JSON.parse(Buffer.concat(chunks).toString('utf8'))
             if (!record(session) || Object.keys(session).length === 0) fail('APPLE_PAY_VALIDATION_FAILED')
             resolve(session)
           }
-          catch { reject(new ApplePayError('APPLE_PAY_VALIDATION_FAILED')) }
+          catch {
+            validationDiagnostic('response-invalid')
+            reject(new ApplePayError('APPLE_PAY_VALIDATION_FAILED'))
+          }
         })
       })
-      req.on('error', () => reject(new ApplePayError('APPLE_PAY_VALIDATION_FAILED')))
+      req.on('error', (error) => {
+        validationDiagnostic(transportDiagnostic(error))
+        reject(new ApplePayError('APPLE_PAY_VALIDATION_FAILED'))
+      })
       req.end(body)
     })
   }
-  catch { return fail('APPLE_PAY_VALIDATION_FAILED') }
+  catch (error) {
+    if (!(error instanceof ApplePayError)) validationDiagnostic(transportDiagnostic(error))
+    return fail('APPLE_PAY_VALIDATION_FAILED')
+  }
 }
 
 async function post(profile: SandboxProfile, path: string, payload: Payload): Promise<unknown> {

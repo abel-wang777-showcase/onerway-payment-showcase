@@ -16,7 +16,10 @@ const context = { merchantTxnId: 'merchant-txn', merchantCustId: 'customer', ord
 const query = { appId: 'app', merchantTxnId: context.merchantTxnId, amountMinor: 500, currency: 'USD' }
 const row = { merchantTxnId: context.merchantTxnId, transactionId: 'txn', orderAmount: '5.00', orderCurrency: 'USD', status: 'S', txnType: 'SALE', subProductType: 'DIRECT' }
 const response = (content: unknown[]) => ({ respCode: '20000', data: { content } })
-afterEach(() => vi.unstubAllGlobals())
+afterEach(() => {
+  vi.unstubAllGlobals()
+  vi.restoreAllMocks()
+})
 
 describe('Apple Pay Direct gateway', () => {
   it('encodes the complete token exactly once at each required level', () => {
@@ -104,6 +107,25 @@ describe('Apple mTLS transport', () => {
     })
     return req
   }
+  it('diagnoses an account environment mismatch without logging the supplied URL', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    httpsRequest.mockClear()
+    await expect(validateApplePayMerchant(profile, 'https://apple-pay-gateway.apple.com/paymentservices/paymentSession?private=hidden')).rejects.toThrow('APPLE_PAY_VALIDATION_URL_INVALID')
+    expect(warn).toHaveBeenCalledExactlyOnceWith('[apple-pay-validation]', { reason: 'production-url' })
+    expect(httpsRequest).not.toHaveBeenCalled()
+  })
+  it('records only the HTTP status when Apple rejects identity validation', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    transport(417, ['private upstream payload'])
+    await expect(validateApplePayMerchant(profile, url)).rejects.toThrow('APPLE_PAY_VALIDATION_FAILED')
+    expect(warn).toHaveBeenCalledExactlyOnceWith('[apple-pay-validation]', { reason: 'http-rejected', status: 417 })
+  })
+  it.each([['ABORT_ERR', 'timeout'], ['ERR_SSL_TLSV1_ALERT_UNKNOWN_CA', 'tls-error'], ['ECONNRESET', 'transport-error']])('records a safe category for %s without raw exception details', async (code, reason) => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    httpsRequest.mockImplementation(() => { throw Object.assign(new Error('private key material'), { code }) })
+    await expect(validateApplePayMerchant(profile, url)).rejects.toThrow('APPLE_PAY_VALIDATION_FAILED')
+    expect(warn).toHaveBeenCalledExactlyOnceWith('[apple-pay-validation]', { reason })
+  })
   it('uses its configured identity, canonical domain and an absolute deadline', async () => {
     const session = { merchantSessionIdentifier: 'synthetic-session', signature: 'synthetic' }
     const req = transport(200, [JSON.stringify(session)])
