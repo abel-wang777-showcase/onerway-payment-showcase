@@ -51,3 +51,28 @@
   outline: 2px solid var(--ui-primary);
   outline-offset: 2px;
 }
+
+.apple-pay-timeline-step {
+  position: relative;
+  padding-inline-start: 3rem;
+  padding-block-end: 2rem;
+}
+
+.apple-pay-timeline-step:not(:last-child)::before {
+  content: '';
+  position: absolute;
+  inset-inline-start: 1rem;
+  top: 2.25rem;
+  bottom: 0.25rem;
+  border-inline-start: 1px solid var(--ui-border);
+}
+
+.apple-pay-timeline-marker {
+  position: absolute;
+  inset-inline-start: 0;
+  top: 0;
+}
+
+.apple-pay-timeline-step summary::-webkit-details-marker {
+  display: none;
+}

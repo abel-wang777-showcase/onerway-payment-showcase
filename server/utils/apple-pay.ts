@@ -257,8 +257,40 @@ export function readApplePayQueryResponse(value: unknown, merchantNo: string, co
   if (matches.length !== 1) fail('APPLE_PAY_RESPONSE_INVALID')
   return readTransaction(matches[0], merchantNo, context, true)
 }
-export async function createApplePayPayment(profile: SandboxProfile, context: ApplePayCreateContext): Promise<ApplePayTransaction> {
-  return readApplePayCreateResponse(await post(profile, '/v1/txn/doTransaction', buildApplePayPayload(profile, context)), profile.merchantNo, { merchantTxnId: context.merchantTxnId, amountMinor: context.order.amount.minor, currency: context.order.amount.currency, appId: profile.appId })
+function maskedRequestIdentifier(value: unknown): string {
+  if (typeof value !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(value) || value.length <= 8) return '[identifier omitted]'
+  return `${value.slice(0, 4)}…${value.slice(-4)}`
+}
+
+/** An ephemeral projection of the exact outgoing payload, never a raw request. */
+function applePayRequestEvidence(payload: Payload): { readonly request: string } {
+  const orderMessage = record(payload.txnOrderMsg) ? payload.txnOrderMsg : {}
+  return {
+    request: JSON.stringify({
+      method: 'POST',
+      path: '/v1/txn/doTransaction',
+      body: {
+        merchantNo: maskedRequestIdentifier(payload.merchantNo),
+        merchantTxnId: maskedRequestIdentifier(payload.merchantTxnId),
+        merchantCustId: maskedRequestIdentifier(payload.merchantCustId),
+        orderAmount: payload.orderAmount,
+        orderCurrency: payload.orderCurrency,
+        productType: payload.productType,
+        subProductType: payload.subProductType,
+        txnType: payload.txnType,
+        paymentMode: payload.paymentMode,
+        txnOrderMsg: JSON.stringify({ appId: maskedRequestIdentifier(orderMessage.appId) }),
+        tokenInfo: JSON.stringify({ provider: 'ApplePay', tokenId: '[encrypted payment token omitted]' }),
+        sign: '[signature omitted]',
+      },
+    }, null, 2),
+  }
+}
+
+export async function createApplePayPayment(profile: SandboxProfile, context: ApplePayCreateContext): Promise<ApplePayTransaction & { readonly evidence: { readonly request: string } }> {
+  const payload = buildApplePayPayload(profile, context)
+  const result = readApplePayCreateResponse(await post(profile, '/v1/txn/doTransaction', payload), profile.merchantNo, { merchantTxnId: context.merchantTxnId, amountMinor: context.order.amount.minor, currency: context.order.amount.currency, appId: profile.appId })
+  return { ...result, evidence: applePayRequestEvidence(payload) }
 }
 export async function queryApplePayPayment(profile: SandboxProfile, context: ApplePayQueryContext): Promise<ApplePayTransaction> {
   return readApplePayQueryResponse(await post(profile, '/v1/txn/list', buildCreationQueryPayload(profile, context.merchantTxnId)), profile.merchantNo, { ...context, appId: profile.appId })

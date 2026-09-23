@@ -22,6 +22,52 @@ afterEach(() => {
 })
 
 describe('Apple Pay Direct gateway', () => {
+  it('projects safe evidence from the actual sent payload without any protected material', async () => {
+    const sensitive = {
+      ciphertext: 'CIPHERTEXT_MARKER_DO_NOT_EXPOSE', signature: 'SIGNATURE_MARKER_DO_NOT_EXPOSE',
+      nonce: 'NONCE_MARKER_DO_NOT_EXPOSE', session: 'SESSION_MARKER_DO_NOT_EXPOSE',
+      privateKey: 'PRIVATEKEY_MARKER_DO_NOT_EXPOSE', secret: 'SECRET_MARKER_DO_NOT_EXPOSE',
+      email: 'PRIVATE_EMAIL_MARKER@example.test', userAgent: 'PRIVATE_UA_MARKER',
+    }
+    const testProfile = { ...profile, merchantNo: 'merchant-sensitive-middle-1234', appId: 'app-sensitive-middle-5678', secret: sensitive.secret,
+      applePay: { ...profile.applePay!, privateKeyPem: sensitive.privateKey } }
+    const testContext = { ...context, merchantTxnId: 'txn-sensitive-middle-9012', merchantCustId: 'cust-sensitive-middle-3456',
+      userAgent: sensitive.userAgent, token: { ...token,
+        paymentData: { data: sensitive.ciphertext, signature: sensitive.signature, header: { nonce: sensitive.nonce } },
+        merchantSessionIdentifier: sensitive.session, contact: { email: sensitive.email },
+      } }
+    const fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ respCode: '20000', data: { ...row, merchantTxnId: testContext.merchantTxnId } }) })
+    vi.stubGlobal('fetch', fetch)
+    const result = await createApplePayPayment(testProfile, testContext)
+    const sent = JSON.parse(fetch.mock.calls[0]![1].body)
+    const evidence = JSON.parse(result.evidence.request)
+    expect(evidence.method).toBe('POST')
+    expect(`${testProfile.apiBaseUrl}${evidence.path}`).toBe(fetch.mock.calls[0]![0])
+    for (const key of ['orderAmount', 'orderCurrency', 'productType', 'subProductType', 'txnType', 'paymentMode']) {
+      expect(evidence.body[key]).toBe(sent[key])
+    }
+    expect(evidence.body).toMatchObject({ merchantNo: 'merc…1234', merchantTxnId: 'txn-…9012', merchantCustId: 'cust…3456', sign: '[signature omitted]' })
+    expect(JSON.parse(evidence.body.txnOrderMsg)).toEqual({ appId: 'app-…5678' })
+    expect(JSON.parse(evidence.body.tokenInfo)).toEqual({ provider: 'ApplePay', tokenId: '[encrypted payment token omitted]' })
+    expect(JSON.parse(JSON.parse(sent.tokenInfo).tokenId)).toEqual(testContext.token)
+    for (const value of Object.values(sensitive)) {
+      expect(result.evidence.request).not.toContain(value)
+      expect(result.evidence.request).not.toContain(value.slice(0, 8))
+    }
+    for (const value of [sent.sign, sent.merchantNo, sent.merchantTxnId, sent.merchantCustId, testProfile.appId, context.transactionIp, context.returnUrl, 'customer@test.com']) {
+      expect(result.evidence.request).not.toContain(value)
+    }
+    expect(Object.keys(evidence.body).sort()).toEqual(['merchantNo', 'merchantTxnId', 'merchantCustId', 'orderAmount', 'orderCurrency', 'productType', 'subProductType', 'txnType', 'paymentMode', 'txnOrderMsg', 'tokenInfo', 'sign'].sort())
+  })
+  it('fully omits short merchant and customer identifiers', async () => {
+    const fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ respCode: '20000', data: row }) })
+    vi.stubGlobal('fetch', fetch)
+    const { evidence } = await createApplePayPayment(profile, context)
+    const body = JSON.parse(evidence.request).body
+    expect(body.merchantNo).toBe('[identifier omitted]')
+    expect(body.merchantCustId).toBe('[identifier omitted]')
+    expect(JSON.parse(body.txnOrderMsg).appId).toBe('[identifier omitted]')
+  })
   it('encodes the complete token exactly once at each required level', () => {
     const wire = signPayload(buildApplePayPayload(profile, context), 'secret')
     expect(wire).toMatchObject({ productType: 'CARD', subProductType: 'DIRECT', txnType: 'SALE', orderAmount: '5.00' })

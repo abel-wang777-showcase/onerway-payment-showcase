@@ -22,7 +22,18 @@ export interface ValidateApplePayResponse {
   readonly merchantSession: Record<string, unknown>
 }
 
-export type PayApplePayResponse = DirectRecoveryResponse
+export interface PayApplePayResponse extends DirectRecoveryResponse {
+  readonly evidence?: { readonly request: string }
+}
+export interface ApplePayEvidence {
+  readonly summary: string
+  readonly source: 'live' | 'stored'
+  readonly fields: readonly { readonly label: string, readonly value: string }[]
+  readonly request?: string
+  readonly response?: string
+  readonly occurredAt?: string
+  readonly durationMs?: number
+}
 export type ApplePayStepState = 'waiting' | 'active' | 'completed' | 'interrupted'
 export interface ApplePayStep {
   readonly id: string
@@ -32,5 +43,7 @@ export interface ApplePayStep {
   readonly output: string
   readonly failure: string
   readonly documentation: string
+  readonly evidence?: ApplePayEvidence
+  readonly example?: { readonly request?: string, readonly response?: string }
   readonly state: ApplePayStepState
 }

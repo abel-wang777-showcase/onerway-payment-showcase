@@ -174,6 +174,16 @@ describe('Apple Pay routes', () => {
     expect(mocks.claimPaymentCreation.mock.invocationCallOrder[0]).toBeLessThan(mocks.createApplePayPayment.mock.invocationCallOrder[0]!)
     expect(mocks.completePaymentRecord).toHaveBeenCalledWith('direct-attempt', undefined, '1001', expect.objectContaining({ source: 'server', status: 'succeeded', transactionStatus: 'S', transactionId: '1001' }))
   })
+  it('returns only the gateway evidence explicitly and never persists it in payment events', async () => {
+    const evidence = { request: '{"method":"POST","body":{"sign":"[signature omitted]"}}' }
+    mocks.createApplePayPayment.mockResolvedValueOnce({ transactionId: '1001', rawStatus: 'S', status: 'succeeded', evidence, rawPayload: 'FORBIDDEN_RAW_PAYLOAD_MARKER' })
+    const { default: handler } = await import('../server/api/payment/apple-pay/pay.post')
+    const result = await handler(event)
+    expect(result.evidence).toEqual(evidence)
+    expect(JSON.stringify(result)).not.toContain('FORBIDDEN_RAW_PAYLOAD_MARKER')
+    expect(JSON.stringify(mocks.completePaymentRecord.mock.calls)).not.toContain(evidence.request)
+    expect(mocks.completePaymentRecord.mock.calls[0]![3]).not.toHaveProperty('evidence')
+  })
   it('rejects malformed token before the durable claim', async () => {
     mocks.readBody.mockResolvedValue({ orderId: 'HLD-DIRECT-TEST', attemptId: 'direct-attempt', token: { incomplete: true }, browser })
     const { default: handler } = await import('../server/api/payment/apple-pay/pay.post')

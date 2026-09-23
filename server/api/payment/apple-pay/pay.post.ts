@@ -42,6 +42,6 @@ export default defineEventHandler(async (event) => {
     }))
     const updated = await getPaymentRecovery(recovery.order.id, recovery.attempt.id)
     if (!updated) throw createError({ statusCode: 503, statusMessage: 'PAYMENT_RECOVERY_PENDING' })
-    return toDirectRecovery(updated)
+    return { ...toDirectRecovery(updated), evidence: result.evidence }
   }).catch(directFailure)
 })

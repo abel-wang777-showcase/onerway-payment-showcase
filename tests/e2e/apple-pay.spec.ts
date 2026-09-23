@@ -64,13 +64,13 @@ async function installAppleMock(page: Page, result: 'succeeded' | 'failed' = 'su
       }
       else if (url.pathname === '/api/payment/apple-pay/validate') {
         expect(body).toEqual({ orderId: current.order.id, attemptId: current.attempt.id, validationURL: 'https://apple-pay-gateway-cert.apple.com/paymentservices/paymentSession' })
-        await route.fulfill({ json: { merchantSession: { synthetic: 'merchant-session-only' } } })
+        await route.fulfill({ json: { merchantSession: { synthetic: 'merchant-session-only', signature: 'merchant-session-only', nonce: 'merchant-session-only', epochTimestamp: 1790168840000, expiresAt: 1790169140000 } } })
       }
       else if (url.pathname === '/api/payment/apple-pay/pay') {
         expect(current.submitted).toBe(false)
         expect(body).toMatchObject({ orderId: current.order.id, attemptId: current.attempt.id, token: { paymentData: { data: 'synthetic-only' }, paymentMethod: { network: 'visa' }, transactionIdentifier: 'synthetic-only' }, browser: { language: 'en-US' } })
         current = payment(result, current.order.id)
-        await route.fulfill({ json: current })
+        await route.fulfill({ json: { ...current, evidence: { request: JSON.stringify({ method: 'POST', path: '/v1/txn/doTransaction', body: { merchantTxnId: 'merc…rect', orderAmount: '5.00', orderCurrency: 'USD', tokenInfo: JSON.stringify({ provider: 'ApplePay', tokenId: '[encrypted payment token omitted]' }) } }, null, 2) } } })
       }
       else if (url.pathname === '/api/payment/recover') {
         await route.fulfill({ json: current })
@@ -92,7 +92,7 @@ async function installAppleMock(page: Page, result: 'succeeded' | 'failed' = 'su
 }
 
 test.describe('mock Apple Pay Direct browser journey', () => {
-  for (const width of [320, 390, 834, 1440]) {
+  for (const width of [320, 390, 790, 834, 1440]) {
     for (const colorScheme of ['light', 'dark'] as const) {
       test(`shows official element and six readable steps at ${width}px ${colorScheme}`, async ({ page }, testInfo) => {
         await page.setViewportSize({ width, height: 1000 })
@@ -122,6 +122,30 @@ test.describe('mock Apple Pay Direct browser journey', () => {
     }
   }
 
+  test('shows real safe evidence alongside clearly separate examples after payment', async ({ page }, testInfo) => {
+    await page.setViewportSize({ width: 790, height: 1000 })
+    await page.emulateMedia({ colorScheme: 'dark', reducedMotion: 'reduce' })
+    const mock = await installAppleMock(page)
+    await gotoHydrated(page, '/halden/direct/order-direct')
+    await page.locator('apple-pay-button').getByRole('button').click()
+    await expect(page.getByRole('heading', { name: 'Your order is paid.' })).toBeVisible()
+    for (const id of ['validate', 'authorize', 'submit', 'result']) {
+      const step = page.locator(`[data-apple-pay-step=${id}]`)
+      await step.locator('summary').click()
+      await expect(step).toContainText('This visit')
+      await expect(step).toContainText('Synthetic example')
+    }
+    await expect(page.locator('[data-apple-pay-step=validate]')).toContainText('apple-pay-gateway-cert.apple.com')
+    await expect(page.locator('[data-apple-pay-step=submit]')).toContainText('/v1/txn/doTransaction')
+    await expect(page.locator('body')).not.toContainText('synthetic-only')
+    await expect(page.locator('body')).not.toContainText('merchant-session-only')
+    await expectNoHorizontalOverflow(page)
+    await page.screenshot({ path: testInfo.outputPath('apple-pay-protocol-790-dark.png'), fullPage: true })
+    await page.locator('[data-apple-pay-step=validate]').screenshot({ path: testInfo.outputPath('apple-pay-validation-detail.png') })
+    await page.locator('[data-apple-pay-step=submit]').screenshot({ path: testInfo.outputPath('apple-pay-submission-detail.png') })
+    mock.assertClean()
+  })
+
   test('pays once and restores the existing order after refresh without replaying browser events', async ({ page }) => {
     const mock = await installAppleMock(page)
     await gotoHydrated(page, '/halden/direct/order-direct')
@@ -133,7 +157,7 @@ test.describe('mock Apple Pay Direct browser journey', () => {
     await page.reload()
     await expect(page.getByRole('heading', { name: 'Your order is paid.' })).toBeVisible()
     await expect(page.locator('apple-pay-button')).toHaveCount(0)
-    await expect(page.locator('summary').nth(3)).toContainText('Not observed')
+    await expect(page.locator('[data-apple-pay-step=authorize]')).toContainText('Not recorded')
     expect(mock.calls.filter(path => path.endsWith('/pay'))).toHaveLength(1)
     mock.assertClean()
   })

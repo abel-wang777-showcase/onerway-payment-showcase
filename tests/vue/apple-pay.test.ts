@@ -52,6 +52,39 @@ beforeEach(() => {
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals() })
 
 describe('Apple Pay direct client', () => {
+  it('keeps safe live evidence after completion without retaining wallet/session credentials', async () => {
+    mocks.fetch.mockResolvedValueOnce(payment()).mockResolvedValueOnce({ merchantSession: { epochTimestamp: 1790168840000, expiresAt: 1790169140000, signature: 'SECRET_SESSION_SIGNATURE', nonce: 'SECRET_NONCE' } }).mockResolvedValueOnce({ ...payment('succeeded'), evidence: { request: '{"method":"POST","path":"/v1/txn/doTransaction"}' } })
+    const wrapper = await mountSuspended(Harness)
+    await apple.prepare()
+    apple.pay()
+    await sheet.onvalidatemerchant!({ validationURL: 'https://apple-pay-gateway-cert.apple.com/paymentservices/paymentSession' })
+    sheet.onpaymentauthorized!({ payment: { token: { paymentMethod: { network: 'MasterCard', type: 'credit', displayName: 'SECRET_CARD_LABEL' }, paymentData: { data: 'SECRET_TOKEN', version: 'EC_v1' }, transactionIdentifier: 'SECRET_WALLET_ID' } } })
+    await flushPromises()
+    const evidence = JSON.stringify(apple.steps.value)
+    expect(evidence).not.toContain('SECRET_')
+    expect(evidence).toContain('MasterCard')
+    expect(evidence).toContain('/v1/txn/doTransaction')
+    expect(apple.steps.value.find(item => item.id === 'validate')?.evidence?.durationMs).toBeTypeOf('number')
+    expect(apple.steps.value.find(item => item.id === 'result')?.evidence?.source).toBe('live')
+    wrapper.unmount()
+  })
+
+  it('restores server evidence without claiming earlier wallet interaction was observed', async () => {
+    const value = payment('succeeded')
+    const restored = { ...value, events: [{ id: 'event', attemptId: value.attempt.id, source: 'server' as const, status: 'succeeded' as const, rawStatus: 'S', occurredAt: value.attempt.updatedAt }] }
+    mocks.fetch.mockResolvedValue(restored)
+    const wrapper = await mountSuspended(Harness)
+    await apple.prepare()
+    for (const id of ['begin', 'validate', 'authorize']) {
+      expect(apple.steps.value.find(item => item.id === id)?.evidence).toBeUndefined()
+      expect(apple.steps.value.find(item => item.id === id)?.state).toBe('waiting')
+    }
+    expect(apple.steps.value.find(item => item.id === 'submit')?.evidence?.request).toBeUndefined()
+    expect(apple.steps.value.find(item => item.id === 'submit')?.evidence?.source).toBe('stored')
+    expect(apple.steps.value.find(item => item.id === 'result')?.evidence?.source).toBe('stored')
+    wrapper.unmount()
+  })
+
   it('begins synchronously on click, forwards the full token once and accepts server success', async () => {
     mocks.fetch.mockResolvedValueOnce(payment()).mockResolvedValueOnce(payment('succeeded'))
     const wrapper = await mountSuspended(Harness)
@@ -137,6 +170,8 @@ describe('Apple Pay direct client', () => {
     finish({ merchantSession: { synthetic: true } })
     await flushPromises()
     expect(sheet.completeMerchantValidation).not.toHaveBeenCalled()
+    expect(apple.steps.value.some(item => item.state === 'active')).toBe(false)
+    expect(apple.steps.value.find(item => item.id === 'validate')?.state).toBe('interrupted')
     expect(apple.session.value?.attempt.status).toBe('created')
     expect(apple.canPay.value).toBe(true)
     wrapper.unmount()
@@ -157,6 +192,7 @@ describe('Apple Pay direct client', () => {
     release()
     await vi.advanceTimersByTimeAsync(0)
     expect(mocks.fetch.mock.calls.filter(([url]) => url.endsWith('/pay'))).toHaveLength(0)
+    expect(apple.steps.value.find(item => item.id === 'submit')?.evidence?.request).toBeUndefined()
     wrapper.unmount()
   })
 
@@ -208,6 +244,7 @@ describe('Apple Pay direct client', () => {
     sheet.onpaymentauthorized!({ payment: { token: { paymentData: 'synthetic' } } })
     await flushPromises()
     expect(mocks.fetch.mock.calls.filter(([url]) => url.endsWith('/pay'))).toHaveLength(0)
+    expect(apple.steps.value.find(item => item.id === 'submit')?.evidence?.request).toBeUndefined()
     expect(sheet.completePayment).toHaveBeenCalledExactlyOnceWith({ status: 1 })
     expect(apple.submitted.value).toBe(false)
     wrapper.unmount()

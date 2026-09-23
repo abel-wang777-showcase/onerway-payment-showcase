@@ -105,7 +105,7 @@ onScopeDispose(() => {
           <dl class="mt-4 space-y-4 text-xs">
             <div v-for="reference in references" :key="reference.label"><dt class="text-muted">{{ reference.label }}</dt><dd class="mt-1 break-all font-mono text-toned">{{ reference.value }}</dd></div>
           </dl>
-          <p class="mt-4 text-xs leading-relaxed text-muted">Apple tokens and merchant sessions are never included in these details.</p>
+          <p class="mt-4 text-xs leading-relaxed text-muted">Apple token contents and merchant-session credentials are never included in these details.</p>
         </section>
       </aside>
     </div>
