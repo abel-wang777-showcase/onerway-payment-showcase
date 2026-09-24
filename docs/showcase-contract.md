@@ -151,7 +151,7 @@ Demo Hub 继续提供两条同结果、可重复的本地模拟旅程。模拟�
 - 商户验证失败的服务端诊断仅记录固定类别（URL / 账号环境、未配置、HTTP 拒绝、超时、TLS、传输、响应格式或大小）及上游 HTTP 状态；不记录实际验证 URL、身份材料、session、响应体或原始异常。诊断不放宽 Sandbox 地址白名单。
 - token 与 merchant session 仅用于当次协议调用，不写入日志、数据库、PaymentEvent、sessionStorage 或技术详情。测试仅使用合成占位数据。可展示订单、Attempt、商户交易号、transactionId、存在时的 paymentId、可信状态及来源；不展示 token 片段。
 - 本路径按**同笔交易 `status`**：`S → succeeded`、`F → failed`、`N → cancelled`、`P/I/U → processing`、`R → requires_action`。可信来源为关联正确的同步 Direct 响应、严格匹配的 query 与验签 Webhook；忽略 `paymentStatus`，不全局更改 SDK / Checkout 映射。R 暂无本范围已确认的商户 action 协议，保持待核验，不根据未经确认的 URL 自动跳转。未知状态、响应丢失、查无记录与 HTTP 200 均不证明失败或成功。
-- 恢复按已保存 `merchantTxnId` 查询 `/v1/txn/list`，核对唯一交易、金额币种和已有 provider IDs，不要求先有 paymentId；事务内再次检查固定 transactionId。刷新与恢复保留 Direct 页面及订单，结果未知只能查询原单，不重发扣款。早到通知与同步响应共享同一 Attempt；终态不被中间态回退，终态冲突由 fresh query 调和。
+- 恢复按已保存 `merchantTxnId` 查询 `/v1/txn/list`，核对唯一交易、金额币种和已有 provider IDs，不要求先有 paymentId；事务内再次检查固定 transactionId。刷新与恢复保留 Direct 页面及订单，结果未知只能查询原单，不重发扣款。早到通知与同步响应共享同一 Attempt；既有 query / Webhook 非终态不得阻断随后关联正确的同步 Direct 终态，同步非终态不得覆盖 query / Webhook 投影，已有 query 终态仍优先；终态不被中间态回退，终态冲突由 fresh query 调和。
 - Direct 禁止同 Order 的 Attempt retry。F/N 后“重新下单支付”创建新的 Order、Attempt、merchantTxnId 和 Apple session/token，保留旧结果。已认领提交且结果未知的 Direct Attempt 即使收到 restart 请求也保留恢复绑定；不得借切换接入方式绕过。未提交 token 前关闭钱包仅结束本次面板，不产生 Onerway N；仍可启动新的 Apple 会话或显式选择其他旅程。
 - 从 `onpaymentauthorized` 开始计约 25 秒总预算。明确 S 完成面板成功，F/N 完成面板失败；预算耗尽但交易未明时，对尚有效且未完成的面板返回失败，订单继续“结果确认中”并查询原单。面板最多完成一次；晚到结果继续收敛订单。25 秒是 UI 等待预算，不是交易失败规则，不能据此开放新订单。
 - 页面保留 Halden 商品、金额与付款操作，以连续时间线展示六步：准备付款、打开钱包、验证网站、用户授权、提交 Onerway、确认结果。摘要默认可见，协议详情与合成示例可展开；本次交互、服务端恢复与合成示例明确区分。自动展开不覆盖用户手动选择、不移动焦点，不通过讲解暂停 Apple 时限。恢复后只展示可确认事实，不伪造此前钱包步骤已成功。

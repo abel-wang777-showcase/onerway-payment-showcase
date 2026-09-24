@@ -120,7 +120,8 @@ export function mergeAttempt(attempt: PaymentAttempt, event: PaymentEvent): Atte
   if (!currentTerminal) {
     if (
       (!incomingTerminal && attempt.statusSource === 'query' && event.source === 'webhook')
-      || (event.source === 'server' && ['query', 'webhook'].includes(attempt.statusSource ?? ''))
+      || (event.source === 'server' && ['query', 'webhook'].includes(attempt.statusSource ?? '')
+        && !(directServer && incomingTerminal))
     ) {
       return Object.freeze({ attempt, conflict: false })
     }

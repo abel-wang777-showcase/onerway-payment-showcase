@@ -394,6 +394,19 @@ describe('Direct Apple Pay persistence', () => {
   it('persists a terminal server response without paymentId', async () => {
     expect(await completePaymentRecord('attempt-1', undefined, '1001', completion())).toMatchObject({ status: 'succeeded', statusSource: 'server', transactionId: '1001' })
   })
+  it('persists a correlated terminal response after a non-terminal query projection', async () => {
+    mockAttempt({
+      integration: 'direct-api',
+      method: 'apple-pay',
+      payment_id: null,
+      transaction_id: '1001',
+      status: 'processing',
+      status_source: 'query',
+    })
+
+    expect(await completePaymentRecord('attempt-1', undefined, '1001', completion()))
+      .toMatchObject({ status: 'succeeded', statusSource: 'server', transactionId: '1001' })
+  })
   it('accepts an early failure webhook without paymentId and prevents late response from changing it', async () => {
     expect((await recordWebhookEvent(directFact)).attempt).toMatchObject({ status: 'failed', transactionId: '1001' })
     mockAttempt({ integration: 'direct-api', method: 'apple-pay', payment_id: null, transaction_id: '1001', status: 'failed', status_source: 'webhook' })
