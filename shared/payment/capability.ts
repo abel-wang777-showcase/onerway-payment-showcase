@@ -37,6 +37,13 @@ function defineCapability(
   integration: IntegrationId,
   method: PaymentMethodId,
 ): Capability {
+  if (scene === 'ecommerce' && integration === 'direct-api' && method === 'apple-pay') {
+    return Object.freeze({
+      scene, integration, method, status: 'conditional', runnable: true,
+      condition: 'Requires Apple Pay merchant configuration, a supported browser and an eligible Sandbox tester wallet. Real Direct payment verification is pending.',
+    })
+  }
+
   if (scene === 'ecommerce' && integration === 'checkout' && method === 'card') {
     return Object.freeze({
       scene,

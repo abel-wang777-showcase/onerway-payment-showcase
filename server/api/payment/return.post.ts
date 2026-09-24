@@ -75,6 +75,10 @@ export default defineEventHandler(async (event): Promise<ObservePaymentReturnRes
         throw createError({ statusCode: 404, statusMessage: 'PAYMENT_RECOVERY_NOT_FOUND' })
       }
 
+      if (recovery.attempt.integration === 'direct-api') {
+        throw createError({ statusCode: 409, statusMessage: 'APPLE_PAY_USE_ORDER_RECOVERY' })
+      }
+
       if (recovery.attempt.authorization) {
         if (!recovery.customer || !isMerchantCustomerInScope(recovery.customer, profile) || recovery.subscription) {
           throw createError({ statusCode: 409, statusMessage: 'PAYMENT_CUSTOMER_SCOPE_MISMATCH' })

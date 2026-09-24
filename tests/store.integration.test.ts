@@ -1116,3 +1116,52 @@ describe('Neon payment persistence integration', () => {
     }
   }, 120_000)
 })
+
+describe('Direct Apple Pay persisted convergence', () => {
+  it('deduplicates an early no-paymentId webhook, preserves it across a late response, and reconciles by same-transaction query', async () => {
+    const { orderId, attemptId, now, order, attempt } = recoveryFixture('Direct Apple Pay')
+    const direct = createAttempt({ ...attempt, integration: 'direct-api', method: 'apple-pay' })
+    const transactionId = `7184${Date.now()}`.slice(0, 20)
+    const failure = {
+      kind: 'direct' as const, transactionId, merchantTxnId: direct.merchantTxnId!,
+      amountMinor: 500, currency: 'USD' as const, transactionStatus: 'F' as const,
+      status: 'failed' as const, occurredAt: now,
+    }
+    try {
+      await createPaymentRecord(order, direct, customer())
+      const claim = createEvent({ id: randomUUID(), attemptId, source: 'server', sourceKey: `create-claim:${attemptId}`, status: 'created', occurredAt: now })
+      const claims = await Promise.all([claimPaymentCreation(attemptId, claim), claimPaymentCreation(attemptId, { ...claim, id: randomUUID() })])
+      expect(claims.map(item => item.outcome).sort()).toEqual(['claimed', 'existing'])
+      const early = await recordWebhookEvent(failure)
+      expect(early.attempt).toMatchObject({ status: 'failed', statusSource: 'webhook', transactionId })
+      expect(early.attempt).not.toHaveProperty('paymentId')
+      expect((await recordWebhookEvent(failure)).duplicate).toBe(true)
+      const response = createEvent({ id: randomUUID(), attemptId, source: 'server', sourceKey: `direct-create:${attemptId}`, status: 'succeeded', transactionStatus: 'S', rawStatus: 'S', transactionId, occurredAt: now })
+      const late = await completePaymentRecord(attemptId, undefined, transactionId, response)
+      expect(late).toMatchObject({ status: 'failed', statusSource: 'webhook' })
+      const query = createEvent({ ...response, id: randomUUID(), source: 'query', sourceKey: `direct-query:${attemptId}:${transactionId}:S` })
+      const reconciled = await completePaymentRecord(attemptId, undefined, transactionId, query)
+      expect(reconciled).toMatchObject({ status: 'succeeded', statusSource: 'query', transactionId })
+      await completePaymentRecord(attemptId, undefined, transactionId, { ...query, id: randomUUID() })
+      const restored = await getPaymentRecovery(orderId, attemptId)
+      expect(restored?.attempt).toMatchObject({ integration: 'direct-api', method: 'apple-pay', status: 'succeeded', transactionId })
+      expect(restored?.attempt).not.toHaveProperty('paymentId')
+      expect(restored?.events.filter(item => item.sourceKey === query.sourceKey)).toHaveLength(1)
+      expect(restored?.events).toEqual(expect.arrayContaining([
+        expect.objectContaining({ id: response.id, conflict: true }),
+        expect.objectContaining({ id: query.id, conflict: true }),
+      ]))
+      const freshFailure = createEvent({ ...query, id: randomUUID(), sourceKey: `direct-query:${attemptId}:${randomUUID()}`, status: 'failed', rawStatus: 'F', transactionStatus: 'F' })
+      expect((await completePaymentRecord(attemptId, undefined, transactionId, freshFailure)).status).toBe('failed')
+      const freshSuccess = createEvent({ ...query, id: randomUUID(), sourceKey: `direct-query:${attemptId}:${randomUUID()}` })
+      expect((await completePaymentRecord(attemptId, undefined, transactionId, freshSuccess)).status).toBe('succeeded')
+      const attributed = await recordPaymentMethodDetails(attemptId, undefined, { transactionId, actualWallet: 'apple-pay', fundingNetwork: 'VISA' }, now)
+      expect(attributed).toMatchObject({ actualWallet: 'apple-pay', fundingNetwork: 'VISA', attributionTransactionId: transactionId })
+      await expect(recordWebhookEvent({ ...failure, transactionId: `8${transactionId.slice(1)}` })).rejects.toThrow('PAYMENT_ATTEMPT_MISMATCH')
+      await expect(recordWebhookEvent({ ...failure, amountMinor: 501 })).rejects.toThrow('PAYMENT_ATTEMPT_MISMATCH')
+    }
+    finally {
+      await deleteTestOrder(orderId)
+    }
+  }, 120_000)
+})

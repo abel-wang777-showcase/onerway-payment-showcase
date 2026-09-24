@@ -3,7 +3,7 @@ export default defineEventHandler((event) => {
 
   const url = getRequestURL(event)
   if (
-    !/^\/halden\/return\/[A-Za-z0-9-]{1,128}\/?$/.test(url.pathname)
+    !/^\/halden\/(?:return|direct)\/[A-Za-z0-9-]{1,128}\/?$/.test(url.pathname)
     && !/^\/halden\/subscription\/return\/?$/.test(url.pathname)
   ) return
 

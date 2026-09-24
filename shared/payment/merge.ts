@@ -1,4 +1,4 @@
-import type { PaymentAttempt, PaymentStatus } from './attempt'
+import { isDirectApplePayAttempt, type PaymentAttempt, type PaymentStatus } from './attempt'
 import { isTerminalStatus } from './sdk'
 import type { PaymentEvent } from './event'
 
@@ -95,8 +95,22 @@ export function mapWebhookStatus(
   return 'processing'
 }
 
+export function mapDirectTransactionStatus(status: string): PaymentStatus {
+  switch (status) {
+    case 'S': return 'succeeded'
+    case 'F': return 'failed'
+    case 'N': return 'cancelled'
+    case 'P': case 'I': case 'U': return 'processing'
+    case 'R': return 'requires_action'
+    default: throw new TypeError('PAYMENT_DIRECT_STATUS_UNKNOWN')
+  }
+}
+
 export function mergeAttempt(attempt: PaymentAttempt, event: PaymentEvent): AttemptMerge {
-  if (isTerminalStatus(event.status) && !trustedTerminalSources.has(event.source)) {
+  const directServer = isDirectApplePayAttempt(attempt) && event.source === 'server'
+    && Boolean(event.transactionId) && event.transactionStatus !== undefined
+    && mapDirectTransactionStatus(event.transactionStatus) === event.status
+  if (isTerminalStatus(event.status) && !trustedTerminalSources.has(event.source) && !directServer) {
     throw new TypeError('PAYMENT_EVENT_TERMINAL_UNTRUSTED')
   }
 
@@ -106,7 +120,8 @@ export function mergeAttempt(attempt: PaymentAttempt, event: PaymentEvent): Atte
   if (!currentTerminal) {
     if (
       (!incomingTerminal && attempt.statusSource === 'query' && event.source === 'webhook')
-      || (event.source === 'server' && ['query', 'webhook'].includes(attempt.statusSource ?? ''))
+      || (event.source === 'server' && ['query', 'webhook'].includes(attempt.statusSource ?? '')
+        && !(directServer && incomingTerminal))
     ) {
       return Object.freeze({ attempt, conflict: false })
     }

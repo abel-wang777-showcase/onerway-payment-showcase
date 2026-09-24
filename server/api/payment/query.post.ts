@@ -86,6 +86,9 @@ export default defineEventHandler(async (event): Promise<QuerySdkPaymentResponse
       if (!context) {
         throw new PaymentStoreError('PAYMENT_ATTEMPT_NOT_FOUND')
       }
+      if (context.attempt.integration === 'direct-api') {
+        throw createError({ statusCode: 409, statusMessage: 'APPLE_PAY_USE_ORDER_RECOVERY' })
+      }
       if (context.attempt.authorization) {
         throw createError({ statusCode: 409, statusMessage: 'AUTHORIZATION_QUERY_UNAVAILABLE' })
       }

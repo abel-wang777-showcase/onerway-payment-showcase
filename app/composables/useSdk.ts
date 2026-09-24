@@ -1,3 +1,4 @@
+import { browserData } from '../utils/browser.client'
 import { createEvent } from '#shared/payment/event'
 import { canClaimAuthorizationOperation, type AuthorizationOperationType } from '#shared/payment/authorization'
 import type { JourneyId } from '#shared/payment/journey'
@@ -25,7 +26,6 @@ import {
   readSdkResult,
   singleFlight,
   toPaymentAttemptSummary,
-  type BrowserData,
   type ClaimPaymentSubmissionResponse,
   type CreatePaymentIntentResponse,
   type CreatePaymentRetryResponse,
@@ -75,26 +75,6 @@ function responseStatus(value: unknown): number | null {
   return typeof nested === 'number' ? nested : null
 }
 
-function browserData(): BrowserData {
-  const javaEnabled = (() => {
-    try {
-      return typeof navigator.javaEnabled === 'function' && navigator.javaEnabled()
-    }
-    catch {
-      return false
-    }
-  })()
-
-  return Object.freeze({
-    javaEnabled,
-    colorDepth: String(screen.colorDepth),
-    screenHeight: String(screen.height),
-    screenWidth: String(screen.width),
-    timeZoneOffset: String(new Date().getTimezoneOffset()),
-    contentLength: String(document.documentElement.outerHTML.length),
-    language: navigator.language || 'en-US',
-  })
-}
 
 async function requestPaymentIntent(
   journeyId: JourneyId,
@@ -175,7 +155,7 @@ function assertSessionCorrelation(
     (expectedOrderId !== undefined && next.order.id !== expectedOrderId)
     || next.attempt.orderId !== next.order.id
     || (next.attempt.paymentId ?? null) !== next.paymentId
-    || (!next.paymentId && (next.attempt.integration !== 'checkout' || (!next.attempt.authorization && !isTerminalStatus(next.attempt.status))))
+    || (!next.paymentId && next.attempt.integration !== 'direct-api' && (next.attempt.integration !== 'checkout' || (!next.attempt.authorization && !isTerminalStatus(next.attempt.status))))
     || active.length !== 1
     || summary?.status !== next.attempt.status
     || summary?.retryOf !== next.attempt.retryOf
@@ -501,6 +481,12 @@ export function useSdk() {
           }
 
           throw new Error('PAYMENT_RECOVERY_PENDING')
+        }
+
+        if (getJourney(journeyId).integration === 'direct-api') {
+          stage.value = 'not_completed'
+          await navigateTo(`/halden/direct/${intent.orderId}`)
+          return
         }
 
         controller = new AbortController()

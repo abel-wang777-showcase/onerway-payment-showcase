@@ -95,6 +95,14 @@ beforeEach(() => {
 })
 
 describe('payment return route', () => {
+  it('does not dispatch Direct Apple Pay through the legacy Payment query', async () => {
+    mocks.getPaymentRecovery.mockResolvedValue({ order: { id: 'order-1' }, attempt: { id: 'attempt-1', integration: 'direct-api', paymentId: '9001' } })
+    const { default: handler } = await import('../server/api/payment/return.post')
+    await expect((handler as (event: unknown) => Promise<unknown>)({})).rejects.toMatchObject({ statusCode: 409, statusMessage: 'APPLE_PAY_USE_ORDER_RECOVERY' })
+    expect(mocks.queryPayment).not.toHaveBeenCalled()
+    expect(mocks.recordQueryEvent).not.toHaveBeenCalled()
+  })
+
   it('records AUTH return as navigation only, without querying or treating it as authorization', async () => {
     mocks.requireServerProfile.mockReturnValue({ profile: 'sandbox', secret: 'test-secret', merchantNo: 'merchant-1', appId: 'app-1' })
     mocks.getPaymentRecovery.mockResolvedValue({

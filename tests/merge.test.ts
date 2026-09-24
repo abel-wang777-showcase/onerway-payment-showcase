@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { createAttempt } from '../shared/payment/attempt'
+import { createAttempt, getRetryDecision } from '../shared/payment/attempt'
 import { createAuthorizationState } from '../shared/payment/authorization'
 import { createEvent } from '../shared/payment/event'
-import { findProjectionEvent, mapWebhookStatus, mergeAttempt } from '../shared/payment/merge'
+import { findProjectionEvent, mapDirectTransactionStatus, mapWebhookStatus, mergeAttempt } from '../shared/payment/merge'
 
 function attempt(status: 'created' | 'requires_action' | 'processing' | 'succeeded' | 'cancelled', source?: 'query' | 'webhook') {
   return Object.freeze({
@@ -166,5 +166,82 @@ describe('authorization projection evidence', () => {
     const conflict = createEvent({ ...initial, id: 'conflict', conflict: true })
     expect(findProjectionEvent({ ...attempt('processing', 'query'), authorization: pending }, [initial, conflict])).toBe(initial)
     expect(findProjectionEvent(attempt('processing', 'query'), [initial, conflict])).toBe(conflict)
+  })
+})
+
+
+describe('Direct Apple Pay transaction truth', () => {
+  const direct = { ...attempt('processing'), integration: 'direct-api' as const, method: 'apple-pay' as const }
+  it.each([['S', 'succeeded'], ['F', 'failed'], ['N', 'cancelled'], ['P', 'processing'], ['I', 'processing'], ['U', 'processing'], ['R', 'requires_action']])('maps %s as %s', (raw, status) => {
+    expect(mapDirectTransactionStatus(raw!)).toBe(status)
+  })
+  it('rejects unknown transaction statuses', () => {
+    expect(() => mapDirectTransactionStatus('O')).toThrow('PAYMENT_DIRECT_STATUS_UNKNOWN')
+  })
+  it('accepts a correlated server terminal only for Direct Apple Pay', () => {
+    const incoming = createEvent({ ...event('succeeded'), source: 'server', transactionStatus: 'S' })
+    expect(mergeAttempt(direct, incoming).attempt.status).toBe('succeeded')
+    expect(() => mergeAttempt(attempt('processing'), incoming)).toThrow('PAYMENT_EVENT_TERMINAL_UNTRUSTED')
+    expect(() => mergeAttempt({ ...direct, method: 'card' }, incoming)).toThrow('PAYMENT_EVENT_TERMINAL_UNTRUSTED')
+    expect(() => mergeAttempt(direct, createEvent({ ...incoming, transactionStatus: undefined }))).toThrow('PAYMENT_EVENT_TERMINAL_UNTRUSTED')
+  })
+  it.each([
+    ['query', 'S', 'succeeded'],
+    ['query', 'F', 'failed'],
+    ['query', 'N', 'cancelled'],
+    ['webhook', 'S', 'succeeded'],
+    ['webhook', 'F', 'failed'],
+    ['webhook', 'N', 'cancelled'],
+  ] as const)('advances a non-terminal %s projection from a correlated Direct %s response', (source, transactionStatus, status) => {
+    const current = { ...direct, statusSource: source }
+    const incoming = createEvent({
+      id: `direct-${transactionStatus}`,
+      attemptId: current.id,
+      source: 'server',
+      status,
+      transactionId: 'transaction-1',
+      transactionStatus,
+      occurredAt: '2026-08-04T07:02:00.000Z',
+    })
+
+    expect(mergeAttempt(current, incoming)).toMatchObject({
+      conflict: false,
+      attempt: { status, statusSource: 'server', transactionId: 'transaction-1' },
+    })
+  })
+  it.each(['query', 'webhook'] as const)('does not let a non-terminal Direct server response replace a %s projection', (source) => {
+    const current = { ...direct, statusSource: source }
+    const incoming = createEvent({
+      id: 'direct-requires-action',
+      attemptId: current.id,
+      source: 'server',
+      status: 'requires_action',
+      transactionId: 'transaction-1',
+      transactionStatus: 'R',
+      occurredAt: '2026-08-04T07:02:00.000Z',
+    })
+
+    expect(mergeAttempt(current, incoming)).toEqual({ attempt: current, conflict: false })
+  })
+  it('keeps an existing query terminal when a Direct server response conflicts', () => {
+    const current = { ...direct, status: 'succeeded' as const, statusSource: 'query' as const }
+    const incoming = createEvent({
+      id: 'direct-failed',
+      attemptId: current.id,
+      source: 'server',
+      status: 'failed',
+      transactionId: 'transaction-1',
+      transactionStatus: 'F',
+      occurredAt: '2026-08-04T07:02:00.000Z',
+    })
+
+    expect(mergeAttempt(current, incoming)).toEqual({ attempt: current, conflict: true })
+  })
+  it('reconciles server/webhook conflict only with fresh query and disallows same-order retry', () => {
+    const failed = mergeAttempt(direct, createEvent({ ...event('succeeded'), source: 'server', status: 'failed', transactionStatus: 'F' })).attempt
+    expect(mergeAttempt(failed, event('succeeded')).conflict).toBe(true)
+    expect(mergeAttempt(failed, event('succeeded')).attempt.status).toBe('failed')
+    expect(mergeAttempt(failed, event('succeeded', 'query')).attempt.status).toBe('succeeded')
+    expect(getRetryDecision({ ...failed, statusSource: 'query' })).toEqual({ allowed: false, reason: 'direct_api' })
   })
 })

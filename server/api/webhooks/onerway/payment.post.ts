@@ -1,5 +1,7 @@
+import { isDirectApplePayAttempt } from '../../../../shared/payment/attempt'
 import {
   isSubscriptionWebhookProcessed,
+  getPaymentTimeline,
   PaymentStoreError,
   recordSubscriptionWebhookEvent,
   recordWebhookEvent,
@@ -7,6 +9,7 @@ import {
 } from '../../../utils/store'
 import {
   readWebhookBody,
+  verifyWebhookSignature,
   readPaymentWebhook,
   readAuthorizationWebhook,
   readSubscriptionPaymentWebhook,
@@ -55,7 +58,14 @@ export default defineEventHandler(async (event): Promise<string> => {
       transactionId = fact.transactionId
     }
     else {
-      const fact = readPaymentWebhook(body, profile.secret, profile.merchantNo, signatureHeader)
+      if (!verifyWebhookSignature(body, profile.secret, signatureHeader)) {
+        throw new WebhookError('PAYMENT_WEBHOOK_SIGNATURE_INVALID')
+      }
+      const timeline = typeof body.merchantTxnId === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(body.merchantTxnId)
+        ? await getPaymentTimeline(body.merchantTxnId) : null
+      const direct = Boolean(timeline && timeline.attempt.merchantTxnId === body.merchantTxnId
+        && isDirectApplePayAttempt(timeline.attempt))
+      const fact = readPaymentWebhook(body, profile.secret, profile.merchantNo, signatureHeader, direct)
       await recordWebhookEvent(fact)
       transactionId = fact.transactionId
     }

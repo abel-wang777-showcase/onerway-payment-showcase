@@ -27,12 +27,18 @@ importers:
       '@iconify-json/lucide':
         specifier: ^1.2.116
         version: 1.2.120
+      '@iconify-json/simple-icons':
+        specifier: ^1.2.97
+        version: 1.2.97
       '@neondatabase/serverless':
         specifier: ^1.1.0
         version: 1.1.0
       '@nuxt/ui':
         specifier: ^4.9.0
         version: 4.10.0(fcd86f91358fc5c47cca83f445f0c4b8)
+      '@speed-highlight/core':
+        specifier: 1.2.17
+        version: 1.2.17
       '@vueuse/core':
         specifier: ^14.3.0
         version: 14.3.0(vue@3.5.40(typescript@5.9.3))
@@ -610,6 +616,9 @@ packages:
 
   '@iconify-json/lucide@1.2.120':
     resolution: {integrity: sha512-4ECF24fxag1n5tZlPGrbWuCGqhkwD0rvAzfCXretqQb4KEC8Y6ja3khF8qmvpR1Mk0NQDhBTRK3Fr/YoV8QyJw==}
+
+  '@iconify-json/simple-icons@1.2.97':
+    resolution: {integrity: sha512-Z6PmM6jvWVU7rmLzqbxCLJA7SeqCnK6lMHXtjyzHPLZebwuoojBEcHHycppahDzEeN9xujRkrV5J8QpOhMyNrg==}
 
   '@iconify/collections@1.0.715':
     resolution: {integrity: sha512-4EP9EOD9qx/Ybu+FtepdxL49FV1mFKsPuLTl06ccwvP5lZyErzTy5CODamEnsnKsYr+8jle2DdlDxqzVBok9hQ==}
@@ -5955,6 +5964,10 @@ snapshots:
   '@humanwhocodes/retry@0.4.3': {}
 
   '@iconify-json/lucide@1.2.120':
+    dependencies:
+      '@iconify/types': 2.0.0
+
+  '@iconify-json/simple-icons@1.2.97':
     dependencies:
       '@iconify/types': 2.0.0
 

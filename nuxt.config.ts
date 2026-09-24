@@ -40,7 +40,23 @@ export default defineNuxtConfig({
   icon: {
     fallbackToApi: false,
     clientBundle: {
-      icons: ['lucide:package-check', 'lucide:refresh-cw'],
+      icons: [
+        'lucide:package-check',
+        'lucide:refresh-cw',
+        'lucide:external-link',
+        'lucide:credit-card',
+        'lucide:user-round',
+        'lucide:monitor-smartphone',
+        'lucide:server',
+        'lucide:wallet-cards',
+        'lucide:shield-check',
+        'lucide:git-branch',
+        'simple-icons:visa',
+        'simple-icons:mastercard',
+        'simple-icons:americanexpress',
+        'simple-icons:discover',
+        'simple-icons:jcb',
+      ],
     },
   },
 

@@ -1,7 +1,9 @@
 <script setup lang="ts">
 const route = useRoute()
 const { session, retainedSubscriptionOrderId } = useSdk()
+const isDirect = computed(() => route.path.includes('/direct/'))
 const isCheckout = computed(() =>
+  isDirect.value ||
   route.path.includes('/checkout/')
   || route.path.includes('/hosted/')
   || route.path.includes('/sdk/')
@@ -9,6 +11,7 @@ const isCheckout = computed(() =>
 )
 const isResult = computed(() => route.path.includes('/result/'))
 const isSandbox = computed(() =>
+  isDirect.value ||
   route.path.includes('/hosted/')
   || route.path.includes('/return/')
   || route.path.includes('/sdk/')
@@ -98,7 +101,9 @@ const isSandbox = computed(() =>
     >
       <UContainer class="py-6">
         <p class="text-sm text-toned">
-          {{ isSandbox
+          {{ isDirect
+            ? 'Halden is a fictional merchant. Apple Pay authorization takes place in Wallet. This merchant server forwards the encrypted token to Onerway Sandbox without saving it.'
+            : isSandbox
             ? 'Halden is a fictional merchant. Payment details are entered on Onerway Sandbox pages or fields and never pass through this merchant server.'
             : 'Halden is a fictional merchant. This journey is simulated and does not collect payment data.' }}
         </p>
