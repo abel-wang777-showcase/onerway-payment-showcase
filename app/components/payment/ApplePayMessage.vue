@@ -1,37 +1,71 @@
 <script setup lang="ts">
-const props = defineProps<{ label: string, value: string }>()
-const copied = shallowRef(false)
-const copyError = shallowRef(false)
-let feedbackTimer: ReturnType<typeof setTimeout> | undefined
-let disposed = false
+import type { ShjToken } from '@speed-highlight/core'
 
-async function copy(): Promise<void> {
-  const text = props.value
+type SyntaxLanguage = 'json' | 'js'
+interface SyntaxToken { readonly text: string, readonly type?: ShjToken }
+
+const props = withDefaults(defineProps<{ label: string, value: string, language?: SyntaxLanguage }>(), {
+  language: 'json',
+})
+const mounted = shallowRef(false)
+const highlighted = shallowRef<readonly SyntaxToken[] | null>(null)
+const copyProps = computed(() => ({ 'aria-label': `Copy ${props.label}`, size: 'sm' as const }))
+const proseUi = {
+  root: 'my-0 min-w-0 max-w-full overflow-hidden',
+  header: 'min-w-0 pe-16',
+  icon: 'hidden',
+  filename: 'min-w-0 break-words text-xs font-medium text-toned',
+  copy: 'top-1 end-1 min-h-11 min-w-11 touch-manipulation',
+  base: 'max-w-full overflow-hidden p-0 whitespace-normal',
+} as const
+
+async function tokenizeMessage(value: string, language: SyntaxLanguage): Promise<readonly SyntaxToken[] | null> {
   try {
-    await navigator.clipboard.writeText(text)
-    if (disposed || props.value !== text) return
-    copied.value = true
-    copyError.value = false
+    const { tokenize } = await import('@speed-highlight/core')
+    const tokens: SyntaxToken[] = []
+    await tokenize(value, language, (text, type) => {
+      tokens.push(type ? { text, type } : { text })
+    })
+    return tokens.map(token => token.text).join('') === value ? Object.freeze(tokens) : null
   }
   catch {
-    if (disposed || props.value !== text) return
-    copied.value = false
-    copyError.value = true
+    return null
   }
-  clearTimeout(feedbackTimer)
-  feedbackTimer = setTimeout(() => { copied.value = false; copyError.value = false }, 3000)
 }
-watch(() => props.value, () => { copied.value = false; copyError.value = false })
-onScopeDispose(() => { disposed = true; clearTimeout(feedbackTimer) })
+
+watch(
+  [mounted, () => props.value, () => props.language],
+  ([ready, value, language], _previous, onCleanup) => {
+    highlighted.value = null
+    if (!ready) return
+
+    let active = true
+    onCleanup(() => { active = false })
+    void tokenizeMessage(value, language).then((tokens) => {
+      if (!active) return
+      highlighted.value = tokens
+    })
+  },
+  { immediate: true },
+)
+onMounted(() => { mounted.value = true })
 </script>
 
 <template>
-  <div class="min-w-0 overflow-hidden rounded-md border border-default bg-muted">
-    <div class="flex min-w-0 flex-wrap items-center justify-between gap-x-3 gap-y-1 border-b border-default px-3 py-1">
-      <p class="min-w-0 break-words text-xs font-medium text-toned">{{ label }}</p>
-      <UButton :aria-label="`Copy ${label}`" :label="copied ? 'Copied' : 'Copy'" :icon="copied ? 'i-lucide-check' : 'i-lucide-copy'" color="neutral" variant="ghost" size="xs" class="min-h-11 shrink-0 touch-manipulation" @click="copy" />
-    </div>
-    <pre tabindex="0" role="region" :aria-label="`${label} code`" class="max-w-full overflow-x-auto overscroll-x-contain p-3 font-mono text-xs leading-relaxed text-toned focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-primary"><code translate="no">{{ value }}</code></pre>
-    <p role="status" aria-live="polite" :class="copyError ? 'px-3 py-2 text-xs leading-relaxed text-toned' : 'sr-only'">{{ copied ? `${label} copied.` : copyError ? `Could not copy ${label}. Select the text to copy it manually.` : '' }}</p>
-  </div>
+  <ProsePre
+    :filename="label"
+    :code="value"
+    :language="language"
+    :copy="copyProps"
+    :ui="proseUi"
+  >
+    <code
+      translate="no"
+      :data-language="language"
+      tabindex="0"
+      role="region"
+      :aria-label="`${label} code`"
+      class="block max-w-full overflow-x-auto overscroll-x-contain whitespace-pre p-3 pe-14 font-mono text-xs leading-relaxed text-toned focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-primary"
+    ><template v-if="highlighted"><span v-for="(token, index) in highlighted" :key="index" :data-syntax="token.type" :class="token.type ? ['apple-pay-code-token', `apple-pay-code-token--${token.type}`] : undefined">{{ token.text }}</span></template><template v-else>{{ value }}</template></code>
+  </ProsePre>
 </template>

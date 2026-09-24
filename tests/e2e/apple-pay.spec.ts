@@ -30,7 +30,7 @@ window.ApplePaySession = class {
   static canMakePayments() { return true; }
   static async applePayCapabilities() { return { paymentCredentialStatus: 'paymentCredentialStatusUnknown' }; }
   begin() { this.onvalidatemerchant({ validationURL: 'https://apple-pay-gateway-cert.apple.com/paymentservices/paymentSession' }); }
-  completeMerchantValidation() { this.onpaymentauthorized({ payment: { token: { paymentData: { data: 'synthetic-only' }, paymentMethod: { network: 'visa' }, transactionIdentifier: 'synthetic-only' } } }); }
+  completeMerchantValidation() { queueMicrotask(() => this.onpaymentauthorized({ payment: { token: { paymentData: { data: 'synthetic-only' }, paymentMethod: { network: 'visa' }, transactionIdentifier: 'synthetic-only' } } })); }
   completePayment(result) { window.__appleCompletions = (window.__appleCompletions || []).concat(result.status); }
   abort() {}
 };`
@@ -122,29 +122,45 @@ test.describe('mock Apple Pay Direct browser journey', () => {
     }
   }
 
-  test('shows real safe evidence alongside clearly separate examples after payment', async ({ page }, testInfo) => {
-    await page.setViewportSize({ width: 790, height: 1000 })
-    await page.emulateMedia({ colorScheme: 'dark', reducedMotion: 'reduce' })
-    const mock = await installAppleMock(page)
-    await gotoHydrated(page, '/halden/direct/order-direct')
-    await page.locator('apple-pay-button').getByRole('button').click()
-    await expect(page.getByRole('heading', { name: 'Your order is paid.' })).toBeVisible()
-    for (const id of ['validate', 'authorize', 'submit', 'result']) {
-      const step = page.locator(`[data-apple-pay-step=${id}]`)
-      await step.locator('summary').click()
-      await expect(step).toContainText('This visit')
-      await expect(step).toContainText('Synthetic example')
-    }
-    await expect(page.locator('[data-apple-pay-step=validate]')).toContainText('apple-pay-gateway-cert.apple.com')
-    await expect(page.locator('[data-apple-pay-step=submit]')).toContainText('/v1/txn/doTransaction')
-    await expect(page.locator('body')).not.toContainText('synthetic-only')
-    await expect(page.locator('body')).not.toContainText('merchant-session-only')
-    await expectNoHorizontalOverflow(page)
-    await page.screenshot({ path: testInfo.outputPath('apple-pay-protocol-790-dark.png'), fullPage: true })
-    await page.locator('[data-apple-pay-step=validate]').screenshot({ path: testInfo.outputPath('apple-pay-validation-detail.png') })
-    await page.locator('[data-apple-pay-step=submit]').screenshot({ path: testInfo.outputPath('apple-pay-submission-detail.png') })
-    mock.assertClean()
-  })
+  for (const presentation of [{ width: 390, colorScheme: 'light' }, { width: 790, colorScheme: 'dark' }, { width: 1440, colorScheme: 'dark' }] as const) {
+    test(`shows real safe evidence alongside clearly separate examples after payment at ${presentation.width}px ${presentation.colorScheme}`, async ({ page }, testInfo) => {
+      await page.setViewportSize({ width: presentation.width, height: 1000 })
+      await page.emulateMedia({ colorScheme: presentation.colorScheme, reducedMotion: 'reduce' })
+      const mock = await installAppleMock(page)
+      await gotoHydrated(page, '/halden/direct/order-direct')
+      await page.locator('apple-pay-button').getByRole('button').click()
+      await expect(page.getByRole('heading', { name: 'Your order is paid.' })).toBeVisible()
+      for (const id of ['validate', 'authorize', 'submit', 'result']) {
+        const step = page.locator(`[data-apple-pay-step=${id}]`)
+        await step.locator('summary').click()
+        await expect(step).toContainText('This visit')
+        await expect(step).toContainText('Synthetic example')
+      }
+      await expect(page.locator('[data-apple-pay-step=validate]')).toContainText('apple-pay-gateway-cert.apple.com')
+      await expect(page.locator('[data-apple-pay-step=submit]')).toContainText('/v1/txn/doTransaction')
+      const authorized = page.locator('[data-apple-pay-step=authorize]')
+      await expect(authorized.locator('.iconify.i-simple-icons\\:visa')).toBeVisible()
+      for (const language of ['json', 'js']) {
+        await expect.poll(() => authorized.locator(`code[data-language=${language}] [data-syntax]`).count()).toBeGreaterThan(0)
+      }
+      await page.context().grantPermissions(['clipboard-read', 'clipboard-write'])
+      const safeResponse = await authorized.locator('code[data-language=json]').textContent()
+      await authorized.getByRole('button', { name: 'Copy Approve this payment in Wallet: safe response', exact: true }).click()
+      await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(safeResponse)
+      await expect(page.locator('body')).not.toContainText('synthetic-only')
+      await expect(page.locator('body')).not.toContainText('merchant-session-only')
+      await expectNoHorizontalOverflow(page)
+      await page.screenshot({ path: testInfo.outputPath(`apple-pay-protocol-${presentation.width}-${presentation.colorScheme}.png`), fullPage: true })
+      await page.locator('[data-apple-pay-step=validate]').screenshot({ path: testInfo.outputPath('apple-pay-validation-detail.png') })
+      await page.locator('[data-apple-pay-step=submit]').screenshot({ path: testInfo.outputPath('apple-pay-submission-detail.png') })
+      await authorized.evaluate(element => {
+        element.scrollIntoView({ block: 'start' })
+        return new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
+      })
+      await page.screenshot({ path: testInfo.outputPath('apple-pay-highlight-and-network.png') })
+      mock.assertClean()
+    })
+  }
 
   test('pays once and restores the existing order after refresh without replaying browser events', async ({ page }) => {
     const mock = await installAppleMock(page)

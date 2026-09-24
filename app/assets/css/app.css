@@ -76,3 +76,60 @@
 .apple-pay-timeline-step summary::-webkit-details-marker {
   display: none;
 }
+
+.apple-pay-code-token--kwd,
+.apple-pay-code-token--bool,
+.apple-pay-code-token--section {
+  color: var(--ui-primary);
+  font-weight: 500;
+}
+
+.apple-pay-code-token--var,
+.apple-pay-code-token--class,
+.apple-pay-code-token--type,
+.apple-pay-code-token--func {
+  color: var(--ui-color-info-700);
+}
+
+.apple-pay-code-token--str,
+.apple-pay-code-token--esc,
+.apple-pay-code-token--insert {
+  color: var(--ui-color-success-700);
+}
+
+.apple-pay-code-token--num,
+.apple-pay-code-token--oper {
+  color: var(--ui-color-warning-700);
+}
+
+.apple-pay-code-token--cmnt {
+  color: var(--ui-text-toned);
+}
+
+.apple-pay-code-token--deleted,
+.apple-pay-code-token--err {
+  color: var(--ui-color-error-700);
+}
+
+.dark .apple-pay-code-token--var,
+.dark .apple-pay-code-token--class,
+.dark .apple-pay-code-token--type,
+.dark .apple-pay-code-token--func {
+  color: var(--ui-color-info-400);
+}
+
+.dark .apple-pay-code-token--str,
+.dark .apple-pay-code-token--esc,
+.dark .apple-pay-code-token--insert {
+  color: var(--ui-color-success-400);
+}
+
+.dark .apple-pay-code-token--num,
+.dark .apple-pay-code-token--oper {
+  color: var(--ui-color-warning-400);
+}
+
+.dark .apple-pay-code-token--deleted,
+.dark .apple-pay-code-token--err {
+  color: var(--ui-color-error-400);
+}

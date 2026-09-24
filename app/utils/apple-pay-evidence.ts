@@ -1,15 +1,33 @@
-import type { ApplePayEvidence, PrepareApplePayResponse, DirectRecoveryResponse } from '#shared/payment/apple-pay'
+import type { ApplePayEvidence, ApplePayEvidenceField, ApplePayNetworkEvidence, ApplePayNetworkIcon, PrepareApplePayResponse, DirectRecoveryResponse } from '#shared/payment/apple-pay'
 
 const json = (value: unknown) => JSON.stringify(value, null, 2)
 export function maskPaymentReference(value: string | undefined | null): string {
   if (!value) return 'Not returned'
   return value.length > 8 ? `${value.slice(0, 4)}…${value.slice(-4)}` : '••••'
 }
-const field = (label: string, value: string) => ({ label, value })
+const networkIcons: Readonly<Record<string, ApplePayNetworkIcon>> = {
+  visa: 'i-simple-icons-visa',
+  mastercard: 'i-simple-icons-mastercard',
+  amex: 'i-simple-icons-americanexpress',
+  americanexpress: 'i-simple-icons-americanexpress',
+  discover: 'i-simple-icons-discover',
+  jcb: 'i-simple-icons-jcb',
+}
+
+export function applePayNetworkEvidence(value: string): ApplePayNetworkEvidence {
+  const normalized = value.normalize('NFKC').trim().toLowerCase()
+  return { value, icon: networkIcons[normalized] ?? 'i-lucide-credit-card' }
+}
+
+const field = (label: string, value: string, networks?: readonly string[]): ApplePayEvidenceField => ({
+  label,
+  value,
+  ...(networks?.length ? { networks: networks.map(applePayNetworkEvidence) } : {}),
+})
 
 export function preparationEvidence(value: PrepareApplePayResponse, eligible?: boolean): ApplePayEvidence {
   return { summary: eligible === false ? 'This device cannot open Apple Pay.' : 'The order and supported card networks are ready.', source: 'live',
-    fields: [field('Amount', `${value.paymentRequest.currencyCode} ${value.paymentRequest.total.amount}`), field('Country', value.paymentRequest.countryCode), field('Networks', value.paymentRequest.supportedNetworks.join(', '))],
+    fields: [field('Amount', `${value.paymentRequest.currencyCode} ${value.paymentRequest.total.amount}`), field('Country', value.paymentRequest.countryCode), field('Networks', value.paymentRequest.supportedNetworks.join(', '), value.paymentRequest.supportedNetworks)],
     response: json({ merchantIdentifier: value.merchantIdentifier, paymentRequest: value.paymentRequest, deviceEligible: eligible ?? 'Not checked for a restored order' }) }
 }
 
@@ -36,7 +54,7 @@ export function authorizationEvidence(token: Record<string, unknown>): ApplePayE
   const network = typeof method.network === 'string' && ['visa', 'mastercard', 'amex', 'discover', 'jcb', 'unionpay', 'maestro', 'eftpos', 'electron', 'vpay', 'cartesbancaires', 'interac', 'mada', 'girocard', 'privatelabel'].includes(method.network.toLowerCase()) ? method.network : 'Not returned'
   const type = typeof method.type === 'string' && ['debit', 'credit', 'prepaid', 'store'].includes(method.type) ? method.type : 'Not returned'
   const version = ['EC_v1', 'RSA_v1'].includes(String(data.version)) ? data.version : 'Not returned'
-  return { summary: 'Wallet authorization arrived with an encrypted payment token.', source: 'live', fields: [field('Wallet-reported network', network), field('Card type', type), field('Encrypted token', 'Received; contents omitted')],
+  return { summary: 'Wallet authorization arrived with an encrypted payment token.', source: 'live', fields: [field('Wallet-reported network', network, [network]), field('Card type', type), field('Encrypted token', 'Received; contents omitted')],
     response: json({ paymentMethod: { network, type, displayName: '[card label omitted]' }, transactionIdentifier: '[wallet transaction identifier omitted]', paymentData: { version, data: '[encrypted payment data omitted]', signature: '[signature omitted]', header: '[cryptographic header omitted]' } }) }
 }
 
@@ -49,7 +67,7 @@ export function submissionEvidence(value: DirectRecoveryResponse, request?: stri
 export function resultEvidence(value: DirectRecoveryResponse, source: ApplePayEvidence['source']): ApplePayEvidence {
   const observations = value.events.filter(e => ['server', 'query', 'webhook'].includes(e.source) && e.rawStatus).map(e => ({ source: e.source, status: e.status, rawStatus: e.rawStatus, occurredAt: e.occurredAt }))
   return { summary: value.verificationPending ? 'A fresh check is unavailable; the saved result is preserved.' : `The saved payment result is ${value.attempt.status}.`, source,
-    fields: [field('Payment result', value.attempt.status), field('Confirmed by', value.attempt.statusSource ?? 'Not confirmed'), field('Verified wallet / network', [value.attempt.actualWallet, value.attempt.fundingNetwork].filter(Boolean).join(' / ') || 'Not yet verified')],
+    fields: [field('Payment result', value.attempt.status), field('Confirmed by', value.attempt.statusSource ?? 'Not confirmed'), field('Verified wallet / network', [value.attempt.actualWallet, value.attempt.fundingNetwork].filter(Boolean).join(' / ') || 'Not yet verified', value.attempt.fundingNetwork ? [value.attempt.fundingNetwork] : undefined)],
     occurredAt: value.attempt.updatedAt,
     response: json({ merchantTxnId: maskPaymentReference(value.attempt.merchantTxnId), transactionId: maskPaymentReference(value.attempt.transactionId), paymentId: maskPaymentReference(value.paymentId), status: value.attempt.status, observations }) }
 }

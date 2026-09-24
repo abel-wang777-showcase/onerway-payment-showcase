@@ -27,6 +27,7 @@ const duration = computed(() => {
   const value = props.step.evidence?.durationMs
   return value !== undefined && Number.isFinite(value) && value >= 0 ? `${new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 }).format(value)} ms` : null
 })
+const exampleLanguage = computed(() => ['begin', 'validate', 'authorize'].includes(props.step.id) ? 'js' as const : 'json' as const)
 
 function toggle(): void { manualChoice.value = !isOpen.value }
 function preserveFocusedContent(event: FocusEvent): void {
@@ -54,7 +55,10 @@ function preserveFocusedContent(event: FocusEvent): void {
       <dl v-if="previewFields.length" class="mt-3 grid min-w-0 gap-x-6 gap-y-2 text-xs sm:grid-cols-2">
         <div v-for="(field, fieldIndex) in previewFields" :key="`${field.label}-${fieldIndex}`" class="min-w-0">
           <dt class="break-words text-toned">{{ field.label }}</dt>
-          <dd class="mt-1 break-all font-mono text-toned" translate="no">{{ field.value }}</dd>
+          <dd class="mt-1 font-mono text-toned" translate="no">
+            <PaymentApplePayNetworkList v-if="field.networks?.length" :networks="field.networks" :value="field.value" />
+            <span v-else class="break-all">{{ field.value }}</span>
+          </dd>
         </div>
       </dl>
       <details ref="details" data-step-details :open="isOpen" class="mt-3 min-w-0" @focusin="preserveFocusedContent">
@@ -68,7 +72,13 @@ function preserveFocusedContent(event: FocusEvent): void {
             <template v-if="step.evidence">
               <p class="max-w-prose text-xs leading-relaxed text-toned">Only safe fields are shown. Sensitive values are omitted or masked; this is not a full raw payload.</p>
               <dl v-if="additionalFields.length" class="grid min-w-0 gap-x-6 gap-y-3 text-xs sm:grid-cols-2">
-                <div v-for="(field, fieldIndex) in additionalFields" :key="`${field.label}-${fieldIndex}`" class="min-w-0"><dt class="break-words text-toned">{{ field.label }}</dt><dd class="mt-1 break-all font-mono text-toned" translate="no">{{ field.value }}</dd></div>
+                <div v-for="(field, fieldIndex) in additionalFields" :key="`${field.label}-${fieldIndex}`" class="min-w-0">
+                  <dt class="break-words text-toned">{{ field.label }}</dt>
+                  <dd class="mt-1 font-mono text-toned" translate="no">
+                    <PaymentApplePayNetworkList v-if="field.networks?.length" :networks="field.networks" :value="field.value" />
+                    <span v-else class="break-all">{{ field.value }}</span>
+                  </dd>
+                </div>
               </dl>
               <PaymentApplePayMessage v-if="step.evidence.request" :label="`${step.title}: safe request`" :value="step.evidence.request" />
               <PaymentApplePayMessage v-if="step.evidence.response" :label="`${step.title}: safe response`" :value="step.evidence.response" />
@@ -89,8 +99,8 @@ function preserveFocusedContent(event: FocusEvent): void {
           <section v-if="step.example?.request || step.example?.response" :aria-label="`${step.title}: synthetic example`" class="min-w-0 space-y-3 border-t border-dashed border-default pt-4">
             <h4 class="text-sm font-semibold tracking-tight text-highlighted">Synthetic example</h4>
             <p class="text-xs leading-relaxed text-toned">Illustrative values only. This example is not a message from your payment.</p>
-            <PaymentApplePayMessage v-if="step.example.request" :label="`${step.title}: example request`" :value="step.example.request" />
-            <PaymentApplePayMessage v-if="step.example.response" :label="`${step.title}: example response`" :value="step.example.response" />
+            <PaymentApplePayMessage v-if="step.example.request" :label="`${step.title}: example request`" :value="step.example.request" :language="exampleLanguage" />
+            <PaymentApplePayMessage v-if="step.example.response" :label="`${step.title}: example response`" :value="step.example.response" :language="exampleLanguage" />
           </section>
         </div>
       </details>
