@@ -92,6 +92,39 @@ async function installAppleMock(page: Page, result: 'succeeded' | 'failed' = 'su
 }
 
 test.describe('mock Apple Pay Direct browser journey', () => {
+  for (const width of [320, 790, 1440]) {
+    test(`explains callback ownership without changing payment at ${width}px`, async ({ page }, testInfo) => {
+      await page.setViewportSize({ width, height: 1100 })
+      await page.emulateMedia({ colorScheme: width === 320 ? 'light' : 'dark', reducedMotion: 'reduce' })
+      const mock = await installAppleMock(page)
+      await gotoHydrated(page, '/halden/direct/order-direct')
+      const flow = page.locator('[data-apple-pay-flow]')
+      await flow.locator('[data-flow-step=validate]').focus()
+      await page.keyboard.press('Enter')
+      const validation = flow.locator('[data-flow-panel=validate]')
+      await expect(validation).toContainText('onvalidatemerchant')
+      await expect(validation).toContainText('completeMerchantValidation')
+      await expect(validation).toContainText('merchantSession')
+      await expect(page.locator('[data-apple-pay-step=validate]')).toHaveAttribute('data-state', 'waiting')
+      await expectNoHorizontalOverflow(page)
+      await flow.screenshot({ path: testInfo.outputPath(`apple-pay-flow-${width}.png`) })
+      await flow.locator('[data-flow-step=cancel]').click()
+      await expect(flow.locator('[data-flow-panel=cancel]')).toContainText('oncancel')
+      expect(mock.calls.filter(path => path.endsWith('/pay'))).toHaveLength(0)
+      await page.locator('apple-pay-button').getByRole('button').click()
+      await expect(page.getByRole('heading', { name: 'Your order is paid.' })).toBeVisible()
+      await expect(flow.locator('[data-flow-panel=cancel]')).toBeVisible()
+      await flow.locator('[data-flow-follow]').click()
+      await expect(flow.locator('[data-flow-panel=result]')).toBeVisible()
+      await expect(flow.locator('[data-flow-step=result]')).toBeFocused()
+      await expect(flow.locator('[data-flow-panel=result] [data-flow-edge-index]')).toHaveCount(0)
+      await flow.screenshot({ path: testInfo.outputPath(`apple-pay-result-flow-${width}.png`) })
+      expect(mock.calls.filter(path => path.endsWith('/pay'))).toHaveLength(1)
+      await expectNoHorizontalOverflow(page)
+      mock.assertClean()
+    })
+  }
+
   for (const width of [320, 390, 790, 834, 1440]) {
     for (const colorScheme of ['light', 'dark'] as const) {
       test(`shows official element and six readable steps at ${width}px ${colorScheme}`, async ({ page }, testInfo) => {
@@ -104,12 +137,12 @@ test.describe('mock Apple Pay Direct browser journey', () => {
         await expect(page.locator('footer')).toContainText('forwards the encrypted token')
         await expect(page.locator('footer')).not.toContainText('simulated')
         await expect(page.getByRole('heading', { name: 'How this payment works' })).toBeVisible()
-        const summaries = page.locator('summary')
+        const summaries = page.locator('[data-step-details] > summary')
         await expect(summaries).toHaveCount(6)
         await summaries.first().focus()
         await page.keyboard.press('Enter')
-        await expect(page.locator('details').first()).toHaveAttribute('open', '')
-        await expect(page.locator('details').first().getByText('Who acts', { exact: true })).toBeVisible()
+        await expect(page.locator('[data-step-details]').first()).toHaveAttribute('open', '')
+        await expect(page.locator('[data-step-details]').first().getByText('Who acts', { exact: true })).toBeVisible()
         for (let index = 1; index < 6; index++) await summaries.nth(index).click()
         await expect(page.getByRole('link', { name: 'Official documentation', exact: true })).toHaveCount(6)
         await expectNoHorizontalOverflow(page)
@@ -144,7 +177,7 @@ test.describe('mock Apple Pay Direct browser journey', () => {
         await expect.poll(() => authorized.locator(`code[data-language=${language}] [data-syntax]`).count()).toBeGreaterThan(0)
       }
       await page.context().grantPermissions(['clipboard-read', 'clipboard-write'])
-      const safeResponse = await authorized.locator('code[data-language=json]').textContent()
+      const safeResponse = await authorized.getByRole('region', { name: 'Approve this payment in Wallet: safe response code', exact: true }).textContent()
       await authorized.getByRole('button', { name: 'Copy Approve this payment in Wallet: safe response', exact: true }).click()
       await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(safeResponse)
       await expect(page.locator('body')).not.toContainText('synthetic-only')

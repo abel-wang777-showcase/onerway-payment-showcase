@@ -16,6 +16,7 @@ const announcement = computed(() => {
     <h2 id="apple-pay-steps-title" class="text-balance text-xl font-semibold tracking-tight text-highlighted">How this payment works</h2>
     <p class="mt-2 max-w-prose text-pretty text-sm leading-relaxed text-toned">Follow the payment across your browser, Halden, Apple and Onerway. Recorded data stays separate from integration examples.</p>
     <p role="status" aria-live="polite" aria-atomic="true" class="sr-only">{{ announcement }}</p>
+    <PaymentApplePayFlow :steps="steps" />
     <ol class="mt-8 min-w-0">
       <PaymentApplePayStep v-for="(step, index) in steps" :key="step.id" :step="step" :index="index" />
     </ol>

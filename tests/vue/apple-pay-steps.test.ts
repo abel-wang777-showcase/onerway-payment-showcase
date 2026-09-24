@@ -50,7 +50,7 @@ function installClipboard() {
 describe('Apple Pay protocol timeline', () => {
   it('shows a compact evidence preview and separates recorded messages from synthetic examples', async () => {
     const wrapper = await mountSuspended(ApplePaySteps, { props: { steps: [step({ state: 'completed', evidence: evidence(), example: { request: '{"example":true}' } })] } })
-    const item = wrapper.get('li')
+    const item = wrapper.get('[data-apple-pay-step]')
     expect(item.text()).toContain('Apple Pay is eligible for this USD 5.00 order.')
     expect(item.get('dl').findAll('dt').map(node => node.text())).toEqual(['Amount', 'Country', 'Networks'])
     expect(item.get('[data-apple-pay-network="visa"]').getComponent({ name: 'UIcon' }).props('name')).toBe('i-simple-icons-visa')
@@ -72,7 +72,7 @@ describe('Apple Pay protocol timeline', () => {
 
   it('does not invent evidence for missing steps and labels restored data explicitly', async () => {
     const wrapper = await mountSuspended(ApplePaySteps, { props: { steps: [step(), step({ id: 'result', title: 'Confirm the order result', state: 'completed', evidence: evidence('stored') })] } })
-    const items = wrapper.findAll('li')
+    const items = wrapper.findAll('[data-apple-pay-step]')
     expect(items[0]!.text()).toContain('Not recorded')
     expect(items[0]!.findAll('pre')).toHaveLength(0)
     await items[0]!.get('summary').trigger('click')
@@ -86,46 +86,46 @@ describe('Apple Pay protocol timeline', () => {
 
   it('marks browser examples as JavaScript and message examples as JSON', async () => {
     const wrapper = await mountSuspended(ApplePaySteps, { props: { steps: [
-      step({ id: 'authorize', example: { response: 'session.onpaymentauthorized = handler' } }),
+      step({ id: 'authorize', example: { request: 'session.onpaymentauthorized = handler', response: '{"paymentData":{}}' } }),
       step({ id: 'submit', example: { request: '{"tokenInfo":"[synthetic]"}' } }),
     ] } })
-    expect(wrapper.findAll('code').map(node => node.attributes('data-language'))).toEqual(['js', 'json'])
+    expect(wrapper.findAll('[data-apple-pay-step] code').map(node => node.attributes('data-language'))).toEqual(['js', 'json', 'json'])
     wrapper.unmount()
   })
 
   it('auto-opens the active step without changing a user-selected collapsed state', async () => {
     const wrapper = await mountSuspended(ApplePaySteps, { props: { steps: [step()] } })
     await wrapper.setProps({ steps: [step({ state: 'active' })] })
-    expect(wrapper.get('details').attributes('open')).toBeDefined()
-    await wrapper.get('summary').trigger('click')
-    expect(wrapper.get('details').attributes('open')).toBeUndefined()
+    expect(wrapper.get('[data-step-details]').attributes('open')).toBeDefined()
+    await wrapper.get('[data-step-details] > summary').trigger('click')
+    expect(wrapper.get('[data-step-details]').attributes('open')).toBeUndefined()
     await wrapper.setProps({ steps: [step({ state: 'completed' })] })
     await wrapper.setProps({ steps: [step({ state: 'active', evidence: evidence() })] })
-    expect(wrapper.get('details').attributes('open')).toBeUndefined()
-    await wrapper.get('summary').trigger('click')
+    expect(wrapper.get('[data-step-details]').attributes('open')).toBeUndefined()
+    await wrapper.get('[data-step-details] > summary').trigger('click')
     await wrapper.setProps({ steps: [step({ state: 'completed', evidence: evidence() })] })
-    expect(wrapper.get('details').attributes('open')).toBeDefined()
+    expect(wrapper.get('[data-step-details]').attributes('open')).toBeDefined()
     wrapper.unmount()
   })
 
   it('keeps focused step content open when a payment event changes the active step', async () => {
     const wrapper = await mountSuspended(ApplePaySteps, { props: { steps: [step({ state: 'active', evidence: evidence() })] } })
-    await wrapper.get('[role="region"]').trigger('focusin')
+    await wrapper.get('[data-apple-pay-step] [role="region"]').trigger('focusin')
     await wrapper.setProps({ steps: [step({ state: 'completed', evidence: evidence() })] })
-    expect(wrapper.get('details').attributes('open')).toBeDefined()
+    expect(wrapper.get('[data-step-details]').attributes('open')).toBeDefined()
     wrapper.unmount()
   })
 
   it('leaves focus on the disclosure after the user closes it and another event arrives', async () => {
     const wrapper = await mountSuspended(ApplePaySteps, { attachTo: document.body, props: { steps: [step({ state: 'active', evidence: evidence() })] } })
-    const summary = wrapper.get('summary').element as HTMLElement
+    const summary = wrapper.get('[data-step-details] > summary').element as HTMLElement
     summary.focus()
-    await wrapper.get('summary').trigger('click')
-    expect(wrapper.get('details').attributes('open')).toBeUndefined()
+    await wrapper.get('[data-step-details] > summary').trigger('click')
+    expect(wrapper.get('[data-step-details]').attributes('open')).toBeUndefined()
     expect(document.activeElement).toBe(summary)
     await wrapper.setProps({ steps: [step({ state: 'completed', evidence: evidence() })] })
     await wrapper.setProps({ steps: [step({ state: 'active', evidence: evidence() })] })
-    expect(wrapper.get('details').attributes('open')).toBeUndefined()
+    expect(wrapper.get('[data-step-details]').attributes('open')).toBeUndefined()
     expect(document.activeElement).toBe(summary)
     wrapper.unmount()
   })

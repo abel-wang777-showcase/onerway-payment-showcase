@@ -77,6 +77,64 @@
   display: none;
 }
 
+@media (max-width: 39.999rem) {
+  .apple-pay-flow-edge > div {
+    grid-template-columns: minmax(0, 1fr);
+    justify-items: start;
+  }
+
+  .apple-pay-flow-arrow {
+    rotate: 90deg;
+  }
+
+  .apple-pay-flow-edge > div > :last-child {
+    text-align: start;
+  }
+}
+
+.apple-pay-flow-lane-origin {
+  position: absolute;
+  z-index: 1;
+  inset-inline-start: var(--flow-from);
+  top: 2.7rem;
+  width: 0.5rem;
+  height: 0.5rem;
+  border: 2px solid var(--ui-primary);
+  border-radius: 9999px;
+  background: var(--ui-bg);
+  translate: -50% -50%;
+}
+
+.apple-pay-flow-lane-line {
+  position: absolute;
+  z-index: 1;
+  inset-inline-start: var(--flow-left);
+  top: 2.7rem;
+  width: var(--flow-width);
+  height: 2px;
+  background: var(--ui-primary);
+}
+
+.apple-pay-flow-lane-line::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  width: 0;
+  height: 0;
+  border-block: 0.35rem solid transparent;
+  translate: 0 -50%;
+}
+
+[data-flow-lane-edge][data-direction="forward"] .apple-pay-flow-lane-line::after {
+  inset-inline-end: -1px;
+  border-inline-start: 0.5rem solid var(--ui-primary);
+}
+
+[data-flow-lane-edge][data-direction="reverse"] .apple-pay-flow-lane-line::after {
+  inset-inline-start: -1px;
+  border-inline-end: 0.5rem solid var(--ui-primary);
+}
+
 .apple-pay-code-token--kwd,
 .apple-pay-code-token--bool,
 .apple-pay-code-token--section {

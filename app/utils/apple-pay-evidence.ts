@@ -75,8 +75,56 @@ export function resultEvidence(value: DirectRecoveryResponse, source: ApplePayEv
 export const applePayExamples: Record<string, { request?: string, response?: string }> = {
   prepare: { response: json({ countryCode: 'US', currencyCode: 'USD', supportedNetworks: ['visa', 'masterCard'] }) },
   begin: { request: 'const session = new ApplePaySession(6, paymentRequest)\nsession.begin() // Call directly from the customer click' },
-  validate: { response: 'session.completeMerchantValidation(merchantSession)\n// The server obtains this session from Apple using mTLS.' },
-  authorize: { response: 'session.onpaymentauthorized = ({ payment }) => {\n  // Forward the complete payment.token; do not save it.\n}' },
-  submit: { request: json({ tokenInfo: JSON.stringify({ provider: 'ApplePay', tokenId: JSON.stringify({ paymentData: '[synthetic placeholder]', paymentMethod: '[synthetic placeholder]', transactionIdentifier: '[synthetic placeholder]' }) }) }) },
-  result: { response: json({ status: 'S', meaning: 'succeeded', source: 'query' }) },
+  validate: {
+    request: 'session.onvalidatemerchant = async ({ validationURL }) => {\n  const merchantSession = await merchantServer.validate(validationURL)\n  session.completeMerchantValidation(merchantSession)\n}\n// Illustrative only',
+    response: json({
+      epochTimestamp: '[epoch milliseconds]',
+      expiresAt: '[epoch milliseconds]',
+      merchantSessionIdentifier: '[session identifier omitted]',
+      nonce: '[nonce omitted]',
+      merchantIdentifier: '[merchant identifier omitted]',
+      domainName: 'shop.example',
+      displayName: 'Halden',
+      signature: '[signature omitted]',
+    }),
+  },
+  authorize: {
+    request: 'session.onpaymentauthorized = ({ payment }) => {\n  merchantServer.pay(payment.token)\n}\n// Illustrative only',
+    response: json({
+      paymentData: {
+        version: 'EC_v1',
+        data: '[encrypted payment data omitted]',
+        signature: '[signature omitted]',
+        header: {
+          ephemeralPublicKey: '[ephemeral public key omitted]',
+          publicKeyHash: '[public key hash omitted]',
+          transactionId: '[cryptographic transaction id omitted]',
+        },
+      },
+      paymentMethod: { displayName: '[card label omitted]', network: 'visa', type: 'credit' },
+      transactionIdentifier: '[wallet transaction identifier omitted]',
+    }),
+  },
+  submit: {
+    request: json({
+      tokenInfo: JSON.stringify({
+        provider: 'ApplePay',
+        tokenId: JSON.stringify({
+          paymentData: {
+            version: 'EC_v1',
+            data: '[encrypted payment data omitted]',
+            signature: '[signature omitted]',
+            header: {
+              ephemeralPublicKey: '[ephemeral public key omitted]',
+              publicKeyHash: '[public key hash omitted]',
+              transactionId: '[cryptographic transaction id omitted]',
+            },
+          },
+          paymentMethod: { displayName: '[card label omitted]', network: 'visa', type: 'credit' },
+          transactionIdentifier: '[wallet transaction identifier omitted]',
+        }),
+      }),
+    }),
+  },
+  result: { response: json({ trustedSources: ['synchronous response', 'matched query', 'verified webhook'], deliveryOrder: 'independent; no fixed order', sheetCompletion: 'separate from the saved order status' }) },
 }

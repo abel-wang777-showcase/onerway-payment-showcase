@@ -100,7 +100,7 @@ function preserveFocusedContent(event: FocusEvent): void {
             <h4 class="text-sm font-semibold tracking-tight text-highlighted">Synthetic example</h4>
             <p class="text-xs leading-relaxed text-toned">Illustrative values only. This example is not a message from your payment.</p>
             <PaymentApplePayMessage v-if="step.example.request" :label="`${step.title}: example request`" :value="step.example.request" :language="exampleLanguage" />
-            <PaymentApplePayMessage v-if="step.example.response" :label="`${step.title}: example response`" :value="step.example.response" :language="exampleLanguage" />
+            <PaymentApplePayMessage v-if="step.example.response" :label="`${step.title}: example response`" :value="step.example.response" language="json" />
           </section>
         </div>
       </details>
