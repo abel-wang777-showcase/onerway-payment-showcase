@@ -102,7 +102,7 @@ const isSandbox = computed(() =>
       <UContainer class="py-6">
         <p class="text-sm text-toned">
           {{ isDirect
-            ? 'Halden is a fictional merchant. Apple Pay authorization takes place in Wallet. This merchant server forwards the encrypted token to Onerway Sandbox without saving it.'
+            ? 'Halden is a fictional merchant. Authorization takes place with your wallet provider. In automatic mode, this merchant server forwards the encrypted token to Onerway Sandbox without saving it.'
             : isSandbox
             ? 'Halden is a fictional merchant. Payment details are entered on Onerway Sandbox pages or fields and never pass through this merchant server.'
             : 'Halden is a fictional merchant. This journey is simulated and does not collect payment data.' }}
