@@ -2,14 +2,20 @@
 import type { CreatePaymentIntentResponse } from '#shared/payment/sdk'
 
 const props = defineProps<{ orderId: string }>()
-const { session, steps, loading, checking, canPay, submitted, sheetOpen, sheetMessage, error, prepare, pay, verify } = useApplePay(props.orderId)
+const { session, steps, mode, manualCaptured, tokenDebug, tokenDebugUnavailable, loading, checking, canPay, submitted, sheetOpen, sheetMessage, error, prepare, pay, verify, clearToken, setMode } = useApplePay(props.orderId)
 const title = useTemplateRef<HTMLElement>('title')
 const restarting = shallowRef(false)
 const restartError = shallowRef<string | null>(null)
 let disposed = false
 const amount = computed(() => session.value ? formatMoney(session.value.order.amount) : 'USD 5.00')
+const modeItems = [
+  { label: 'Automatic payment', value: 'automatic', description: 'Authorize in Wallet to submit this Sandbox payment.' },
+  { label: 'Manual debugging', value: 'manual', description: 'Capture a token without submitting this order. Copy it to Apifox to call the Direct API.' },
+]
+const modeLocked = computed(() => loading.value || sheetOpen.value || submitted.value)
 const resultTitle = computed(() => {
   if (!session.value) return loading.value ? 'Preparing your order…' : 'This order could not be restored.'
+  if (manualCaptured.value && !submitted.value) return 'Token captured — payment not submitted.'
   switch (session.value?.attempt.status) {
     case 'succeeded': return 'Your order is paid.'
     case 'failed': return 'This payment failed.'
@@ -29,6 +35,10 @@ const references = computed(() => session.value ? [
   { label: 'Status source', value: session.value.attempt.statusSource ?? 'Not confirmed' },
   { label: 'Latest server status', value: [...session.value.events].reverse().find(event => ['server', 'query', 'webhook'].includes(event.source))?.rawStatus ?? 'Not returned' },
 ] : [])
+
+function selectMode(nextMode: unknown): void {
+  if (nextMode === 'automatic' || nextMode === 'manual') setMode(nextMode)
+}
 
 async function restart(): Promise<void> {
   if (restarting.value || !canRestart.value) return
@@ -72,7 +82,11 @@ onScopeDispose(() => {
         <section class="space-y-4 rounded-lg border border-default p-5 sm:p-6" aria-labelledby="apple-pay-order-title">
           <h2 id="apple-pay-order-title" class="text-lg font-semibold text-highlighted">{{ resultTitle }}</h2>
           <p v-if="submitted && !canRestart && session?.attempt.status !== 'succeeded'" class="text-sm leading-relaxed text-toned">Please do not pay again while this order is unconfirmed. Closing Apple Pay, leaving this page or a timeout does not cancel a payment already submitted.</p>
+          <p v-if="manualCaptured && !submitted" class="text-sm leading-relaxed text-toned">Copy the token below to Apifox and match this USD 5.00 order’s amount and currency. A call made in Apifox is separate from this Showcase order; check that call’s result in Apifox. This page’s order remains unsubmitted.</p>
           <p v-if="canRestart" class="text-sm leading-relaxed text-toned">The original result is preserved. Paying again creates a new order and requires fresh Apple Pay authorization.</p>
+          <UFormField label="After Wallet authorization" name="apple-pay-mode" :help="sheetOpen ? 'Close Wallet before changing mode.' : submitted ? 'The mode is locked after payment submission.' : undefined">
+            <URadioGroup :model-value="mode" :items="modeItems" :disabled="modeLocked" color="neutral" variant="list" :ui="{ item: 'min-h-11 touch-manipulation' }" @update:model-value="selectMode" />
+          </UFormField>
           <p role="status" aria-live="polite" class="text-sm leading-relaxed text-toned">{{ sheetMessage }}</p>
           <UAlert v-if="error || restartError" :description="error ?? restartError ?? ''" color="warning" variant="subtle" />
           <USkeleton v-if="loading" class="h-12 w-full rounded-sm" aria-label="Preparing Apple Pay" />
@@ -84,6 +98,7 @@ onScopeDispose(() => {
             <UButton to="/" label="Demo Hub" color="neutral" variant="link" class="min-h-11 touch-manipulation" />
           </div>
         </section>
+        <PaymentApplePayToken v-if="session" :token="tokenDebug" :unavailable="tokenDebugUnavailable" :manual="mode === 'manual'" :captured="manualCaptured" @clear="clearToken" />
         <PaymentApplePaySteps :steps="steps" />
       </div>
       <aside class="min-w-0 space-y-6 lg:sticky lg:top-24" aria-label="Order and test conditions">

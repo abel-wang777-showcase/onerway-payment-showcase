@@ -30,6 +30,7 @@
     }
   },
   "requestedItems": [
+    "foundation-copy-button",
     "geist-foundation"
   ],
   "items": {
@@ -41,6 +42,25 @@
         "app/assets/css/main.css",
         "app/config/foundation/nuxt.ts",
         "app/config/foundation/app.ts"
+      ]
+    },
+    "foundation-use-copy": {
+      "sourceSha": "81464cbcf82813181a49043c5437a25eb8e12d45",
+      "registryDependencies": [],
+      "packageDependencies": {},
+      "files": [
+        "app/composables/useCopy.ts"
+      ]
+    },
+    "foundation-copy-button": {
+      "sourceSha": "81464cbcf82813181a49043c5437a25eb8e12d45",
+      "registryDependencies": [
+        "geist-foundation",
+        "foundation-use-copy"
+      ],
+      "packageDependencies": {},
+      "files": [
+        "app/components/CopyButton.vue"
       ]
     }
   },
@@ -68,6 +88,22 @@
       "sourceSha": "81464cbcf82813181a49043c5437a25eb8e12d45",
       "sourceHash": "baca97fac9f6fd1b33d0469689c56e9b00d161774c500bdf4694f80a8abb2a5b",
       "targetHash": "baca97fac9f6fd1b33d0469689c56e9b00d161774c500bdf4694f80a8abb2a5b"
+    },
+    "app/composables/useCopy.ts": {
+      "item": "foundation-use-copy",
+      "source": "foundation/composables/useCopy.ts",
+      "target": "app/composables/useCopy.ts",
+      "sourceSha": "81464cbcf82813181a49043c5437a25eb8e12d45",
+      "sourceHash": "ab78ffeb8f646736b568daf02f60f037102206f7ccabbf4f098d7672b4d6c182",
+      "targetHash": "ab78ffeb8f646736b568daf02f60f037102206f7ccabbf4f098d7672b4d6c182"
+    },
+    "app/components/CopyButton.vue": {
+      "item": "foundation-copy-button",
+      "source": "foundation/components/CopyButton.vue",
+      "target": "app/components/CopyButton.vue",
+      "sourceSha": "81464cbcf82813181a49043c5437a25eb8e12d45",
+      "sourceHash": "0b8d119e35586efe2a41da8b83f6cc9407e668bb74eeaa1bfdbbae567e954792",
+      "targetHash": "0b8d119e35586efe2a41da8b83f6cc9407e668bb74eeaa1bfdbbae567e954792"
     }
   }
 }

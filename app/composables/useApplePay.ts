@@ -1,6 +1,7 @@
 import type { ApplePayStep, PrepareApplePayResponse, PayApplePayResponse, ValidateApplePayResponse, DirectRecoveryResponse } from '#shared/payment/apple-pay'
 import { isTerminalStatus } from '#shared/payment/sdk'
 import { browserData } from '~/utils/browser.client'
+import { canDisplayApplePayToken } from '~/utils/apple-pay-token'
 import { applePayExamples, preparationEvidence, validationEvidence, authorizationEvidence, submissionEvidence, resultEvidence } from '~/utils/apple-pay-evidence'
 import {
   APPLE_PAY_SESSION_VERSION,
@@ -29,16 +30,22 @@ function preparationMessage(error: unknown): string {
   }
 }
 
-function initialSteps(): ApplePayStep[] {
+export type ApplePayMode = 'automatic' | 'manual'
+
+function initialSteps(mode: ApplePayMode = 'automatic'): ApplePayStep[] {
   const definitions: ApplePayStep[] = [
     { id: 'prepare', title: 'Prepare this payment', actor: 'Merchant server → Onerway', input: 'The server-owned USD 5.00 order and DIRECT payment method context.', output: 'Eligible country and card networks, then browser capability detection.', failure: 'If configuration or device support is unavailable, no payment is submitted.', documentation: 'https://developers.onerway.com/zh/payments/api-reference/endpoints/list-available-payment-methods', state: 'waiting' },
     { id: 'begin', title: 'Open the Apple Pay sheet', actor: 'Customer → browser / Apple', input: 'A customer click and the prepared payment request.', output: 'ApplePaySession.begin() opens the sheet or supported payment code flow.', failure: 'Closing the sheet does not prove that an Onerway transaction was cancelled.', documentation: 'https://developer.apple.com/documentation/applepayontheweb/applepaysession/begin', state: 'waiting' },
     { id: 'validate', title: 'Let Apple verify this website', actor: 'Browser → merchant server → Apple', input: 'Apple’s validation URL; the server supplies the Merchant Identity certificate and registered domain.', output: 'A single-use merchant session completes merchant validation. Only a safe field summary is shown; session credentials are never shown or saved.', failure: 'A rejected URL, identity or session stops this sheet before authorization.', documentation: 'https://developer.apple.com/documentation/applepayontheweb/requesting-an-apple-pay-payment-session', state: 'waiting' },
-    { id: 'authorize', title: 'Approve this payment in Wallet', actor: 'Customer → Apple → browser', input: 'A Sandbox Wallet card and customer approval.', output: 'Apple returns the full encrypted payment token, held only while forwarding it to the server.', failure: 'Wallet cancellation is a sheet outcome; it is not a payment failure. Ordinary Wallet cards are not this Sandbox test path.', documentation: 'https://developer.apple.com/documentation/applepayontheweb/applepaysession/onpaymentauthorized', state: 'waiting' },
+    { id: 'authorize', title: 'Approve this payment in Wallet', actor: 'Customer → Apple → browser', input: 'A Sandbox Wallet card and customer approval.', output: 'Apple returns the full encrypted payment token. The selected mode determines whether Showcase submits it.', failure: 'Wallet cancellation is a sheet outcome; it is not a payment failure. Ordinary Wallet cards are not this Sandbox test path.', documentation: 'https://developer.apple.com/documentation/applepayontheweb/applepaysession/onpaymentauthorized', state: 'waiting' },
     { id: 'submit', title: 'Send the payment to Onerway', actor: 'Merchant server → Onerway', input: 'One persisted merchant transaction ID and tokenInfo with provider ApplePay and the serialized full token.', output: 'Onerway decrypts the token and processes CARD / DIRECT / SALE. No token is retained.', failure: 'A network error or a nonterminal response leaves the result unconfirmed. The same transaction is never resubmitted.', documentation: 'https://developers.onerway.com/zh/payments/api-reference/endpoints/direct-create-transaction', state: 'waiting' },
     { id: 'result', title: 'Confirm the order result', actor: 'Onerway → merchant server → browser', input: 'This transaction’s status from its response, a matched query, or a verified Webhook.', output: 'S means paid, F means failed, N means cancelled. The order can recover after the sheet closes.', failure: 'After 25 seconds from authorization the sheet is closed as unsuccessful, while an unknown order stays pending. A late result can still confirm payment.', documentation: 'https://developers.onerway.com/zh/payments/api-reference/webhooks/payment-result', state: 'waiting' },
   ]
-  return definitions.map(item => ({ ...item, example: applePayExamples[item.id] }))
+  return definitions.map((item) => {
+    if (mode === 'manual' && item.id === 'submit') return { ...item, actor: 'You → Apifox / your API tool → Onerway', input: 'The captured token and a matching USD 5.00 Direct API request.', output: 'Showcase does not submit a payment. Copy the token and submit it yourself in your API tool.', failure: 'Switching modes never submits a captured token.', example: applePayExamples[item.id] }
+    if (mode === 'manual' && item.id === 'result') return { ...item, input: 'The response and verified result of your external API request.', output: 'Check the transaction in your API tool. This Showcase order does not track that separate transaction.', failure: 'Wallet authorization and closing the sheet do not confirm payment.', example: applePayExamples[item.id] }
+    return { ...item, example: applePayExamples[item.id] }
+  })
 }
 
 export function useApplePay(orderId: string) {
@@ -52,9 +59,15 @@ export function useApplePay(orderId: string) {
   const submitted = shallowRef(false)
   const error = shallowRef<string | null>(null)
   const sheetMessage = shallowRef('Preparing Apple Pay…')
+  const tokenDebug = shallowRef<string | null>(null)
+  const tokenDebugUnavailable = shallowRef(false)
+  const mode = shallowRef<ApplePayMode>('automatic')
+  const manualCaptured = shallowRef(false)
+  let pageHidden = false
   let disposed = false
   let appleSession: AppleSession | null = null
   let completion: ReturnType<typeof createApplePayCompletion> | null = null
+  let pendingSubmission: { abort: AbortController, sent: boolean } | null = null
   let recoveryFlight: Promise<void> | null = null
   let preparing = false
   let pollTimer: ReturnType<typeof setTimeout> | undefined
@@ -63,6 +76,59 @@ export function useApplePay(orderId: string) {
 
   const canPay = computed(() => !loading.value && eligible.value && prepared.value?.canAuthorize === true && !sheetOpen.value && !submitted.value)
   const terminal = computed(() => session.value !== null && isTerminalStatus(session.value.attempt.status))
+
+  function clearToken(): void {
+    tokenDebug.value = null
+    tokenDebugUnavailable.value = false
+  }
+
+  function setMode(value: ApplePayMode): void {
+    if ((value !== 'automatic' && value !== 'manual') || loading.value || sheetOpen.value || submitted.value || mode.value === value) return
+    mode.value = value
+    clearToken()
+    manualCaptured.value = false
+    const preparation = steps.value.find(item => item.id === 'prepare')
+    steps.value = initialSteps(value).map(item => item.id === 'prepare' && preparation ? preparation : item)
+    sheetMessage.value = value === 'manual'
+      ? 'Manual debugging: authorize in Wallet to capture a token. No payment will be submitted by Showcase.'
+      : 'Automatic payment: Wallet authorization will submit this order to Onerway.'
+  }
+
+  function snapshotToken(value: Record<string, unknown>): Record<string, unknown> {
+    const serialized = JSON.stringify(value)
+    const token = JSON.parse(serialized) as Record<string, unknown>
+    tokenDebugUnavailable.value = !canDisplayApplePayToken(token, serialized)
+    tokenDebug.value = tokenDebugUnavailable.value ? null : serialized
+    return token
+  }
+
+  function cancelPendingSubmission(): void {
+    if (!pendingSubmission || pendingSubmission.sent) return
+    pendingSubmission.abort.abort()
+    pendingSubmission = null
+    submitted.value = Boolean(session.value?.submitted || terminal.value)
+  }
+
+  function leavePage(): void {
+    pageHidden = true
+    clearToken()
+    manualCaptured.value = false
+    cancelPendingSubmission()
+    const active = completion?.active
+    completion?.cancel()
+    if (active) {
+      try { appleSession?.abort() } catch { /* Already closed. */ }
+    }
+    if (appleSession) {
+      appleSession.onpaymentauthorized = null
+      appleSession.onvalidatemerchant = null
+      appleSession.oncancel = null
+    }
+    appleSession = null
+    completion = null
+    sheetOpen.value = false
+  }
+  onMounted(() => { window.addEventListener('pagehide', leavePage) })
 
   function step(id: string, state: ApplePayStep['state'], evidence?: ApplePayStep['evidence']): void {
     if (state === 'active') stepStarted.set(id, performance.now())
@@ -177,13 +243,18 @@ export function useApplePay(orderId: string) {
     const ApplePay = appleSessionConstructor()
     const current = prepared.value
     if (!canPay.value || !ApplePay || !current) return
+    pageHidden = false
+    clearToken()
+    manualCaptured.value = false
+    const selectedMode = mode.value
     error.value = null
     sheetOpen.value = true
     stepStarted.clear()
-    steps.value = initialSteps().map(item => item.id === 'prepare' ? { ...item, state: 'completed', evidence: preparationEvidence(current, eligible.value) } : item)
+    steps.value = initialSteps(selectedMode).map(item => item.id === 'prepare' ? { ...item, state: 'completed', evidence: preparationEvidence(current, eligible.value) } : item)
     step('begin', 'active')
     try {
       const sheet = new ApplePay(APPLE_PAY_SESSION_VERSION, current.paymentRequest)
+      let manuallyClosed = false
       appleSession = sheet
       const controller = createApplePayCompletion(sheet, () => {
         sheetOpen.value = false
@@ -193,16 +264,17 @@ export function useApplePay(orderId: string) {
       })
       completion = controller
       sheet.onvalidatemerchant = async (event) => {
+        if (disposed || pageHidden || appleSession !== sheet || !controller.active) return
         step('validate', 'active', validationEvidence(event.validationURL, current.merchantIdentifier, window.location.hostname))
         try {
           const response = await $fetch<ValidateApplePayResponse>('/api/payment/apple-pay/validate', { method: 'POST', body: { orderId, attemptId: current.attempt.id, validationURL: event.validationURL }, retry: 0, timeout: 15_000 })
-          if (disposed || !controller.active) return
+          if (disposed || pageHidden || appleSession !== sheet || !controller.active) return
           sheet.completeMerchantValidation(response.merchantSession)
           step('validate', 'completed', validationEvidence(event.validationURL, current.merchantIdentifier, window.location.hostname, response.merchantSession))
           step('authorize', 'active')
         }
         catch {
-          if (disposed || !controller.active) return
+          if (disposed || pageHidden || appleSession !== sheet || !controller.active) return
           controller.cancel()
           try { sheet.abort() } catch { /* Already closed. */ }
           sheetOpen.value = false
@@ -211,7 +283,31 @@ export function useApplePay(orderId: string) {
         }
       }
       sheet.onpaymentauthorized = async (event) => {
-        if (disposed || !controller.authorize(ApplePay.STATUS_FAILURE) || submitted.value) return
+        if (disposed || pageHidden || appleSession !== sheet || !controller.authorize(ApplePay.STATUS_FAILURE) || submitted.value) return
+        if (selectedMode === 'manual') {
+          try {
+            snapshotToken(event.payment.token)
+            manualCaptured.value = tokenDebug.value !== null
+            const evidence = authorizationEvidence(event.payment.token)
+            step('authorize', 'completed', { ...evidence, summary: 'Manual authorization received. Showcase did not submit this token.', fields: [...evidence.fields, { label: 'Submission', value: 'Not submitted' }] })
+            sheetMessage.value = manualCaptured.value
+              ? 'Token captured. No payment was submitted. Show and copy the token below to use it in Apifox.'
+              : 'No payment was submitted. This token cannot be shown safely; start a new Wallet authorization.'
+            if (!manualCaptured.value) error.value = 'The token contains unsupported fields or exceeds the debugging limit. No payment was submitted.'
+          }
+          catch {
+            clearToken()
+            sheetMessage.value = 'Token capture stopped. No payment was submitted.'
+            error.value = 'The token could not be captured. No payment was submitted; start a new Wallet authorization.'
+          }
+          // End the authorized sheet without claiming a payment result. Ignore
+          // its late cancellation callback, which must not erase the snapshot.
+          manuallyClosed = true
+          controller.cancel()
+          try { sheet.abort() } catch { /* The native sheet may already be closed. */ }
+          sheetOpen.value = false
+          return
+        }
         if (!navigator.locks) {
           controller.finish(ApplePay.STATUS_FAILURE)
           sheetOpen.value = false
@@ -223,20 +319,25 @@ export function useApplePay(orderId: string) {
         step('authorize', 'completed', authorizationEvidence(event.payment.token))
         step('submit', 'active', { summary: 'Waiting for exclusive access before sending this payment.', source: 'live', fields: [{ label: 'Submission', value: 'Not sent yet' }] })
         sheetMessage.value = 'Authorization received. Confirming this order with Onerway…'
+        const submission = { abort: new AbortController(), sent: false }
+        pendingSubmission = submission
         try {
-          const response = await navigator.locks.request('onerway-payment-intent', { mode: 'exclusive' }, () => {
+          // Snapshot once so debugging and the eventual submission use identical JSON.
+          const token = snapshotToken(event.payment.token)
+          const response = await navigator.locks.request('onerway-payment-intent', { mode: 'exclusive', signal: submission.abort.signal }, () => {
             // The original authorization budget includes lock contention. Never
             // submit an expired or cancelled sheet after another tab releases it.
-            if (disposed || !controller.active) return null
+            if (disposed || pageHidden || !controller.active) return null
+            submission.sent = true
             step('submit', 'active', submissionEvidence(current))
             return $fetch<PayApplePayResponse>('/api/payment/apple-pay/pay', {
               method: 'POST',
-              body: { orderId, attemptId: current.attempt.id, token: event.payment.token, browser: browserData() },
+              body: { orderId, attemptId: current.attempt.id, token, browser: browserData() },
               retry: 0,
               timeout: 30_000,
             })
           })
-          if (disposed) return
+          if (disposed || (!submission.sent && appleSession !== sheet)) return
           if (!response) {
             submitted.value = Boolean(session.value?.submitted)
             step('submit', 'interrupted')
@@ -248,14 +349,20 @@ export function useApplePay(orderId: string) {
           accept(response, 'live')
         }
         catch {
-          if (disposed || terminal.value) return
+          if (disposed || terminal.value || (!submission.sent && submission.abort.signal.aborted)) return
           step('submit', 'interrupted')
           step('result', 'active')
           error.value = 'The payment response was not confirmed. Check this order; its token will not be resubmitted.'
         }
+        finally {
+          if (pendingSubmission === submission) pendingSubmission = null
+        }
         if (!disposed && !terminal.value) void verify().then(scheduleRecovery)
       }
       sheet.oncancel = () => {
+        if (disposed || pageHidden || appleSession !== sheet || manuallyClosed) return
+        clearToken()
+        cancelPendingSubmission()
         controller.cancel()
         sheetOpen.value = false
         sheetMessage.value = submitted.value ? 'Apple Pay closed. The order result still needs confirmation.' : 'Apple Pay closed before payment was submitted.'
@@ -280,6 +387,10 @@ export function useApplePay(orderId: string) {
 
   onScopeDispose(() => {
     disposed = true
+    clearToken()
+    manualCaptured.value = false
+    cancelPendingSubmission()
+    if (import.meta.client) window.removeEventListener('pagehide', leavePage)
     clearTimeout(pollTimer)
     const active = completion?.active
     completion?.cancel()
@@ -294,5 +405,5 @@ export function useApplePay(orderId: string) {
     appleSession = null
   })
 
-  return { session: readonly(session), steps: readonly(steps), loading: readonly(loading), checking: readonly(checking), canPay, terminal, submitted: readonly(submitted), sheetOpen: readonly(sheetOpen), sheetMessage: readonly(sheetMessage), error: readonly(error), prepare, pay, verify }
+  return { session: readonly(session), steps: readonly(steps), mode: readonly(mode), manualCaptured: readonly(manualCaptured), setMode, tokenDebug: readonly(tokenDebug), tokenDebugUnavailable: readonly(tokenDebugUnavailable), loading: readonly(loading), checking: readonly(checking), canPay, terminal, submitted: readonly(submitted), sheetOpen: readonly(sheetOpen), sheetMessage: readonly(sheetMessage), error: readonly(error), prepare, pay, verify, clearToken }
 }

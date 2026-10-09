@@ -29,7 +29,7 @@ function installClipboard() {
   const originalPermissions = Object.getOwnPropertyDescriptor(window.navigator, 'permissions')
   const write = vi.fn().mockResolvedValue(undefined)
   const items: Array<Record<string, unknown>> = []
-  Object.defineProperty(window.navigator, 'clipboard', { configurable: true, value: { write } })
+  Object.defineProperty(window.navigator, 'clipboard', { configurable: true, value: { write, writeText: write } })
   Object.defineProperty(window.navigator, 'permissions', {
     configurable: true,
     value: { query: vi.fn().mockResolvedValue(Object.assign(new EventTarget(), { state: 'granted' })) },
@@ -136,7 +136,7 @@ describe('Apple Pay protocol timeline', () => {
     await wrapper.get('button[aria-label="Copy Check payment availability: safe request"]').trigger('click')
     await flushPromises()
     expect(clipboard.write).toHaveBeenCalledOnce()
-    expect(clipboard.items[0]?.['text/plain']).toBe(evidence().request)
+    expect(clipboard.write).toHaveBeenCalledWith(evidence().request)
     expect(wrapper.findAll('[role="status"]').some(node => node.text().includes('"amount"'))).toBe(false)
     wrapper.unmount()
     clipboard.restore()

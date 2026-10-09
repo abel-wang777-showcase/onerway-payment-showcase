@@ -1,4 +1,4 @@
-import { mountSuspended } from '@nuxt/test-utils/runtime'
+import { mockNuxtImport, mountSuspended } from '@nuxt/test-utils/runtime'
 import { flushPromises } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import ApplePayMessage from '../../app/components/payment/ApplePayMessage.vue'
@@ -9,6 +9,10 @@ const highlight = vi.hoisted(() => ({
   failedValue: undefined as string | undefined,
   tokenize: vi.fn(),
 }))
+const toast = vi.hoisted(() => ({ add: vi.fn() }))
+const restoreClipboard: Array<() => void> = []
+
+mockNuxtImport('useToast', () => () => toast)
 
 vi.mock('@speed-highlight/core', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@speed-highlight/core')>()
@@ -25,30 +29,23 @@ beforeEach(() => {
   highlight.gate = undefined
   highlight.failedValue = undefined
   highlight.tokenize.mockClear()
+  toast.add.mockClear()
 })
-afterEach(() => { vi.unstubAllGlobals() })
+afterEach(() => {
+  restoreClipboard.splice(0).forEach(restore => restore())
+  vi.unstubAllGlobals()
+  vi.restoreAllMocks()
+})
 
 function installClipboard() {
   const originalClipboard = Object.getOwnPropertyDescriptor(window.navigator, 'clipboard')
-  const originalPermissions = Object.getOwnPropertyDescriptor(window.navigator, 'permissions')
-  const write = vi.fn().mockResolvedValue(undefined)
-  const items: Array<Record<string, unknown>> = []
-  Object.defineProperty(window.navigator, 'clipboard', { configurable: true, value: { write } })
-  Object.defineProperty(window.navigator, 'permissions', {
-    configurable: true,
-    value: { query: vi.fn().mockResolvedValue(Object.assign(new EventTarget(), { state: 'granted' })) },
+  const writeText = vi.fn().mockResolvedValue(undefined)
+  Object.defineProperty(window.navigator, 'clipboard', { configurable: true, value: { writeText } })
+  restoreClipboard.push(() => {
+    if (originalClipboard) Object.defineProperty(window.navigator, 'clipboard', originalClipboard)
+    else Reflect.deleteProperty(window.navigator, 'clipboard')
   })
-  vi.stubGlobal('ClipboardItem', function (value: Record<string, unknown>) { items.push(value) })
-  return {
-    items,
-    write,
-    restore() {
-      if (originalClipboard) Object.defineProperty(window.navigator, 'clipboard', originalClipboard)
-      else Reflect.deleteProperty(window.navigator, 'clipboard')
-      if (originalPermissions) Object.defineProperty(window.navigator, 'permissions', originalPermissions)
-      else Reflect.deleteProperty(window.navigator, 'permissions')
-    },
-  }
+  return { writeText }
 }
 
 describe('Apple Pay safe message', () => {
@@ -72,17 +69,66 @@ describe('Apple Pay safe message', () => {
   })
 
   it('copies the unchanged source value after highlighting', async () => {
-    const value = '{"safe":true}'
+    const value = '  {\n  "safe": true,\n  "text": "<script>escaped</script>"\n}\n'
     const clipboard = installClipboard()
-    const wrapper = await mountSuspended(ApplePayMessage, { props: { label: 'Safe response', value } })
+    const wrapper = await mountSuspended(ApplePayMessage, {
+      attachTo: document.body,
+      props: { label: 'Safe response', value },
+    })
     await flushPromises()
 
-    await wrapper.get('button[aria-label="Copy Safe response"]').trigger('click')
+    const button = wrapper.get('button[aria-label="Copy Safe response"]')
+    button.element.focus()
+    await button.trigger('click')
     await flushPromises()
-    expect(clipboard.write).toHaveBeenCalledOnce()
-    expect(clipboard.items[0]?.['text/plain']).toBe(value)
+    expect(clipboard.writeText).toHaveBeenCalledExactlyOnceWith(value)
+    expect(wrapper.get('code').element.textContent).toBe(value)
+    expect(button.attributes('aria-label')).toBe('Safe response copied to clipboard')
+    expect(button.get('[data-slot="leadingIcon"]').classes()).toContain('i-lucide:check')
+    expect(document.activeElement).toBe(button.element)
+    expect(toast.add).toHaveBeenCalledWith(expect.objectContaining({ color: 'success' }))
+    expect(toast.add.mock.calls.flatMap(([payload]) => Object.values(payload))).not.toContain(value)
+    expect(wrapper.get('[role="status"]').text()).not.toContain(value)
     wrapper.unmount()
-    clipboard.restore()
+  })
+
+  it('keeps a labelled copy icon and visible focus without a tooltip wrapper', async () => {
+    const warn = vi.spyOn(console, 'warn')
+    const wrapper = await mountSuspended(ApplePayMessage, { props: { label: 'Safe request', value: '{}' } })
+    const button = wrapper.get('button[aria-label="Copy Safe request"]')
+
+    expect(button.get('[data-slot="leadingIcon"]').classes()).toContain('i-lucide:copy')
+    expect(button.get('[data-slot="leadingIcon"]').attributes('aria-hidden')).toBe('true')
+    expect(button.classes().some(name => name.startsWith('focus-visible:'))).toBe(true)
+    expect(button.attributes('aria-describedby')).toBeUndefined()
+    expect(wrapper.find('[role="tooltip"]').exists()).toBe(false)
+    expect(warn.mock.calls.flat().join(' ')).not.toMatch(/failed to resolve component|extraneous non-props attributes|icon.*not found/i)
+    wrapper.unmount()
+  })
+
+  it('reports a failed clipboard write without showing a copied state', async () => {
+    const value = '{"safe":true}'
+    const clipboard = installClipboard()
+    clipboard.writeText.mockRejectedValueOnce(new Error('Clipboard unavailable'))
+    const originalExecCommand = Object.getOwnPropertyDescriptor(document, 'execCommand')
+    const execCommand = vi.fn().mockReturnValue(false)
+    Object.defineProperty(document, 'execCommand', { configurable: true, value: execCommand })
+    restoreClipboard.push(() => {
+      if (originalExecCommand) Object.defineProperty(document, 'execCommand', originalExecCommand)
+      else Reflect.deleteProperty(document, 'execCommand')
+    })
+    const wrapper = await mountSuspended(ApplePayMessage, { props: { label: 'Safe response', value } })
+
+    const button = wrapper.get('button[aria-label="Copy Safe response"]')
+    await button.trigger('click')
+    await flushPromises()
+    expect(execCommand).toHaveBeenCalledWith('copy')
+    expect(button.attributes('aria-label')).toBe('Copy Safe response')
+    expect(button.get('[data-slot="leadingIcon"]').classes()).toContain('i-lucide:copy')
+    expect(toast.add).toHaveBeenCalledWith(expect.objectContaining({ color: 'error' }))
+    expect(toast.add.mock.calls.flatMap(([payload]) => Object.values(payload))).not.toContain(value)
+    expect(document.querySelector('textarea')).toBeNull()
+    wrapper.unmount()
   })
 
   it('keeps the newest value and language when an older tokenization finishes late', async () => {
