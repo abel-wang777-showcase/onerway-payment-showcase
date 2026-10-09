@@ -50,6 +50,51 @@ async function installMock(page: Page) {
 }
 
 test.describe('Google Pay Direct with synthetic provider boundary', () => {
+  for (const width of [320, 1440]) {
+    test(`explains protocol stages without creating payments at ${width}px`, async ({ page }, testInfo) => {
+      await page.setViewportSize({ width, height: 1000 })
+      await page.emulateMedia({ colorScheme: width === 1440 ? 'dark' : 'light', reducedMotion: 'reduce' })
+      const mock = await installMock(page)
+      await gotoHydrated(page, '/halden/direct/order-google')
+      const flow = page.locator('[data-google-pay-flow]')
+      await expect(flow.getByRole('heading', { name: 'Google Pay protocol map' })).toBeVisible()
+      for (const stage of ['prepare', 'ready', 'authorize', 'submit', 'result', 'cancel']) {
+        const button = flow.locator(`[data-flow-step="${stage}"]`)
+        await button.focus()
+        await button.press('Enter')
+        await expect(button).toHaveAttribute('aria-pressed', 'true')
+        await expect(flow.locator(`[data-flow-panel="${stage}"]`)).toBeVisible()
+        await expectNoHorizontalOverflow(page)
+      }
+      await flow.locator('[data-flow-step="submit"]').click()
+      await flow.getByRole('button', { name: 'Server example', exact: true }).click()
+      await expect(flow.locator('[data-flow-code-panel="server"]')).toContainText('GooglePay')
+      await expect(flow.locator('[data-flow-code-panel="server"]')).toContainText('tokenId')
+      await flow.getByRole('button', { name: 'Follow live events', exact: true }).click()
+      await expect(flow.locator('[data-flow-step="ready"]')).toHaveAttribute('aria-pressed', 'true')
+      await expect(flow.locator('[data-flow-step="ready"]')).toBeFocused()
+      const preparation = page.locator('[data-google-pay-step="prepare"]')
+      await preparation.locator('summary').click()
+      await expect(preparation.getByRole('heading', { name: 'How to integrate' })).toBeVisible()
+      await expect(preparation.getByRole('link', { name: 'Official documentation' })).toBeVisible()
+      await expect(preparation).toContainText('PAN_ONLY')
+      await page.getByRole('radio', { name: 'Manual debugging', exact: true }).click()
+      await page.getByRole('button', { name: 'Pay with Google Pay', exact: true }).click()
+      const authorization = page.locator('[data-google-pay-step="authorize"]')
+      await expect(authorization).toHaveAttribute('data-state', 'completed')
+      await expect(page.locator('[data-google-pay-step="submit"]')).toHaveAttribute('data-state', 'waiting')
+      await expect(page.locator('[data-google-pay-step="result"]')).toHaveAttribute('data-state', 'waiting')
+      await authorization.locator('summary').click()
+      await expect(authorization.getByRole('heading', { name: 'How to integrate' })).toBeVisible()
+      expect(await authorization.textContent()).not.toContain('synthetic-signature')
+      expect(mock.calls.filter(path => path.endsWith('/pay'))).toHaveLength(0)
+      expect(mock.violations).toEqual([])
+      await expectNoHorizontalOverflow(page)
+      await flow.scrollIntoViewIfNeeded()
+      await page.screenshot({ path: testInfo.outputPath(`google-protocol-${width}.png`), fullPage: true })
+    })
+  }
+
   for (const width of [320, 390, 834, 1440]) {
     test(`manual capture and four copy formats at ${width}px`, async ({ page }, testInfo) => {
       await page.setViewportSize({ width, height: 1000 })

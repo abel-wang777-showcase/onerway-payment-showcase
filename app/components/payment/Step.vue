@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import type { ApplePayStep } from '#shared/payment/apple-pay'
+import type { PaymentStep } from '#shared/payment/protocol'
 
-const props = defineProps<{ step: ApplePayStep, index: number }>()
+const props = withDefaults(defineProps<{ step: PaymentStep, index: number, wallet?: 'apple-pay' | 'google-pay' }>(), { wallet: 'apple-pay' })
 const details = useTemplateRef<HTMLDetailsElement>('details')
 const manualChoice = shallowRef<boolean | null>(null)
 const keepOpenForFocus = shallowRef(false)
@@ -27,7 +27,7 @@ const duration = computed(() => {
   const value = props.step.evidence?.durationMs
   return value !== undefined && Number.isFinite(value) && value >= 0 ? `${new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 }).format(value)} ms` : null
 })
-const exampleLanguage = computed(() => ['begin', 'validate', 'authorize'].includes(props.step.id) ? 'js' as const : 'json' as const)
+const exampleLanguage = computed(() => props.step.example?.language ?? (['begin', 'validate', 'authorize'].includes(props.step.id) ? 'js' as const : 'json' as const))
 
 function toggle(): void { manualChoice.value = !isOpen.value }
 function preserveFocusedContent(event: FocusEvent): void {
@@ -36,7 +36,7 @@ function preserveFocusedContent(event: FocusEvent): void {
 </script>
 
 <template>
-  <li class="apple-pay-timeline-step min-w-0" :data-apple-pay-step="step.id" :data-state="step.state" :aria-current="step.state === 'active' ? 'step' : undefined">
+  <li class="apple-pay-timeline-step min-w-0" :data-apple-pay-step="wallet === 'apple-pay' ? step.id : undefined" :data-google-pay-step="wallet === 'google-pay' ? step.id : undefined" :data-state="step.state" :aria-current="step.state === 'active' ? 'step' : undefined">
     <span class="apple-pay-timeline-marker flex size-8 items-center justify-center rounded-full border bg-default text-sm font-medium tabular-nums text-highlighted" :class="step.state === 'active' ? 'border-primary' : 'border-default'" aria-hidden="true">{{ index + 1 }}</span>
     <div class="min-w-0">
       <div class="flex min-w-0 flex-wrap items-start justify-between gap-x-3 gap-y-1">

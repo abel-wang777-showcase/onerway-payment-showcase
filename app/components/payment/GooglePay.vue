@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { DirectRecoveryResponse } from '#shared/payment/apple-pay'
 const props = defineProps<{ orderId: string, initial?: DirectRecoveryResponse }>()
-const { session, prepared, submissionRequest, manualCaptured, tokenDebugUnavailable, mode, loading, checking, sheetOpen, submitted, tokenDebug, error, message, phase, canPay, setMode, initialize, prepare, verify, clearToken, createButton } = useGooglePay(props.orderId, props.initial)
+const { session, steps, manualCaptured, tokenDebugUnavailable, mode, loading, checking, sheetOpen, submitted, tokenDebug, error, message, canPay, setMode, initialize, prepare, verify, clearToken, createButton } = useGooglePay(props.orderId, props.initial)
 const restarting = shallowRef(false)
 const restartError = shallowRef<string | null>(null)
 let disposed = false
@@ -14,7 +14,6 @@ const references = computed(() => session.value ? [
   ['Status', session.value.attempt.status], ['Source', session.value.attempt.statusSource ?? 'Not confirmed'],
   ['Latest server status', [...session.value.events].reverse().find(event => ['server', 'query', 'webhook'].includes(event.source))?.rawStatus ?? 'Not returned'],
 ] : [])
-const safeRequest = computed(() => prepared.value ? JSON.stringify({ environment: 'TEST', countryCode: prepared.value.config.countryCode, currencyCode: prepared.value.config.currencyCode, totalPrice: prepared.value.config.totalPrice, allowedCardNetworks: prepared.value.config.allowedCardNetworks, allowedAuthMethods: prepared.value.config.allowedAuthMethods, tokenizationType: 'PAYMENT_GATEWAY' }, null, 2) : '')
 async function restart() {
   if (restarting.value || !canRestart.value) return
   restarting.value = true
@@ -78,18 +77,7 @@ onMounted(initialize)
           </div>
         </section>
         <PaymentGooglePayToken :token="tokenDebug" :unavailable="tokenDebugUnavailable" :manual="mode === 'manual'" :captured="manualCaptured" @clear="clearToken" />
-        <section class="space-y-4 rounded-lg border border-default p-5 sm:p-6" aria-labelledby="google-pay-flow-title">
-          <h2 id="google-pay-flow-title" class="text-lg font-semibold text-highlighted">How this payment works</h2>
-          <ol class="space-y-4 text-sm leading-relaxed text-toned">
-            <li :aria-current="phase === 'prepare' ? 'step' : undefined" :class="phase === 'prepare' ? 'font-medium text-highlighted' : undefined"><strong class="text-highlighted">1. Prepare.</strong> Halden checks the order and Sandbox merchant configuration; Google checks browser readiness.</li>
-            <li :aria-current="phase === 'authorize' ? 'step' : undefined" :class="phase === 'authorize' ? 'font-medium text-highlighted' : undefined"><strong class="text-highlighted">2. Authorize.</strong> The official Google Pay button opens the payment sheet. Google returns an encrypted gateway token.</li>
-            <li :aria-current="phase === 'submit' ? 'step' : undefined" :class="phase === 'submit' ? 'font-medium text-highlighted' : undefined"><strong class="text-highlighted">3. {{ mode === 'manual' ? 'Capture.' : 'Submit.' }}</strong> {{ mode === 'manual' ? 'Copy the token to your own API tool. This order stays unsubmitted and does not track external calls.' : 'Halden sends the original token once to Onerway as GooglePay / CARD / DIRECT / SALE.' }}</li>
-            <li :aria-current="phase === 'result' ? 'step' : undefined" :class="phase === 'result' ? 'font-medium text-highlighted' : undefined"><strong class="text-highlighted">4. Confirm.</strong> {{ mode === 'manual' ? 'Read your external transaction result in Apifox.' : 'Only server responses, queries and verified notifications confirm this order. Wallet authorization alone does not mean paid.' }}</li>
-          </ol>
-          <p class="text-xs text-muted">Current page phase: {{ phase }}. Restored orders do not replay earlier browser steps.</p>
-          <details v-if="submissionRequest" class="text-sm"><summary class="cursor-pointer touch-manipulation py-3 focus-visible:outline-primary">Submitted Direct API request</summary><PaymentMessage label="Safe Direct API request" :value="submissionRequest" /></details>
-          <details v-if="safeRequest" class="text-sm"><summary class="cursor-pointer touch-manipulation py-3 focus-visible:outline-primary">Prepared Google Pay request</summary><PaymentMessage label="Safe Google Pay configuration" :value="safeRequest" /></details>
-        </section>
+        <PaymentGooglePaySteps :steps="steps" :mode="mode" />
       </div>
       <aside class="min-w-0 space-y-6 lg:sticky lg:top-24" aria-label="Order and test conditions">
         <section class="rounded-lg border border-default p-5 sm:p-6">

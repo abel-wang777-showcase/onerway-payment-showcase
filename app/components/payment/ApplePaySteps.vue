@@ -18,7 +18,7 @@ const announcement = computed(() => {
     <p role="status" aria-live="polite" aria-atomic="true" class="sr-only">{{ announcement }}</p>
     <PaymentApplePayFlow :steps="steps" />
     <ol class="mt-8 min-w-0">
-      <PaymentApplePayStep v-for="(step, index) in steps" :key="step.id" :step="step" :index="index" />
+      <PaymentStep v-for="(step, index) in steps" :key="step.id" :step="step" :index="index" />
     </ol>
   </section>
 </template>
