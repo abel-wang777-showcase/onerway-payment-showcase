@@ -42,7 +42,7 @@ Demo Hub 是公开演示入口，不是第二套后台。它负责：
 | 维度 | 当前或规划值 |
 | --- | --- |
 | Scene | E-commerce；后续 Game、Live、AI |
-| Integration | Web JS SDK、Checkout、Direct API（Apple Pay） |
+| Integration | Web JS SDK、Checkout、Direct API（Apple Pay、Google Pay） |
 | Payment Method | Card、APM、Google Pay、Apple Pay；Checkout 的 All 表示由客户在托管页选择 |
 
 能力状态：
@@ -62,6 +62,7 @@ Demo Hub 是公开演示入口，不是第二套后台。它负责：
 - `E-commerce × Checkout × All` 为 Conditional，并提供 USD 5.00 普通支付与 USD 50.00 3DS 的 Sandbox 一次性支付入口。`All` 是支付方式选择策略，不代表最终使用某张卡或钱包；具体可选项由商户启用、国家、币种和设备条件决定。USD 50.00 真实 3DS 已获用户人工验收确认，返回恢复、超时取消与通知链路已有独立 Sandbox 证据，执行范围见 Issue #8；这些证据不代表所有设备或具体支付方式均已验证，不宣称任一具体收银台支付方式为 Available。同一入口另有 Card 初始订阅选项，沿用固定 USD 5.00 计划且保持 Conditional，范围及证据边界见 Issue #10 章节。
 - `E-commerce × Checkout × Card` 提供 USD 5.00 预授权旅程及全额请款或撤销操作，保持 Conditional；当前实现、查询补偿与真实 Sandbox 验收边界见 Issue #11 章节。
 - `E-commerce × Direct API × Apple Pay` 提供 USD 5.00 / SALE 条件性 Sandbox 入口；自有 Merchant ID 验证、Onerway 代解密。实际 Direct 设备支付验收仍待 Issue #17，不能沿用 SDK Apple Pay 证据。
+- `E-commerce × Direct API × Google Pay` 提供 US / USD 5.00 / SALE 的 Conditional Sandbox 入口，Google 环境固定 TEST；网关测试 token 的可处理性与托管补充认证仍按本节下述条件记录，不因可取得 token 而标为 Available。
 - Checkout 的其余具体支付方式直达、其余 Direct API 方式、其余 APM 和 Game / Live / AI 场景当前为 Planned。
 - Unavailable 保留为明确证实不支持时使用的状态；当前不为凑齐 UI 而制造无证据的 Unavailable 组合。
 
@@ -161,6 +162,18 @@ Demo Hub 继续提供两条同结果、可重复的本地模拟旅程。模拟�
 - 支付结果仅展示已关联的同步响应、Query、已验签 Webhook 状态与来源；三者是无固定到达顺序的独立观察路径。`completePayment` 仅完成 Apple 面板展示，不替代订单状态。钱包回调的网络只标为钱包提供，actualWallet/fundingNetwork 的已核验归因仍来自严格匹配的服务端 Query。合成示例使用明确占位符和独立标签，不伪装为本次实测报文。
 
 真实 iPhone 授权、商户验证 mTLS、Onerway 代解密、同笔 query / Webhook / persistence 的黄金路径须分别在 Issue #17 登记。自动化与本地浏览器通过只证明对应测试范围；本实现合并与正式发布须另获本次授权。
+
+### Google Pay Direct API（Issue #20）
+
+固定旅程为 `google-pay-direct`：E-commerce、US / USD 5.00、SALE，商品 `HL-GOOGLE-005`。Google `PaymentsClient` 固定 `TEST`，现有 Onerway profile 仍为 Sandbox，两者是独立环境维度。使用官方 `pay.js`、`createButton()`、`isReadyToPay()` 和用户点击时的 `loadPaymentData()`；采用 `PAYMENT_GATEWAY`，由 Onerway 处理 gateway token，不做商户自解密。
+
+- 服务端用订单固定的 US / USD 5.00 / WEB / DIRECT 调用 `consultPaymentMethod`，只接受唯一 GooglePay 记录并白名单投影 `gatewayName`、`gatewayMerchantId`、`countryCode`、`subCardTypes`。认证方式按当前 Onerway [Google Pay 指南](https://developers.onerway.com/zh/payments/online-payments/payment-methods/google-pay)同时声明 `PAN_ONLY` 与 `CRYPTOGRAM_3DS`，不从网络列表推导实际 token 的认证方式。生产锁定和唯一 profile 解析保持不变，不把 credential 或整个响应放入 public profile。
+- `paymentMethodData.tokenizationData.token` 已是字符串，原样作为 `tokenId`，wire `tokenInfo = JSON.stringify({ provider: 'GooglePay', tokenId: token })`。不解析后重建支付 token，不对 `tokenId` 多做一次 stringify。金额、币种、客户、回跳地址和通知地址由服务器控制；请求保持 CARD / DIRECT / SALE，复用权限、creation claim、独占 Web Lock、签名、Query 与验签 Webhook。
+- 默认自动支付；手动调试在打开 Google 面板前选择，只捕获本次 token，不提交、不认领、不轮询、不改变 Order/Attempt 状态。外部 Apifox 请求及其结果不自动关联本页订单。切换模式、重新授权均清除旧副本，自动模式必须取得新 token。取消与 `loadPaymentData()` 的返回只描述钱包交互，不构成付款成功或 Provider 取消。
+- **2026-10-09 用户明确授权**将完整 token 调试例外扩展到 Google Pay，仅限 Sandbox、用户主动展开、当前页面内存。只提取 token 字符串，不保存完整 PaymentData。JSON 视图仅在可解析为 JSON 对象时展示；否则明确为非对象字符串，不伪造对象。Stringify 提供带外层引号及转义的 JSON 字符串值；Apifox 提供对象形式 `tokenInfo`，交由既有签名脚本序列化外层一次；Direct API 提供已经序列化的 wire 字符串。四种用途必须还原同一个原始 token。清空、新授权、模式切换、离页（含 BFCache）及销毁时清除；刷新不恢复。不进入日志、数据库、PaymentEvent、浏览器存储、URL、公开 profile 或既有 Technical details。剪贴板由用户管理；自动提交后的 token 不得再次用于扣款。该例外不开放 PAN/CVV、Production 或重复提交，测试与截图仅用合成数据。
+- Direct 状态遵循同笔交易 `status`，不采用 SDK 的 `paymentStatus`。Google `R + actionType=RedirectURL` 可在 `transactionId/paymentId=null` 时要求补充 CVC，以既有 `merchantTxnId` 关联原单；不因缺少 Provider ID 而重新下单。商户不采集 CVC，优先由 Onerway 托管交互承接。当前尚无核实过的 Sandbox 跳转主机/路径证据，未确认的 URL 不透传、不自动跳转；保留 `requires_action` 并提示当前无法继续托管认证，仍可核验原单。该限制影响需要补充认证的完整支付旅程，不妨碍已明确标注的取 token 调试。
+- 已提交或结果未知时只查询原单，不重发 token；终态重试创建新的 Order/Attempt/merchantTxnId 与新授权。Direct 恢复根据持久化的钱包方式选择页面，不依赖 URL query 推断钱包。刷新不能恢复旧 token 或伪造先前 Google 面板步骤。
+- Google 普通 TEST、Mock test cards 或面板返回 token 不证明 Onerway 已解密或可扣款。Onerway [测试说明](https://developers.onerway.com/zh/payments/get-started/testing)指向测试卡群组；Google [测试卡套件](https://developers.google.com/pay/api/web/guides/resources/test-card-suite)未将 `ronghan` 列入 gateway test cards 支持表，未列网关使用 mock 卡时可能被处理方拒绝。因此浏览器 mock、Google 取 token、Onerway 提交/拒绝、Query、Webhook 与用户人工确认分别记录；预期拒绝可验证约定调试链路，不等同于付款成功或未观察到的解密证据。
 
 ### Checkout 接入决定与验收边界（2026-09-14）
 
@@ -382,7 +395,7 @@ Sandbox profile 由 `ONERWAY_SHOWCASE_ORIGIN` 固定公开 canonical origin；�
 - 本机浏览器与 Nuxt 同机运行时，可通过未提交的 `ONERWAY_SANDBOX_TRANSACTION_IP` 提供真实持卡人公网 IP，避免把 loopback 发送给 Sandbox 风控；该覆盖只属于 Sandbox 服务端 profile，且不改变用于请求限流的 runtime 客户端身份。部署环境应省略它：Vercel 使用平台覆盖的 `x-vercel-forwarded-for`，其他 runtime 使用 H3 提供的可信地址；最终地址必须通过 IP 格式校验。
 - 浏览器只通过 `/api/profile` 得到显式白名单投影后的 profile、环境、交易策略、canonical Showcase origin 与当前 SDK script URL；canonical origin 和 SDK URL 不是 credential。
 - PAN / CVV 即使来自 Sandbox，也不得持久化、进入日志、分析埋点或错误上报。
-- 保存和展示请求、响应、Webhook、Technical details 前统一脱敏；仅第 5 节明确授权的 Sandbox 当前访问 token 调试区允许用户主动展示/复制完整标准 Apple token，仍禁止持久化。
+- 保存和展示请求、响应、Webhook、Technical details 前统一脱敏；仅第 5 节明确授权的 Sandbox 当前访问 token 调试区允许用户主动展示/复制完整标准 Apple token 或 Google gateway token，仍禁止持久化。
 - Onerway `production` profile 默认锁定。基础域名已确认不代表允许交易；启用实际交易仍需单独确认凭据、回调验签、审计、错误处理和显式开关。
 - 所有 Vercel scope 都不得配置或开放 Onerway Production 实际交易；Vercel Production target 也必须继续服从该锁定。
 - Onerway `production` profile 锁定时仍可运行明确标记为 Simulation 的纯本地旅程，因为它不产生上游请求或交易；页面必须同时保留 Simulation 与 Transactions locked 提示。
@@ -419,7 +432,7 @@ Sandbox 基础域名为 `https://sandbox-acq.onerway.com`，create 与 query 请
 - 当前只消费 `geist-foundation`，设计基础来源 revision 记录为 `81464cbcf82813181a49043c5437a25eb8e12d45`；本次 registry metadata 更新未改变三个受管 foundation 文件的内容。
 - Geist Sans / Mono 字体资产由同版本、精确锁定的 `@fontsource` 包在应用构建中自托管；`@nuxt/fonts` 不再通过 Google provider 解析这两个 family，构建和浏览器运行时都不得依赖 Google Fonts URL。字体导入只属于 consumer-owned `app.css`，不修改 registry 受管的 foundation CSS。
 - M0 先交付 Web JS SDK，不包含 iOS / Android SDK。
-- 本期 Direct API 仅处理 Apple Pay 加密 token，不采集 PAN / CVV；merchant session 仅瞬时转交，token 可依第 5 节授权在本次 Sandbox 页面内存调试，不记录或持久化。
+- 本期 Direct API 仅处理 Apple Pay 与 Google Pay 的钱包 token，不采集 PAN / CVV；merchant session 仅瞬时转交，token 可依第 5 节授权在本次 Sandbox 页面内存调试，不记录或持久化。
 - Delete card token 接口的 `id` 是 binding record id，不是 `tokenId`。
 - Checkout、Web JS SDK、Direct API 共用统一支付模型。
 - 客户可以从 Demo Hub 自助选择已开放场景，不依赖内部 Console。

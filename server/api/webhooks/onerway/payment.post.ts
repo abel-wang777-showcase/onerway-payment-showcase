@@ -1,4 +1,4 @@
-import { isDirectApplePayAttempt } from '../../../../shared/payment/attempt'
+import { isDirectWalletAttempt } from '../../../../shared/payment/attempt'
 import {
   isSubscriptionWebhookProcessed,
   getPaymentTimeline,
@@ -64,7 +64,7 @@ export default defineEventHandler(async (event): Promise<string> => {
       const timeline = typeof body.merchantTxnId === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(body.merchantTxnId)
         ? await getPaymentTimeline(body.merchantTxnId) : null
       const direct = Boolean(timeline && timeline.attempt.merchantTxnId === body.merchantTxnId
-        && isDirectApplePayAttempt(timeline.attempt))
+        && isDirectWalletAttempt(timeline.attempt))
       const fact = readPaymentWebhook(body, profile.secret, profile.merchantNo, signatureHeader, direct)
       await recordWebhookEvent(fact)
       transactionId = fact.transactionId

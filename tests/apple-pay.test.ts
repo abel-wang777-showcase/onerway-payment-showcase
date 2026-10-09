@@ -88,6 +88,9 @@ describe('Apple Pay Direct gateway', () => {
     const result = readApplePayCreateResponse({ respCode: '20000', data: { ...row, status: 'R', redirectUrl: 'https://example.com', token } }, 'merchant', query)
     expect(result).toEqual({ merchantTxnId: query.merchantTxnId, transactionId: 'txn', rawStatus: 'R', status: 'requires_action' })
   })
+  it('does not accept the Google-only no-ID action response', () => {
+    expect(() => readApplePayCreateResponse({ respCode: '20000', data: { merchantTxnId: query.merchantTxnId, status: 'R', actionType: 'RedirectURL', transactionId: null, paymentId: null } }, 'merchant', query)).toThrow('APPLE_PAY_RESPONSE_INVALID')
+  })
   it('recovers without paymentId and requires a unique exact merchant transaction', () => {
     expect(readApplePayQueryResponse(response([row]), 'merchant', query).status).toBe('succeeded')
     expect(() => readApplePayQueryResponse(response([]), 'merchant', query)).toThrow('PAYMENT_QUERY_NOT_FOUND')

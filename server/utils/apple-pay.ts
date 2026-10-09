@@ -1,20 +1,16 @@
+import { DirectGatewayError, buildDirectPayload, directRequestEvidence, postDirect, queryDirectPayment, readDirectCreateResponse, readDirectQueryResponse, type DirectQueryContext, type DirectTransaction } from './direct-gateway'
 import { request } from 'node:https'
 import type { PaymentStatus } from '../../shared/payment/attempt'
 import type { Order } from '../../shared/payment/order'
 import { mapDirectTransactionStatus } from '../../shared/payment/merge'
-import { buildCreationQueryPayload, signPayload, type CreateContext } from './gateway'
+import type { CreateContext } from './gateway'
 import type { ServerProfile } from './profile'
 
 type SandboxProfile = Extract<ServerProfile, { profile: 'sandbox' }>
 type Payload = Readonly<Record<string, unknown>>
 
-export class ApplePayError extends Error {
-  constructor(readonly code: string) {
-    super(code)
-    this.name = 'ApplePayError'
-  }
-}
-function fail(code: string): never { throw new ApplePayError(code) }
+
+function fail(code: string): never { throw new DirectGatewayError(code) }
 function record(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
@@ -96,7 +92,7 @@ export async function validateApplePayMerchant(profile: SandboxProfile, validati
         if (res.statusCode !== 200) {
           validationDiagnostic('http-rejected', res.statusCode)
           res.destroy()
-          reject(new ApplePayError('APPLE_PAY_VALIDATION_FAILED'))
+          reject(new DirectGatewayError('APPLE_PAY_VALIDATION_FAILED'))
           return
         }
         let bytes = 0
@@ -106,13 +102,13 @@ export async function validateApplePayMerchant(profile: SandboxProfile, validati
           if (bytes > 65_536) {
             validationDiagnostic('response-too-large')
             res.destroy()
-            reject(new ApplePayError('APPLE_PAY_VALIDATION_FAILED'))
+            reject(new DirectGatewayError('APPLE_PAY_VALIDATION_FAILED'))
           }
           else chunks.push(chunk)
         })
         res.on('error', (error) => {
           validationDiagnostic(transportDiagnostic(error))
-          reject(new ApplePayError('APPLE_PAY_VALIDATION_FAILED'))
+          reject(new DirectGatewayError('APPLE_PAY_VALIDATION_FAILED'))
         })
         res.on('end', () => {
           try {
@@ -122,34 +118,21 @@ export async function validateApplePayMerchant(profile: SandboxProfile, validati
           }
           catch {
             validationDiagnostic('response-invalid')
-            reject(new ApplePayError('APPLE_PAY_VALIDATION_FAILED'))
+            reject(new DirectGatewayError('APPLE_PAY_VALIDATION_FAILED'))
           }
         })
       })
       req.on('error', (error) => {
         validationDiagnostic(transportDiagnostic(error))
-        reject(new ApplePayError('APPLE_PAY_VALIDATION_FAILED'))
+        reject(new DirectGatewayError('APPLE_PAY_VALIDATION_FAILED'))
       })
       req.end(body)
     })
   }
   catch (error) {
-    if (!(error instanceof ApplePayError)) validationDiagnostic(transportDiagnostic(error))
+    if (!(error instanceof DirectGatewayError)) validationDiagnostic(transportDiagnostic(error))
     return fail('APPLE_PAY_VALIDATION_FAILED')
   }
-}
-
-async function post(profile: SandboxProfile, path: string, payload: Payload): Promise<unknown> {
-  sandbox(profile)
-  try {
-    const response = await fetch(`${profile.apiBaseUrl}${path}`, {
-      method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(signPayload(payload, profile.secret)), redirect: 'error', signal: AbortSignal.timeout(12_000),
-    })
-    if (!response.ok) fail('APPLE_PAY_NETWORK_ERROR')
-    return await response.json()
-  }
-  catch { return fail('APPLE_PAY_NETWORK_ERROR') }
 }
 
 export interface ApplePayConfiguration {
@@ -176,15 +159,15 @@ export function readApplePayConfiguration(value: unknown, profile: SandboxProfil
 export async function consultApplePay(profile: SandboxProfile, order: Order): Promise<ApplePayConfiguration> {
   sandbox(profile)
   if (!profile.applePay) fail('APPLE_PAY_NOT_CONFIGURED')
-  return readApplePayConfiguration(await post(profile, '/v1/txn/consultPaymentMethod', {
+  return readApplePayConfiguration(await postDirect(profile, '/v1/txn/consultPaymentMethod', {
     merchantNo: profile.merchantNo, appId: profile.appId, country: 'US', orderAmount: orderAmount(order), orderCurrency: 'USD', paymentMode: 'WEB', subProductType: 'DIRECT',
-  }), profile, order)
+  }, 'ApplePay'), profile, order)
 }
 
 export type ApplePayCreateContext = CreateContext & { readonly token: unknown }
 export function buildApplePayPayload(profile: SandboxProfile, context: ApplePayCreateContext): Payload {
   sandbox(profile)
-  const amount = orderAmount(context.order)
+  orderAmount(context.order)
   const token = context.token
   if (!record(token) || !record(token.paymentData) || !record(token.paymentMethod)
     || typeof token.transactionIdentifier !== 'string' || !token.transactionIdentifier
@@ -193,105 +176,22 @@ export function buildApplePayPayload(profile: SandboxProfile, context: ApplePayC
   try { tokenId = JSON.stringify(token) }
   catch { return fail('APPLE_PAY_REQUEST_INVALID') }
   if (Buffer.byteLength(tokenId) > 65_536) fail('APPLE_PAY_REQUEST_INVALID')
-  const address = { country: 'US', email: 'customer@test.com', province: 'CA' }
-  return {
-    merchantNo: profile.merchantNo, merchantTxnId: context.merchantTxnId, merchantCustId: context.merchantCustId,
-    orderAmount: amount, orderCurrency: 'USD', productType: 'CARD', subProductType: 'DIRECT', txnType: 'SALE', paymentMode: 'WEB',
-    billingInformation: address, shippingInformation: address,
-    // Already serialized: signPayload must not recursively encode the full token.
-    tokenInfo: JSON.stringify({ provider: 'ApplePay', tokenId }),
-    txnOrderMsg: {
-      appId: profile.appId, returnUrl: context.returnUrl, notifyUrl: profile.notifyUrl,
-      products: [{ currency: 'USD', name: context.order.item.name, num: String(context.order.item.quantity), price: (context.order.item.unitAmount.minor / 100).toFixed(2) }],
-      transactionIp: context.transactionIp, javaEnabled: context.javaEnabled, colorDepth: context.colorDepth,
-      screenHeight: context.screenHeight, screenWidth: context.screenWidth, timeZoneOffset: context.timeZoneOffset,
-      accept: context.accept, userAgent: context.userAgent, contentLength: context.contentLength, language: context.language,
-    },
-  }
+  return buildDirectPayload(profile, context, JSON.stringify({ provider: 'ApplePay', tokenId }), 'ApplePay')
 }
 
-export interface ApplePayQueryContext {
-  readonly appId?: string
-  readonly merchantTxnId: string
-  readonly amountMinor: number
-  readonly currency: string
-  readonly transactionId?: string
-  readonly paymentId?: string
+export type ApplePayQueryContext = DirectQueryContext
+export type ApplePayTransaction = DirectTransaction & { readonly transactionId: string, readonly actualWallet?: 'apple-pay' }
+export function readApplePayCreateResponse(value: unknown, merchantNo: string, context: DirectQueryContext): ApplePayTransaction {
+  return readDirectCreateResponse(value, merchantNo, context, 'ApplePay') as ApplePayTransaction
 }
-export interface ApplePayTransaction {
-  readonly merchantTxnId: string
-  readonly transactionId: string
-  readonly paymentId?: string
-  readonly rawStatus: string
-  readonly status: PaymentStatus
-  readonly actualWallet?: 'apple-pay'
-  readonly fundingNetwork?: string
+export function readApplePayQueryResponse(value: unknown, merchantNo: string, context: DirectQueryContext): ApplePayTransaction {
+  return readDirectQueryResponse(value, merchantNo, context, 'ApplePay') as ApplePayTransaction
 }
-function readTransaction(data: unknown, merchantNo: string, context: ApplePayQueryContext, query: boolean): ApplePayTransaction {
-  if (!record(data) || !id(context.merchantTxnId) || context.amountMinor !== 500 || context.currency !== 'USD'
-    || !id(data.transactionId) || (context.transactionId !== undefined && data.transactionId !== context.transactionId)
-    || (query ? data.merchantTxnId !== context.merchantTxnId : data.merchantTxnId !== undefined && data.merchantTxnId !== context.merchantTxnId)
-    || (data.merchantNo !== undefined && data.merchantNo !== merchantNo)
-    || (data.paymentId != null && !id(data.paymentId))
-    || (context.paymentId !== undefined && data.paymentId != null && data.paymentId !== context.paymentId)
-    || ((query || data.txnType !== undefined) && data.txnType !== 'SALE')
-    || (data.productType !== undefined && data.productType !== 'CARD')
-    || (data.appId != null && data.appId !== context.appId)
-    || ((query || data.subProductType !== undefined) && data.subProductType !== 'DIRECT')
-    || ((query || data.orderAmount !== undefined) && (typeof data.orderAmount !== 'string' || !/^5(?:\.0{1,2})?$/.test(data.orderAmount)))
-    || ((query || data.orderCurrency !== undefined) && data.orderCurrency !== context.currency)) fail('APPLE_PAY_RESPONSE_INVALID')
-  const status = mapApplePayStatus(data.status)
-  const network = typeof data.paymentMethod === 'string' ? data.paymentMethod.toUpperCase() : undefined
-  const attributed = data.walletTypeName === 'ApplePay' && network && /^[A-Z0-9][A-Z0-9 _-]{0,31}$/.test(network)
-  return { merchantTxnId: context.merchantTxnId, transactionId: data.transactionId, ...(id(data.paymentId) ? { paymentId: data.paymentId } : {}), rawStatus: data.status as string, status,
-    ...(attributed ? { actualWallet: 'apple-pay' as const, fundingNetwork: network } : {}) }
-}
-export function readApplePayCreateResponse(value: unknown, merchantNo: string, context: ApplePayQueryContext): ApplePayTransaction {
-  return readTransaction(responseData(value), merchantNo, context, false)
-}
-export function readApplePayQueryResponse(value: unknown, merchantNo: string, context: ApplePayQueryContext): ApplePayTransaction {
-  const data = responseData(value)
-  if (!record(data) || !Array.isArray(data.content) || Number(data.totalPages ?? 1) > 1) fail('APPLE_PAY_RESPONSE_INVALID')
-  const matches = data.content.filter(item => record(item) && item.merchantTxnId === context.merchantTxnId)
-  if (!matches.length) fail('PAYMENT_QUERY_NOT_FOUND')
-  if (matches.length !== 1) fail('APPLE_PAY_RESPONSE_INVALID')
-  return readTransaction(matches[0], merchantNo, context, true)
-}
-function maskedRequestIdentifier(value: unknown): string {
-  if (typeof value !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(value) || value.length <= 8) return '[identifier omitted]'
-  return `${value.slice(0, 4)}…${value.slice(-4)}`
-}
-
-/** An ephemeral projection of the exact outgoing payload, never a raw request. */
-function applePayRequestEvidence(payload: Payload): { readonly request: string } {
-  const orderMessage = record(payload.txnOrderMsg) ? payload.txnOrderMsg : {}
-  return {
-    request: JSON.stringify({
-      method: 'POST',
-      path: '/v1/txn/doTransaction',
-      body: {
-        merchantNo: maskedRequestIdentifier(payload.merchantNo),
-        merchantTxnId: maskedRequestIdentifier(payload.merchantTxnId),
-        merchantCustId: maskedRequestIdentifier(payload.merchantCustId),
-        orderAmount: payload.orderAmount,
-        orderCurrency: payload.orderCurrency,
-        productType: payload.productType,
-        subProductType: payload.subProductType,
-        txnType: payload.txnType,
-        paymentMode: payload.paymentMode,
-        txnOrderMsg: JSON.stringify({ appId: maskedRequestIdentifier(orderMessage.appId) }),
-        tokenInfo: JSON.stringify({ provider: 'ApplePay', tokenId: '[encrypted payment token omitted]' }),
-        sign: '[signature omitted]',
-      },
-    }, null, 2),
-  }
-}
-
 export async function createApplePayPayment(profile: SandboxProfile, context: ApplePayCreateContext): Promise<ApplePayTransaction & { readonly evidence: { readonly request: string } }> {
   const payload = buildApplePayPayload(profile, context)
-  const result = readApplePayCreateResponse(await post(profile, '/v1/txn/doTransaction', payload), profile.merchantNo, { merchantTxnId: context.merchantTxnId, amountMinor: context.order.amount.minor, currency: context.order.amount.currency, appId: profile.appId })
-  return { ...result, evidence: applePayRequestEvidence(payload) }
+  const result = readApplePayCreateResponse(await postDirect(profile, '/v1/txn/doTransaction', payload, 'ApplePay'), profile.merchantNo, { merchantTxnId: context.merchantTxnId, amountMinor: context.order.amount.minor, currency: context.order.amount.currency, appId: profile.appId })
+  return { ...result, evidence: directRequestEvidence(payload, 'ApplePay') }
 }
-export async function queryApplePayPayment(profile: SandboxProfile, context: ApplePayQueryContext): Promise<ApplePayTransaction> {
-  return readApplePayQueryResponse(await post(profile, '/v1/txn/list', buildCreationQueryPayload(profile, context.merchantTxnId)), profile.merchantNo, { ...context, appId: profile.appId })
+export async function queryApplePayPayment(profile: SandboxProfile, context: DirectQueryContext): Promise<ApplePayTransaction> {
+  return await queryDirectPayment(profile, context, 'ApplePay') as ApplePayTransaction
 }

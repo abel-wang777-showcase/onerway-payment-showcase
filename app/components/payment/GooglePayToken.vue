@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { applePayTokenFormats } from '~/utils/apple-pay-token'
+import { googlePayTokenFormats } from '~/utils/google-pay-token'
 
 const props = withDefaults(defineProps<{ token: string | null, unavailable: boolean, manual?: boolean, captured?: boolean }>(), {
   manual: false,
@@ -7,7 +7,7 @@ const props = withDefaults(defineProps<{ token: string | null, unavailable: bool
 })
 const emit = defineEmits<{ clear: [] }>()
 const revealed = shallowRef(false)
-const formats = computed(() => revealed.value && props.token ? applePayTokenFormats(props.token) : null)
+const formats = computed(() => revealed.value && props.token ? googlePayTokenFormats(props.token) : null)
 const emptyMessage = computed(() => {
   if (props.unavailable) return props.manual
     ? 'This token contains fields that cannot be shown safely. No payment was submitted by this page.'
@@ -27,9 +27,9 @@ watch(() => props.token, () => { revealed.value = false })
 </script>
 
 <template>
-  <section class="min-w-0 space-y-4 rounded-lg border border-default p-5 sm:p-6" aria-labelledby="apple-pay-token-title" data-apple-pay-token>
+  <section class="min-w-0 space-y-4 rounded-lg border border-default p-5 sm:p-6" aria-labelledby="google-pay-token-title" data-google-pay-token>
     <div class="flex flex-wrap items-center justify-between gap-3">
-      <h2 id="apple-pay-token-title" class="text-lg font-semibold tracking-tight text-highlighted">Apple Pay token</h2>
+      <h2 id="google-pay-token-title" class="text-lg font-semibold tracking-tight text-highlighted">Google Pay token</h2>
       <UBadge label="Sandbox · This visit" color="neutral" variant="outline" />
     </div>
     <p class="max-w-prose text-sm leading-relaxed text-toned">Inspect the encrypted token from this Wallet authorization. It stays in this page’s memory and is cleared when you refresh or leave.</p>
@@ -38,23 +38,24 @@ watch(() => props.token, () => { revealed.value = false })
     <p v-if="!token" role="status" class="text-sm leading-relaxed text-toned">{{ emptyMessage }}</p>
     <template v-else>
       <div class="flex flex-wrap gap-2">
-        <UButton :label="revealed ? 'Hide token' : 'Show token'" color="neutral" variant="outline" :aria-expanded="revealed" aria-controls="apple-pay-token-content" class="touch-manipulation" @click="revealed = !revealed" />
+        <UButton :label="revealed ? 'Hide token' : 'Show token'" color="neutral" variant="outline" :aria-expanded="revealed" aria-controls="google-pay-token-content" class="touch-manipulation" @click="revealed = !revealed" />
         <UButton label="Clear token" color="neutral" variant="ghost" class="touch-manipulation" @click="emit('clear')" />
       </div>
-      <div id="apple-pay-token-content" class="min-w-0">
+      <div id="google-pay-token-content" class="min-w-0">
         <div v-if="formats" class="space-y-4">
           <p class="text-xs leading-relaxed text-toned">{{ manual ? 'Use this token only for the USD 5.00 Sandbox call you make in Apifox. Check that call’s result there; this page’s order remains unsubmitted.' : 'This token is part of the automatic payment submission. Inspect it for Sandbox debugging; do not submit it again in Apifox.' }} Copied text remains in your clipboard.</p>
           <UTabs :items="tabs" default-value="json" color="neutral" variant="link" size="sm" :ui="{ list: 'flex-wrap', trigger: 'flex-none touch-manipulation', content: 'min-w-0' }">
             <template #json>
               <div class="min-w-0 space-y-3">
-                <p class="text-xs leading-relaxed text-toned">The complete <code class="font-mono" translate="no">event.payment.token</code> as a readable JSON object.</p>
-                <PaymentMessage label="Apple Pay token: JSON object" :value="formats.json" />
+                <p class="text-xs leading-relaxed text-toned">The complete <code class="font-mono" translate="no">paymentMethodData.tokenizationData.token</code> as a readable JSON object.</p>
+                <PaymentMessage v-if="formats.json" label="Google Pay token: JSON object" :value="formats.json" />
+                <p v-else class="text-sm text-toned">This gateway token is an opaque string, not a JSON object. Use Stringify to preserve it.</p>
               </div>
             </template>
             <template #stringify>
               <div class="min-w-0 space-y-3">
                 <p class="text-xs leading-relaxed text-toned">A quoted and escaped JSON string value. In Apifox’s JSON request body, replace the entire <code class="font-mono" translate="no">tokenInfo.tokenId</code> value, including its quotes. Do not add quotes or stringify it again. Use the Apifox tab to copy the complete <code class="font-mono" translate="no">tokenInfo</code> object.</p>
-                <PaymentMessage label="Apple Pay token: stringify" :value="formats.stringify" />
+                <PaymentMessage label="Google Pay token: stringify" :value="formats.stringify" />
               </div>
             </template>
             <template #apifox>

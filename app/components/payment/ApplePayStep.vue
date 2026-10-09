@@ -80,8 +80,8 @@ function preserveFocusedContent(event: FocusEvent): void {
                   </dd>
                 </div>
               </dl>
-              <PaymentApplePayMessage v-if="step.evidence.request" :label="`${step.title}: safe request`" :value="step.evidence.request" />
-              <PaymentApplePayMessage v-if="step.evidence.response" :label="`${step.title}: safe response`" :value="step.evidence.response" />
+              <PaymentMessage v-if="step.evidence.request" :label="`${step.title}: safe request`" :value="step.evidence.request" />
+              <PaymentMessage v-if="step.evidence.response" :label="`${step.title}: safe response`" :value="step.evidence.response" />
               <p v-if="!step.evidence.request && !step.evidence.response" class="text-xs leading-relaxed text-toned">No request or response body is retained for this step.</p>
             </template>
             <p v-else class="text-sm leading-relaxed text-toned">No data was recorded for this step in this visit. The explanation below describes the integration; it does not prove that this step ran.</p>
@@ -99,8 +99,8 @@ function preserveFocusedContent(event: FocusEvent): void {
           <section v-if="step.example?.request || step.example?.response" :aria-label="`${step.title}: synthetic example`" class="min-w-0 space-y-3 border-t border-dashed border-default pt-4">
             <h4 class="text-sm font-semibold tracking-tight text-highlighted">Synthetic example</h4>
             <p class="text-xs leading-relaxed text-toned">Illustrative values only. This example is not a message from your payment.</p>
-            <PaymentApplePayMessage v-if="step.example.request" :label="`${step.title}: example request`" :value="step.example.request" :language="exampleLanguage" />
-            <PaymentApplePayMessage v-if="step.example.response" :label="`${step.title}: example response`" :value="step.example.response" language="json" />
+            <PaymentMessage v-if="step.example.request" :label="`${step.title}: example request`" :value="step.example.request" :language="exampleLanguage" />
+            <PaymentMessage v-if="step.example.response" :label="`${step.title}: example response`" :value="step.example.response" language="json" />
           </section>
         </div>
       </details>

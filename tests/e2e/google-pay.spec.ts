@@ -1,0 +1,113 @@
+import { expect, test, type Page } from '@playwright/test'
+import type { PrepareGooglePayResponse } from '../../shared/payment/google-pay'
+import { expectNoHorizontalOverflow, gotoHydrated } from './support'
+
+const origin = 'http://127.0.0.1:4173'
+const token = JSON.stringify({ protocolVersion: 'ECv2', signature: 'synthetic-signature', signedMessage: JSON.stringify({ encryptedMessage: 'synthetic-encrypted-message', ephemeralPublicKey: 'synthetic-key', tag: 'synthetic-tag' }) })
+function payment(status: PrepareGooglePayResponse['attempt']['status'] = 'created'): PrepareGooglePayResponse {
+  const at = '2026-10-09T00:00:00.000Z'
+  const attempt = { id: 'attempt-google', orderId: 'order-google', integration: 'direct-api' as const, method: 'google-pay' as const, status,
+    merchantTxnId: 'merchant-google', ...(status !== 'created' ? { transactionId: 'transaction-google', statusSource: 'server' as const } : {}), createdAt: at, updatedAt: at }
+  return {
+    order: { id: 'order-google', scene: 'ecommerce', item: { sku: 'HL-GOOGLE-005', name: 'Halden sample', variant: 'Google Pay Direct', quantity: 1, unitAmount: { minor: 500, currency: 'USD' } }, amount: { minor: 500, currency: 'USD' }, fulfillment: 'pending', createdAt: at },
+    attempt, attempts: [attempt], events: [], paymentId: null, query: null, submitted: status !== 'created', canAuthorize: status === 'created',
+    config: { environment: 'TEST', gateway: 'synthetic', gatewayMerchantId: 'synthetic-merchant', allowedCardNetworks: ['VISA', 'MASTERCARD'], allowedAuthMethods: ['PAN_ONLY', 'CRYPTOGRAM_3DS'], countryCode: 'US', currencyCode: 'USD', totalPrice: '5.00' },
+  }
+}
+
+async function installMock(page: Page) {
+  let current = payment()
+  const calls: string[] = []
+  const violations: string[] = []
+  await page.context().route('**/*', async (route) => {
+    const request = route.request()
+    const url = new URL(request.url())
+    if (url.href === 'https://pay.google.com/gp/p/js/pay.js') {
+      await route.fulfill({ contentType: 'application/javascript', body: `window.google = { payments: { api: { PaymentsClient: class {
+        constructor(options) { if(options.environment !== 'TEST') throw new Error('TEST_REQUIRED'); }
+        async isReadyToPay() { return { result: true }; }
+        createButton(options) { const button = document.createElement('button'); button.textContent = 'Pay with Google Pay'; button.addEventListener('click', options.onClick); return button; }
+        async loadPaymentData(request) { window.__googleLoads = (window.__googleLoads || 0) + 1; if(request.allowedPaymentMethods[0].tokenizationSpecification.type !== 'PAYMENT_GATEWAY') throw new Error('GATEWAY_REQUIRED'); return { paymentMethodData: { type: 'CARD', tokenizationData: { type: 'PAYMENT_GATEWAY', token: ${JSON.stringify(token)} } } }; }
+      } } } };` })
+      return
+    }
+    if (url.origin !== origin) { violations.push(url.origin + url.pathname); await route.abort('blockedbyclient'); return }
+    if (url.pathname === '/api/profile') { await route.fulfill({ json: { profile: 'sandbox', environment: 'Sandbox', transactionPolicy: 'sandbox-only', canonicalOrigin: origin } }); return }
+    if (url.pathname.startsWith('/api/payment/')) {
+      calls.push(url.pathname)
+      if (url.pathname === '/api/payment/recover' || url.pathname === '/api/payment/google-pay/prepare') { await route.fulfill({ json: current }); return }
+      if (url.pathname === '/api/payment/google-pay/pay') {
+        expect(request.postDataJSON()).toMatchObject({ orderId: 'order-google', attemptId: 'attempt-google', token })
+        expect(current.submitted).toBe(false)
+        current = payment('failed')
+        await route.fulfill({ json: current }); return
+      }
+      violations.push(url.pathname); await route.fulfill({ status: 403, json: {} }); return
+    }
+    await route.continue()
+  })
+  return { calls, violations }
+}
+
+test.describe('Google Pay Direct with synthetic provider boundary', () => {
+  for (const width of [320, 390, 834, 1440]) {
+    test(`manual capture and four copy formats at ${width}px`, async ({ page }, testInfo) => {
+      await page.setViewportSize({ width, height: 1000 })
+      await page.emulateMedia({ colorScheme: width === 390 || width === 1440 ? 'dark' : 'light', reducedMotion: 'reduce' })
+      const mock = await installMock(page)
+      await gotoHydrated(page, '/halden/direct/order-google')
+      const manual = page.getByRole('radio', { name: 'Manual debugging', exact: true })
+      await expect(manual).toBeVisible()
+      await expect(page.getByRole('button', { name: 'Pay with Google Pay', exact: true })).toBeVisible()
+      const initialRecoveries = mock.calls.filter(path => path.endsWith('/recover')).length
+      await manual.focus(); await page.keyboard.press('Space')
+      await expect(manual).toBeChecked()
+      await page.getByRole('button', { name: 'Pay with Google Pay', exact: true }).click()
+      const panel = page.locator('[data-google-pay-token]')
+      await expect(panel.getByRole('button', { name: 'Show token', exact: true })).toBeVisible()
+      await expect(panel.locator('code[data-language]')).toHaveCount(0)
+      await panel.getByRole('button', { name: 'Show token', exact: true }).click()
+      await page.context().grantPermissions(['clipboard-read', 'clipboard-write'])
+      await expect.poll(async () => JSON.parse((await panel.locator('code[data-language]').textContent())!)).toEqual(JSON.parse(token))
+      for (const [tab, label, expected] of [
+        ['Stringify', 'Google Pay token: stringify', JSON.stringify(token)],
+        ['Apifox', 'Apifox tokenInfo object', JSON.stringify({ tokenInfo: { provider: 'GooglePay', tokenId: token } }, null, 2)],
+        ['Direct API', 'Direct API tokenInfo', JSON.stringify({ tokenInfo: JSON.stringify({ provider: 'GooglePay', tokenId: token }) }, null, 2)],
+      ] as const) {
+        await panel.getByRole('tab', { name: tab, exact: true }).click()
+        await panel.getByRole('button', { name: `Copy ${label}`, exact: true }).click()
+        await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(expected)
+      }
+      expect(mock.calls.filter(path => path.endsWith('/pay'))).toHaveLength(0)
+      expect(mock.calls.filter(path => path.endsWith('/recover'))).toHaveLength(initialRecoveries)
+      await expectNoHorizontalOverflow(page)
+      await page.screenshot({ path: testInfo.outputPath(`google-manual-${width}.png`), fullPage: true })
+      await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: true })))
+      await expect(panel.locator('code[data-language]')).toHaveCount(0)
+      expect(mock.violations).toEqual([])
+    })
+  }
+
+  test('switching to automatic requires a new token and restores a failed order without another submission', async ({ page }) => {
+    const mock = await installMock(page)
+    await gotoHydrated(page, '/halden/direct/order-google')
+    const button = page.getByRole('button', { name: 'Pay with Google Pay', exact: true })
+    await expect(button).toBeVisible()
+    await page.getByRole('radio', { name: 'Manual debugging', exact: true }).click()
+    await button.click()
+    const panel = page.locator('[data-google-pay-token]')
+    await expect(panel.getByRole('button', { name: 'Show token', exact: true })).toBeVisible()
+    await page.getByRole('radio', { name: 'Automatic payment', exact: true }).click()
+    await expect(panel.getByRole('button', { name: 'Show token', exact: true })).toHaveCount(0)
+    expect(mock.calls.filter(path => path.endsWith('/pay'))).toHaveLength(0)
+    await button.click()
+    await expect.poll(() => mock.calls.filter(path => path.endsWith('/pay')).length).toBe(1)
+    await expect(page.getByRole('radio', { name: 'Manual debugging', exact: true })).toBeDisabled()
+    expect(await page.evaluate(() => (window as unknown as { __googleLoads: number }).__googleLoads)).toBe(2)
+    await page.reload()
+    await expect(page.getByRole('radio', { name: 'Manual debugging', exact: true })).toBeDisabled()
+    await expect(panel.getByRole('button', { name: 'Show token', exact: true })).toHaveCount(0)
+    expect(mock.calls.filter(path => path.endsWith('/pay'))).toHaveLength(1)
+    expect(mock.violations).toEqual([])
+  })
+})

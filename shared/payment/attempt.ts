@@ -104,7 +104,7 @@ export interface RetryDecision {
 const trustedTerminalSources = new Set<PaymentEventSource>(['query', 'webhook'])
 
 export function getRetryDecision(attempt: PaymentAttempt): RetryDecision {
-  if (isDirectApplePayAttempt(attempt)) {
+  if (isDirectWalletAttempt(attempt)) {
     return Object.freeze({ allowed: false, reason: 'direct_api' })
   }
   if (attempt.authorization) {
@@ -125,6 +125,6 @@ export function getRetryDecision(attempt: PaymentAttempt): RetryDecision {
   return Object.freeze({ allowed: true, reason: 'eligible' })
 }
 
-export function isDirectApplePayAttempt(attempt: Pick<PaymentAttempt, 'integration' | 'method'>): boolean {
-  return attempt.integration === 'direct-api' && attempt.method === 'apple-pay'
+export function isDirectWalletAttempt(attempt: Pick<PaymentAttempt, 'integration' | 'method'>): boolean {
+  return attempt.integration === 'direct-api' && ['apple-pay', 'google-pay'].includes(attempt.method)
 }

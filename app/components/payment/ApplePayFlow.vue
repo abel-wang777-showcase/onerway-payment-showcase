@@ -217,7 +217,7 @@ async function followLive(): Promise<void> {
               Client example
               <UIcon name="i-lucide-chevron-down" class="size-4" :class="{ 'rotate-180': openCode.client }" aria-hidden="true" />
             </button>
-            <PaymentApplePayMessage v-if="openCode.client" data-flow-code-panel="client" class="mt-2" :label="`${selectedFlow.title}: client example`" :value="selectedFlow.clientCode" language="js" />
+            <PaymentMessage v-if="openCode.client" data-flow-code-panel="client" class="mt-2" :label="`${selectedFlow.title}: client example`" :value="selectedFlow.clientCode" language="js" />
           </template>
         </section>
         <section class="min-w-0 rounded-md border border-default bg-default p-3" data-flow-responsibility="server">
@@ -237,7 +237,7 @@ async function followLive(): Promise<void> {
               Server example
               <UIcon name="i-lucide-chevron-down" class="size-4" :class="{ 'rotate-180': openCode.server }" aria-hidden="true" />
             </button>
-            <PaymentApplePayMessage v-if="openCode.server" data-flow-code-panel="server" class="mt-2" :label="`${selectedFlow.title}: server example`" :value="selectedFlow.serverCode" language="js" />
+            <PaymentMessage v-if="openCode.server" data-flow-code-panel="server" class="mt-2" :label="`${selectedFlow.title}: server example`" :value="selectedFlow.serverCode" language="js" />
           </template>
         </section>
       </div>

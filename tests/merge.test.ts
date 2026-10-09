@@ -170,15 +170,15 @@ describe('authorization projection evidence', () => {
 })
 
 
-describe('Direct Apple Pay transaction truth', () => {
-  const direct = { ...attempt('processing'), integration: 'direct-api' as const, method: 'apple-pay' as const }
+describe.each(['apple-pay', 'google-pay'] as const)('Direct %s transaction truth', (method) => {
+  const direct = { ...attempt('processing'), integration: 'direct-api' as const, method }
   it.each([['S', 'succeeded'], ['F', 'failed'], ['N', 'cancelled'], ['P', 'processing'], ['I', 'processing'], ['U', 'processing'], ['R', 'requires_action']])('maps %s as %s', (raw, status) => {
     expect(mapDirectTransactionStatus(raw!)).toBe(status)
   })
   it('rejects unknown transaction statuses', () => {
     expect(() => mapDirectTransactionStatus('O')).toThrow('PAYMENT_DIRECT_STATUS_UNKNOWN')
   })
-  it('accepts a correlated server terminal only for Direct Apple Pay', () => {
+  it('accepts a correlated server terminal only for supported Direct wallets', () => {
     const incoming = createEvent({ ...event('succeeded'), source: 'server', transactionStatus: 'S' })
     expect(mergeAttempt(direct, incoming).attempt.status).toBe('succeeded')
     expect(() => mergeAttempt(attempt('processing'), incoming)).toThrow('PAYMENT_EVENT_TERMINAL_UNTRUSTED')

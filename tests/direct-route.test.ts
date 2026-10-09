@@ -12,6 +12,7 @@ import { assertDirectRecovery, canAuthorizeDirect, refreshDirectRecovery, requir
 const mocks = vi.hoisted(() => ({
   readPaymentRecovery: vi.fn(), getPaymentRecovery: vi.fn(), completePaymentRecord: vi.fn(),
   recordPaymentMethodDetails: vi.fn(),
+  queryGooglePayPayment: vi.fn(), createGooglePayPayment: vi.fn(), consultGooglePay: vi.fn(),
   claimPaymentCreation: vi.fn(), queryApplePayPayment: vi.fn(), createApplePayPayment: vi.fn(),
   consultApplePay: vi.fn(), validateApplePayMerchant: vi.fn(), requireServerProfile: vi.fn(),
   requireCanonicalPaymentOrigin: vi.fn(), readBody: vi.fn(),
@@ -26,6 +27,10 @@ vi.mock('../server/utils/apple-pay', async (original) => ({
   ...await original<typeof import('../server/utils/apple-pay')>(),
   queryApplePayPayment: mocks.queryApplePayPayment, createApplePayPayment: mocks.createApplePayPayment,
   consultApplePay: mocks.consultApplePay, validateApplePayMerchant: mocks.validateApplePayMerchant,
+}))
+vi.mock('../server/utils/google-pay', async (original) => ({
+  ...await original<typeof import('../server/utils/google-pay')>(),
+  queryGooglePayPayment: mocks.queryGooglePayPayment, createGooglePayPayment: mocks.createGooglePayPayment, consultGooglePay: mocks.consultGooglePay,
 }))
 vi.mock('../server/utils/profile', () => ({ requireServerProfile: mocks.requireServerProfile }))
 vi.mock('../server/utils/limit', () => ({
@@ -43,13 +48,13 @@ const event = { node: { req: {} } } as H3Event
 const browser = { javaEnabled: false, colorDepth: '24', screenHeight: '800', screenWidth: '1200', timeZoneOffset: '0', contentLength: '0', language: 'en-US' }
 const token = { paymentData: { version: 'EC_v1', data: 'fixture-data', signature: 'fixture-signature', header: { ephemeralPublicKey: 'fixture-key', publicKeyHash: 'fixture-hash', transactionId: 'fixture-transaction' } }, paymentMethod: { displayName: 'Test', network: 'Visa', type: 'debit' }, transactionIdentifier: 'fixture-identifier' }
 
-function fixture(): PaymentRecovery {
-  const journey = JOURNEYS['apple-pay-direct']
+function fixture(method: 'apple-pay' | 'google-pay' = 'apple-pay'): PaymentRecovery {
+  const journey = JOURNEYS[`${method}-direct`]
   const order = createOrder({ id: 'HLD-DIRECT-TEST', scene: 'ecommerce', createdAt: now,
     amount: { minor: 500, currency: 'USD' },
     item: { sku: journey.sku, name: journey.item, variant: journey.variant, quantity: 1, unitAmount: { minor: 500, currency: 'USD' } },
   })
-  const attempt = createAttempt({ id: 'direct-attempt', orderId: order.id, integration: 'direct-api', method: 'apple-pay', merchantTxnId: 'merchant-direct', createdAt: now })
+  const attempt = createAttempt({ id: 'direct-attempt', orderId: order.id, integration: 'direct-api', method, merchantTxnId: 'merchant-direct', createdAt: now })
   return { order, attempt, attempts: [attempt], events: [], customer: createMerchantCustomer(profile), subscription: null }
 }
 function submitted(recovery = fixture()): PaymentRecovery {
@@ -100,7 +105,7 @@ describe('Direct recovery permissions', () => {
   })
   it.each(['environment', 'merchantNo', 'appId'] as const)('rejects customer %s scope mismatch', (key) => {
     const recovery = fixture()
-    expect(() => assertDirectRecovery(profile, { ...recovery, customer: { ...recovery.customer!, [key]: 'other' } })).toThrow('APPLE_PAY_ORDER_MISMATCH')
+    expect(() => assertDirectRecovery(profile, { ...recovery, customer: { ...recovery.customer!, [key]: 'other' } })).toThrow('DIRECT_PAY_ORDER_MISMATCH')
   })
   it('rejects other integrations, methods, journeys and missing customer bindings', () => {
     const recovery = fixture()
@@ -110,7 +115,7 @@ describe('Direct recovery permissions', () => {
       { ...recovery, attempt: { ...recovery.attempt, merchantTxnId: undefined } },
       { ...recovery, order: { ...recovery.order, amount: { minor: 5000, currency: 'USD' as const } } },
       { ...recovery, customer: null },
-    ]) expect(() => assertDirectRecovery(profile, invalid)).toThrow('APPLE_PAY_ORDER_MISMATCH')
+    ]) expect(() => assertDirectRecovery(profile, invalid)).toThrow('DIRECT_PAY_ORDER_MISMATCH')
   })
   it('persists every fresh query observation separately for S-F-S reconciliation', async () => {
     const pending = submitted()
@@ -231,5 +236,68 @@ describe('Apple Pay routes', () => {
     await expect(handler(event)).rejects.toMatchObject({ statusCode: 403 })
     expect(mocks.claimPaymentCreation).not.toHaveBeenCalled()
     expect(mocks.createApplePayPayment).not.toHaveBeenCalled()
+  })
+})
+
+describe('Google Pay routes', () => {
+  beforeEach(() => {
+    mocks.getPaymentRecovery.mockResolvedValue(fixture('google-pay'))
+    mocks.readBody.mockResolvedValue({ orderId: 'HLD-DIRECT-TEST', attemptId: 'direct-attempt', token: 'opaque-google-token', browser })
+    mocks.createGooglePayPayment.mockResolvedValue({ transactionId: '1001', rawStatus: 'S', status: 'succeeded', evidence: { request: 'safe' } })
+    mocks.queryGooglePayPayment.mockResolvedValue({ transactionId: '1001', rawStatus: 'S', status: 'succeeded', actualWallet: 'google-pay', fundingNetwork: 'VISA' })
+    mocks.consultGooglePay.mockResolvedValue({ environment: 'TEST' })
+  })
+  it('prepares only Google configuration without a create claim', async () => {
+    mocks.readBody.mockResolvedValue({ orderId: 'HLD-DIRECT-TEST' })
+    const { default: handler } = await import('../server/api/payment/google-pay/prepare.post')
+    expect(await handler(event)).toMatchObject({ config: { environment: 'TEST' }, canAuthorize: true })
+    expect(mocks.claimPaymentCreation).not.toHaveBeenCalled()
+  })
+  it('keeps Apple routes and Google routes bound to their own method', async () => {
+    const { default: apple } = await import('../server/api/payment/apple-pay/pay.post')
+    await expect(apple(event)).rejects.toMatchObject({ statusCode: 409 })
+    mocks.getPaymentRecovery.mockResolvedValue(fixture())
+    const { default: google } = await import('../server/api/payment/google-pay/pay.post')
+    await expect(google(event)).rejects.toMatchObject({ statusCode: 409 })
+    expect(mocks.claimPaymentCreation).not.toHaveBeenCalled()
+  })
+  it('claims once before forwarding the opaque token and persists no token', async () => {
+    const { default: handler } = await import('../server/api/payment/google-pay/pay.post')
+    await handler(event)
+    expect(mocks.claimPaymentCreation.mock.invocationCallOrder[0]).toBeLessThan(mocks.createGooglePayPayment.mock.invocationCallOrder[0]!)
+    expect(mocks.createGooglePayPayment).toHaveBeenCalledWith(profile, expect.objectContaining({ token: 'opaque-google-token' }))
+    expect(JSON.stringify(mocks.completePaymentRecord.mock.calls)).not.toContain('opaque-google-token')
+    mocks.claimPaymentCreation.mockResolvedValue({ outcome: 'existing' })
+    await expect(handler(event)).rejects.toMatchObject({ statusCode: 409 })
+    expect(mocks.createGooglePayPayment).toHaveBeenCalledOnce()
+  })
+  it('persists R with missing provider IDs and advertises unavailable action without leaking URL', async () => {
+    mocks.createGooglePayPayment.mockResolvedValue({ rawStatus: 'R', status: 'requires_action', actionURL: 'https://unverified.example/token' })
+    const { default: handler } = await import('../server/api/payment/google-pay/pay.post')
+    const result = await handler(event)
+    expect(result.actionUnavailable).toBe(true)
+    expect(result).not.toHaveProperty('actionURL')
+    expect(mocks.completePaymentRecord).toHaveBeenCalledWith('direct-attempt', undefined, undefined, expect.objectContaining({ status: 'requires_action', transactionStatus: 'R' }))
+  })
+  it('unknown creation remains submitted and recovers through Google query only', async () => {
+    mocks.createGooglePayPayment.mockRejectedValueOnce(new Error('unknown'))
+    const { default: handler } = await import('../server/api/payment/google-pay/pay.post')
+    await expect(handler(event)).rejects.toBeDefined()
+    const recovery = submitted(fixture('google-pay'))
+    mocks.getPaymentRecovery.mockResolvedValue(recovery)
+    await expect(handler(event)).rejects.toMatchObject({ statusCode: 409 })
+    await refreshDirectRecovery(profile, recovery)
+    expect(mocks.createGooglePayPayment).toHaveBeenCalledOnce()
+    expect(mocks.queryGooglePayPayment).toHaveBeenCalledOnce()
+    expect(mocks.queryApplePayPayment).not.toHaveBeenCalled()
+    expect(mocks.recordPaymentMethodDetails).toHaveBeenCalledWith('direct-attempt', undefined, expect.objectContaining({ actualWallet: 'google-pay', fundingNetwork: 'VISA' }), expect.any(String))
+  })
+  it('rejects invalid token and production before claim', async () => {
+    mocks.readBody.mockResolvedValue({ orderId: 'HLD-DIRECT-TEST', attemptId: 'direct-attempt', token: {}, browser })
+    const { default: handler } = await import('../server/api/payment/google-pay/pay.post')
+    await expect(handler(event)).rejects.toMatchObject({ statusCode: 400 })
+    mocks.requireServerProfile.mockReturnValue({ profile: 'production' })
+    await expect(handler(event)).rejects.toMatchObject({ statusCode: 403 })
+    expect(mocks.claimPaymentCreation).not.toHaveBeenCalled()
   })
 })
