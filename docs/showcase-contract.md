@@ -145,18 +145,19 @@ Demo Hub 继续提供两条同结果、可重复的本地模拟旅程。模拟�
 固定范围为 `apple-pay-direct`：E-commerce、USD 5.00、SALE，商品 `HL-APPLE-005`。沿用现有 Sandbox merchantNo/appId；Merchant ID 为 `merchant.com.onerway.showcase`，域名为 `https://onerway-payment-showcase.vercel.app`。本期使用自有 Merchant Identity 验证商户，Payment Processing 私钥及 token 代解密由 Onerway 承担；不调用代理验证接口，不采集卡号，不含订阅、AUTH、其他 Direct 方式或 Production 交易。渠道及域名准备的确认不替代真实支付证据。
 
 - `POST /v1/txn/consultPaymentMethod` 以本交易金额、币种、US、WEB、DIRECT 查询，读取唯一 `ApplePay` 的 `countryCode` 与 `subCardTypes`。浏览器资格另用官方 Apple Pay JS `1.latest` 与能力检测确认；不硬编码 Safari-only。优先验收 iPhone Safari，跨浏览器扫码不在首期必验范围。
-- 订单先持久化并签发既有 HttpOnly recovery cookie。浏览器将 Direct 提交与所有 intent 共用同一独占 Web Lock；锁等待计入授权预算，超时、取消或离页后尚未发出的提交不再执行，防止多标签切换订单覆盖在途提交的恢复绑定。官方 `apple-pay-button` 的用户点击同步启动 ApplePaySession；订单金额和币种由服务端控制。准备、商户验证不创建上游交易；收到完整 `event.payment.token` 后，服务端才原子认领既有 creation claim 并提交 `/v1/txn/doTransaction`。请求固定 `CARD + DIRECT + SALE`，`tokenInfo = JSON.stringify({ provider: 'ApplePay', tokenId: JSON.stringify(token) })`。每层只序列化一次，使用完整 token 而非仅 paymentData。
+- 订单先持久化并签发既有 HttpOnly recovery cookie。自动支付的 Direct 提交与所有 intent 共用同一独占 Web Lock；锁等待计入授权预算，超时、取消或离页后尚未发出的提交不再执行，防止多标签切换订单覆盖在途提交的恢复绑定。官方 `apple-pay-button` 的用户点击同步启动 ApplePaySession；订单金额和币种由服务端控制。准备、商户验证不创建上游交易；自动支付收到完整 `event.payment.token` 后，服务端才原子认领既有 creation claim 并提交 `/v1/txn/doTransaction`。请求固定 `CARD + DIRECT + SALE`，`tokenInfo = JSON.stringify({ provider: 'ApplePay', tokenId: JSON.stringify(token) })`。每层只序列化一次，使用完整 token 而非仅 paymentData。
+- 2026-10-08 用户授权两种 Sandbox 模式：默认「自动支付」在 Wallet 授权后立即按原流程提交；「手动调试」只捕获 token，不调用 `/api/payment/apple-pay/pay`、不认领提交、不自动轮询 Provider、不把订单投影成 processing / succeeded / failed。模式必须在打开 Wallet 前选择；面板打开、准备中或已提交后禁止切换。手动捕获后取消本地授权 timer 并调用 `ApplePaySession.abort()` 结束本次 sheet，不使用 `STATUS_SUCCESS` 伪报支付成功，也不让 sheet 停留等待复制；本次主动关闭的晚到 `oncancel` 不清除捕获的副本。用户之后主动展开或复制 token 到 Apifox 等工具，以与授权一致的 USD 5.00 请求自行提交并在该工具核对结果；外部请求不自动关联本页 Order。清空 token 不改变「未提交」事实；切换模式或重新打开 Wallet 会清除旧副本，自动模式必须取得新授权，不自动消费手动 token。Apple 的 30 秒回调响应要求不是 token 有效期；授权后 abort 的设备表现及捕获 token 能否被 Onerway 受理仍需真实 Sandbox 验证。
 - `ONERWAY_*` 仍由 `server/utils/profile.ts` 唯一解析。新增 Sandbox Apple Merchant ID、证书 PEM 和私钥 PEM 仅在服务端；全部未配时 SDK / Checkout 仍可运行，部分配置则拒绝。身份材料不得放入 public profile、客户端、日志或持久层。Merchant Identity 与 Payment Processing 证书用途不能混用。
 - 验证 URL 来自 Apple 事件，服务端仅允许 HTTPS 的 `apple-pay-gateway-cert.apple.com` 或 `cn-apple-pay-gateway-cert.apple.com`，路径仅 `/paymentservices/startSession` 或 `/paymentservices/paymentSession`；拒绝 userinfo、显式端口、query、fragment、其他主机与重定向。域名取受控 canonical origin；mTLS 总等待与响应大小有界。Apple Sandbox tester 与 Sandbox merchant session 配对，遵守 TN3174 的 2026-10-01 环境变更，不从 Vercel deployment 名称推导 Apple 环境。
 - 商户验证失败的服务端诊断仅记录固定类别（URL / 账号环境、未配置、HTTP 拒绝、超时、TLS、传输、响应格式或大小）及上游 HTTP 状态；不记录实际验证 URL、身份材料、session、响应体或原始异常。诊断不放宽 Sandbox 地址白名单。
-- token 与 merchant session 仅用于当次协议调用，不写入日志、数据库、PaymentEvent、sessionStorage 或技术详情。测试仅使用合成占位数据。可展示订单、Attempt、商户交易号、transactionId、存在时的 paymentId、可信状态及来源；不展示 token 片段。
+- token 与 merchant session 不写入日志、数据库、PaymentEvent、浏览器存储或既有 Technical details。2026-10-08 用户授权新增仅 Sandbox、当前访问的 token 调试区：收到本次 Wallet 授权后，完整标准 Apple token 的单一序列化快照只保留在组件内存；默认收起，由用户主动展示或复制。提供 JSON 对象、Stringify JSON 字符串值、Apifox `tokenInfo` 对象请求片段及 Direct API `tokenInfo` 字符串请求片段，自动支付提交仍使用同一快照恢复的对象。Stringify 将已有 `JSON.stringify(token)` 快照再编码为可粘贴的 JSON 字符串字面量，带外层引号和转义符，仅改变展示/复制格式；在 JSON 请求编辑器中整体替换 `tokenInfo.tokenId` 的值，不额外加引号或 stringify。Apifox 对象片段使用 `tokenInfo: { provider: 'ApplePay', tokenId: <完整 token 的字符串值> }`，内层转义已由 JSON 格式化生成，外层由现有公共签名脚本序列化一次；Direct API 片段的 `tokenInfo` 已是 wire 字符串，使用公共签名脚本的 Apifox 编辑器优先复制 Apifox 对象片段。调试展示只接受标准 token 字段结构且不超过服务端 64 KiB 上限；未知字段在自动模式不展示、不删改支付提交，在手动模式不展示且不提交。清空、用户 Wallet 取消、新面板、模式切换、`pagehide`（含 BFCache）和组件销毁均清除调试副本；离页关闭旧面板并阻止尚未发出的锁等待提交，已发出的支付仍按原单核验。刷新或服务端恢复不恢复 token，复制后的剪贴板由用户管理。自动模式捕获的 token 已用于本次提交，页面提示不用于再次扣款。该例外不开放 merchant-session 凭据、PAN / CVV、Production 交易或重复提交。测试与截图仅使用合成占位数据。可展示订单、Attempt、商户交易号、transactionId、存在时的 paymentId、可信状态及来源。
 - 本路径按**同笔交易 `status`**：`S → succeeded`、`F → failed`、`N → cancelled`、`P/I/U → processing`、`R → requires_action`。可信来源为关联正确的同步 Direct 响应、严格匹配的 query 与验签 Webhook；忽略 `paymentStatus`，不全局更改 SDK / Checkout 映射。R 暂无本范围已确认的商户 action 协议，保持待核验，不根据未经确认的 URL 自动跳转。未知状态、响应丢失、查无记录与 HTTP 200 均不证明失败或成功。
 - 恢复按已保存 `merchantTxnId` 查询 `/v1/txn/list`，核对唯一交易、金额币种和已有 provider IDs，不要求先有 paymentId；事务内再次检查固定 transactionId。刷新与恢复保留 Direct 页面及订单，结果未知只能查询原单，不重发扣款。早到通知与同步响应共享同一 Attempt；既有 query / Webhook 非终态不得阻断随后关联正确的同步 Direct 终态，同步非终态不得覆盖 query / Webhook 投影，已有 query 终态仍优先；终态不被中间态回退，终态冲突由 fresh query 调和。
 - Direct 禁止同 Order 的 Attempt retry。F/N 后“重新下单支付”创建新的 Order、Attempt、merchantTxnId 和 Apple session/token，保留旧结果。已认领提交且结果未知的 Direct Attempt 即使收到 restart 请求也保留恢复绑定；不得借切换接入方式绕过。未提交 token 前关闭钱包仅结束本次面板，不产生 Onerway N；仍可启动新的 Apple 会话或显式选择其他旅程。
-- 从 `onpaymentauthorized` 开始计约 25 秒总预算。明确 S 完成面板成功，F/N 完成面板失败；预算耗尽但交易未明时，对尚有效且未完成的面板返回失败，订单继续“结果确认中”并查询原单。面板最多完成一次；晚到结果继续收敛订单。25 秒是 UI 等待预算，不是交易失败规则，不能据此开放新订单。
+- 自动模式从 `onpaymentauthorized` 开始计约 25 秒总预算。明确 S 完成面板成功，F/N 完成面板失败；预算耗尽但交易未明时，对尚有效且未完成的面板返回失败，订单继续“结果确认中”并查询原单。面板最多完成一次；晚到结果继续收敛订单。25 秒是 UI 等待预算，不是交易失败规则，不能据此开放新订单。手动模式授权捕获后立即 abort，不等待 Provider 结果。
 - 页面保留 Halden 商品、金额与付款操作，以 Customer、Merchant client、Merchant server、Apple / Wallet、Onerway 五方交互图展示六个主阶段：准备付款、打开钱包、商户验证、用户授权、提交 Onerway、确认结果，并将 Wallet `oncancel` 作为无 Provider 报文的教学分支。图中优先突出 `onvalidatemerchant → validationURL → Apple mTLS → merchantSession → completeMerchantValidation`、`onpaymentauthorized → event.payment.token` 等回调边与每阶段各一句客户端/服务端动作；完整 merchantSession 仅瞬时回传 Apple，图示投影和短 illustrative 伪代码中的合成 merchant session、`EC_v1` token 只保留字段结构和敏感值占位。手动选中的阶段不被实时跟随覆盖、不移动焦点，讲解不暂停 Apple 时限；本次交互、服务端恢复与合成示例明确区分，恢复后只展示可确认事实，不伪造此前钱包步骤已成功。
-- 2026-09-23 用户确认面向商户/开发者演示，实际值优先展示并按字段脱敏：金额、币种、状态、国家、支持网络、公开 Merchant ID/验证域完整展示；验证 URL 仅展示通过同一 Sandbox 白名单的 HTTPS 主机与路径，不显示其他原始 URL。Merchant session 仅投影 epochTimestamp/expiresAt（保持原数值，另提供可读有效期）、匹配当前域的 domainName 与已知 displayName，session 标识、nonce、签名及未知字段均省略；不持久化会话或其投影。授权阶段仅显示白名单 network/type/version 与“加密 token 已收到”，不展示卡片显示名、钱包交易标识、token 密文/签名/header 的任何片段，不推断 Face ID 等具体认证方式。
-- 订单/商户/应用/客户/Provider 交易标识在协议摘要内统一保留首尾各 4 字符，长度不超过 8 时全部省略；既有授权 Payment references 的精确标识边界不变。服务端从实际发送的同一 payload 显式投影请求摘要，只返回方法、路径、上述脱敏标识、金额币种、CARD/DIRECT/SALE/WEB 及 tokenInfo/txnOrderMsg 的结构占位；不返回完整 payload、sign、secret、IP、UA、地址或邮箱。摘要只在本次响应和页面内存中使用，不写入 PaymentEvent、日志、浏览器存储或数据库；复制只复制安全摘要。没有成功响应时，不把客户端发起请求当成 Onerway 已接收。
+- 2026-09-23 用户确认面向商户/开发者演示，实际值优先展示并按字段脱敏：金额、币种、状态、国家、支持网络、公开 Merchant ID/验证域完整展示；验证 URL 仅展示通过同一 Sandbox 白名单的 HTTPS 主机与路径，不显示其他原始 URL。Merchant session 仅投影 epochTimestamp/expiresAt（保持原数值，另提供可读有效期）、匹配当前域的 domainName 与已知 displayName，session 标识、nonce、签名及未知字段均省略；不持久化会话或其投影。授权阶段的安全时间线仍仅显示白名单 network/type/version 与“加密 token 已收到”，不展示卡片显示名、钱包交易标识或 token 片段，不推断 Face ID 等具体认证方式；完整 token 只适用上文单独授权的 Sandbox 调试区。
+- 订单/商户/应用/客户/Provider 交易标识在协议摘要内统一保留首尾各 4 字符，长度不超过 8 时全部省略；既有授权 Payment references 的精确标识边界不变。服务端从实际发送的同一 payload 显式投影请求摘要，只返回方法、路径、上述脱敏标识、金额币种、CARD/DIRECT/SALE/WEB 及 tokenInfo/txnOrderMsg 的结构占位；不返回完整 payload、sign、secret、IP、UA、地址或邮箱。摘要只在本次响应和页面内存中使用，不写入 PaymentEvent、日志、浏览器存储或数据库；时间线复制只复制安全摘要，完整 token 的复制仅限上述调试区。没有成功响应时，不把客户端发起请求当成 Onerway 已接收。
 - 支付结果仅展示已关联的同步响应、Query、已验签 Webhook 状态与来源；三者是无固定到达顺序的独立观察路径。`completePayment` 仅完成 Apple 面板展示，不替代订单状态。钱包回调的网络只标为钱包提供，actualWallet/fundingNetwork 的已核验归因仍来自严格匹配的服务端 Query。合成示例使用明确占位符和独立标签，不伪装为本次实测报文。
 
 真实 iPhone 授权、商户验证 mTLS、Onerway 代解密、同笔 query / Webhook / persistence 的黄金路径须分别在 Issue #17 登记。自动化与本地浏览器通过只证明对应测试范围；本实现合并与正式发布须另获本次授权。
@@ -381,7 +382,7 @@ Sandbox profile 由 `ONERWAY_SHOWCASE_ORIGIN` 固定公开 canonical origin；�
 - 本机浏览器与 Nuxt 同机运行时，可通过未提交的 `ONERWAY_SANDBOX_TRANSACTION_IP` 提供真实持卡人公网 IP，避免把 loopback 发送给 Sandbox 风控；该覆盖只属于 Sandbox 服务端 profile，且不改变用于请求限流的 runtime 客户端身份。部署环境应省略它：Vercel 使用平台覆盖的 `x-vercel-forwarded-for`，其他 runtime 使用 H3 提供的可信地址；最终地址必须通过 IP 格式校验。
 - 浏览器只通过 `/api/profile` 得到显式白名单投影后的 profile、环境、交易策略、canonical Showcase origin 与当前 SDK script URL；canonical origin 和 SDK URL 不是 credential。
 - PAN / CVV 即使来自 Sandbox，也不得持久化、进入日志、分析埋点或错误上报。
-- 保存和展示请求、响应、Webhook、Technical details 前统一脱敏。
+- 保存和展示请求、响应、Webhook、Technical details 前统一脱敏；仅第 5 节明确授权的 Sandbox 当前访问 token 调试区允许用户主动展示/复制完整标准 Apple token，仍禁止持久化。
 - Onerway `production` profile 默认锁定。基础域名已确认不代表允许交易；启用实际交易仍需单独确认凭据、回调验签、审计、错误处理和显式开关。
 - 所有 Vercel scope 都不得配置或开放 Onerway Production 实际交易；Vercel Production target 也必须继续服从该锁定。
 - Onerway `production` profile 锁定时仍可运行明确标记为 Simulation 的纯本地旅程，因为它不产生上游请求或交易；页面必须同时保留 Simulation 与 Transactions locked 提示。
@@ -395,7 +396,7 @@ Sandbox 基础域名为 `https://sandbox-acq.onerway.com`，create 与 query 请
 实现要求：
 
 - 使用 Nuxt UI 原语和 registry 提供的语义 token，不复制原型中的硬编码样式。
-- 初始只安装 `geist-foundation`；不复制旧 `assets/starter`、旧 export、playground 或 API Docs kit。
+- 初始只安装 `geist-foundation`；复制动作复用同一已锁定 revision 的 registry `foundation-copy-button` / `foundation-use-copy`，不复制旧 `assets/starter`、旧 export、playground 或 API Docs kit。
 - 验收 1440、834、390、320 宽度；独立静态画板不等于真实响应式已通过。
 - Demo Hub 的选择器使用正确的 radio / `aria-pressed` 语义。
 - 页面提供 `main`、`nav`、`aria-current`、`aria-controls`、可见键盘焦点和状态播报。
@@ -418,7 +419,7 @@ Sandbox 基础域名为 `https://sandbox-acq.onerway.com`，create 与 query 请
 - 当前只消费 `geist-foundation`，设计基础来源 revision 记录为 `81464cbcf82813181a49043c5437a25eb8e12d45`；本次 registry metadata 更新未改变三个受管 foundation 文件的内容。
 - Geist Sans / Mono 字体资产由同版本、精确锁定的 `@fontsource` 包在应用构建中自托管；`@nuxt/fonts` 不再通过 Google provider 解析这两个 family，构建和浏览器运行时都不得依赖 Google Fonts URL。字体导入只属于 consumer-owned `app.css`，不修改 registry 受管的 foundation CSS。
 - M0 先交付 Web JS SDK，不包含 iOS / Android SDK。
-- 本期 Direct API 仅处理 Apple Pay 加密 token，不采集 PAN / CVV；token 与 merchant session 仅瞬时转交，不记录或持久化。
+- 本期 Direct API 仅处理 Apple Pay 加密 token，不采集 PAN / CVV；merchant session 仅瞬时转交，token 可依第 5 节授权在本次 Sandbox 页面内存调试，不记录或持久化。
 - Delete card token 接口的 `id` 是 binding record id，不是 `tokenId`。
 - Checkout、Web JS SDK、Direct API 共用统一支付模型。
 - 客户可以从 Demo Hub 自助选择已开放场景，不依赖内部 Console。

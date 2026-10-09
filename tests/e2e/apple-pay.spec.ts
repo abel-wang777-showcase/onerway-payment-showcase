@@ -16,7 +16,8 @@ function payment(status: PrepareApplePayResponse['attempt']['status'] = 'created
 }
 
 // The provider boundary is mocked. No actual Apple session or payment is opened.
-const appleMock = `
+const syntheticToken = { paymentData: { data: 'synthetic-only' }, paymentMethod: { network: 'visa' }, transactionIdentifier: 'synthetic-only' }
+const appleMock = (token: Record<string, unknown>) => `
 customElements.define('apple-pay-button', class extends HTMLElement {
   connectedCallback() {
     const root = this.attachShadow({ mode: 'open' });
@@ -30,12 +31,12 @@ window.ApplePaySession = class {
   static canMakePayments() { return true; }
   static async applePayCapabilities() { return { paymentCredentialStatus: 'paymentCredentialStatusUnknown' }; }
   begin() { this.onvalidatemerchant({ validationURL: 'https://apple-pay-gateway-cert.apple.com/paymentservices/paymentSession' }); }
-  completeMerchantValidation() { queueMicrotask(() => this.onpaymentauthorized({ payment: { token: { paymentData: { data: 'synthetic-only' }, paymentMethod: { network: 'visa' }, transactionIdentifier: 'synthetic-only' } } })); }
+  completeMerchantValidation() { queueMicrotask(() => this.onpaymentauthorized({ payment: { token: ${JSON.stringify(token)} } })); }
   completePayment(result) { window.__appleCompletions = (window.__appleCompletions || []).concat(result.status); }
-  abort() {}
+  abort() { window.__appleAborts = (window.__appleAborts || 0) + 1; this.oncancel?.(); }
 };`
 
-async function installAppleMock(page: Page, result: 'succeeded' | 'failed' = 'succeeded', initial: PrepareApplePayResponse['attempt']['status'] = 'created') {
+async function installAppleMock(page: Page, result: 'succeeded' | 'failed' = 'succeeded', initial: PrepareApplePayResponse['attempt']['status'] = 'created', token: Record<string, unknown> = syntheticToken) {
   let current = payment(initial)
   const calls: string[] = []
   const violations: string[] = []
@@ -43,7 +44,7 @@ async function installAppleMock(page: Page, result: 'succeeded' | 'failed' = 'su
     const request = route.request()
     const url = new URL(request.url())
     if (request.url() === APPLE_PAY_SCRIPT) {
-      await route.fulfill({ contentType: 'application/javascript', body: appleMock })
+      await route.fulfill({ contentType: 'application/javascript', body: appleMock(token) })
       return
     }
     if (url.origin !== BASE_URL) {
@@ -68,7 +69,7 @@ async function installAppleMock(page: Page, result: 'succeeded' | 'failed' = 'su
       }
       else if (url.pathname === '/api/payment/apple-pay/pay') {
         expect(current.submitted).toBe(false)
-        expect(body).toMatchObject({ orderId: current.order.id, attemptId: current.attempt.id, token: { paymentData: { data: 'synthetic-only' }, paymentMethod: { network: 'visa' }, transactionIdentifier: 'synthetic-only' }, browser: { language: 'en-US' } })
+        expect(body).toMatchObject({ orderId: current.order.id, attemptId: current.attempt.id, token, browser: { language: 'en-US' } })
         current = payment(result, current.order.id)
         await route.fulfill({ json: { ...current, evidence: { request: JSON.stringify({ method: 'POST', path: '/v1/txn/doTransaction', body: { merchantTxnId: 'merc…rect', orderAmount: '5.00', orderCurrency: 'USD', tokenInfo: JSON.stringify({ provider: 'ApplePay', tokenId: '[encrypted payment token omitted]' }) } }, null, 2) } } })
       }
@@ -92,6 +93,128 @@ async function installAppleMock(page: Page, result: 'succeeded' | 'failed' = 'su
 }
 
 test.describe('mock Apple Pay Direct browser journey', () => {
+  for (const presentation of [{ width: 320, colorScheme: 'light' }, { width: 1440, colorScheme: 'dark' }] as const) {
+    test(`captures a manual token without submitting and clears it on leaving at ${presentation.width}px`, async ({ page }, testInfo) => {
+      await page.setViewportSize({ width: presentation.width, height: 1000 })
+      await page.emulateMedia({ colorScheme: presentation.colorScheme, reducedMotion: 'reduce' })
+      const mock = await installAppleMock(page)
+      await gotoHydrated(page, '/halden/direct/order-direct')
+      const manual = page.getByRole('radio', { name: 'Manual debugging', exact: true })
+      await manual.focus()
+      await page.keyboard.press('Space')
+      await expect(manual).toBeChecked()
+      await page.locator('apple-pay-button').getByRole('button').click()
+      await expect(page.getByRole('heading', { name: /Token captured.*payment not submitted/ })).toBeVisible()
+      await expect(page.locator('[data-flow-step=authorize]')).toHaveAttribute('aria-pressed', 'true')
+      await expect(page.locator('[data-apple-pay-step=submit]')).toHaveAttribute('data-state', 'waiting')
+      const panel = page.locator('[data-apple-pay-token]')
+      await expect(panel.locator('code[data-language]')).toHaveCount(0)
+      await panel.getByRole('button', { name: 'Show token', exact: true }).click()
+      await panel.getByRole('tab', { name: 'Stringify', exact: true }).click()
+      await expect(panel.locator('code[data-language]')).toHaveText(JSON.stringify(JSON.stringify(syntheticToken)))
+      await page.context().grantPermissions(['clipboard-read', 'clipboard-write'])
+      await panel.getByRole('button', { name: 'Copy Apple Pay token: stringify', exact: true }).click()
+      await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(JSON.stringify(JSON.stringify(syntheticToken)))
+      await panel.getByRole('tab', { name: 'Apifox', exact: true }).click()
+      await panel.getByRole('button', { name: 'Copy Apifox tokenInfo object', exact: true }).click()
+      await expect.poll(async () => JSON.parse(await page.evaluate(() => navigator.clipboard.readText()))).toEqual({ tokenInfo: { provider: 'ApplePay', tokenId: JSON.stringify(syntheticToken) } })
+      await expect.poll(() => page.evaluate(() => (window as unknown as { __appleAborts?: number }).__appleAborts)).toBe(1)
+      expect(await page.evaluate(() => (window as unknown as { __appleCompletions?: number[] }).__appleCompletions ?? [])).toEqual([])
+      expect(mock.calls.filter(path => path.endsWith('/pay') || path.endsWith('/recover'))).toHaveLength(0)
+      await expectNoHorizontalOverflow(page)
+      await page.screenshot({ path: testInfo.outputPath(`apple-pay-manual-${presentation.width}.png`), fullPage: true })
+      await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: true })))
+      await expect(panel.locator('code[data-language]')).toHaveCount(0)
+      await page.reload()
+      await expect(page.getByRole('radio', { name: 'Automatic payment', exact: true })).toBeChecked()
+      await expect(panel.getByRole('button', { name: 'Show token', exact: true })).toHaveCount(0)
+      expect(mock.calls.filter(path => path.endsWith('/pay'))).toHaveLength(0)
+      mock.assertClean()
+    })
+  }
+
+  test('requires another Wallet authorization when switching a captured manual token to automatic payment', async ({ page }) => {
+    const mock = await installAppleMock(page)
+    await gotoHydrated(page, '/halden/direct/order-direct')
+    await page.getByRole('radio', { name: 'Manual debugging', exact: true }).click()
+    await page.locator('apple-pay-button').getByRole('button').click()
+    const panel = page.locator('[data-apple-pay-token]')
+    await expect(panel.getByRole('button', { name: 'Show token', exact: true })).toBeVisible()
+    await panel.getByRole('button', { name: 'Clear token', exact: true }).click()
+    await expect(page.getByRole('heading', { name: /Token captured.*payment not submitted/ })).toBeVisible()
+    await page.getByRole('radio', { name: 'Automatic payment', exact: true }).click()
+    await expect(panel.getByRole('button', { name: 'Show token', exact: true })).toHaveCount(0)
+    expect(mock.calls.filter(path => path.endsWith('/pay'))).toHaveLength(0)
+    await page.locator('apple-pay-button').getByRole('button').click()
+    await expect(page.getByRole('heading', { name: 'Your order is paid.' })).toBeVisible()
+    await expect(page.getByRole('radio', { name: 'Manual debugging', exact: true })).toBeDisabled()
+    expect(mock.calls.filter(path => path.endsWith('/pay'))).toHaveLength(1)
+    mock.assertClean()
+  })
+
+  for (const width of [320, 390, 834, 1440]) {
+    for (const colorScheme of ['light', 'dark'] as const) {
+      test(`inspects and copies the current token without replaying payment at ${width}px ${colorScheme}`, async ({ page }, testInfo) => {
+        await page.setViewportSize({ width, height: 1000 })
+        await page.emulateMedia({ colorScheme, reducedMotion: 'reduce' })
+        const token = { ...syntheticToken, paymentData: { version: 'EC_v1', data: 'synthetic-debug-data-'.repeat(100), signature: 'synthetic-signature', header: { ephemeralPublicKey: 'synthetic-key', publicKeyHash: 'synthetic-hash', transactionId: 'synthetic-id' } } }
+        const mock = await installAppleMock(page, 'succeeded', 'created', token)
+        await gotoHydrated(page, '/halden/direct/order-direct')
+        const panel = page.locator('[data-apple-pay-token]')
+        await expect(panel).toContainText('Restored orders do not retain tokens')
+        await page.locator('apple-pay-button').getByRole('button').click()
+        await expect(page.getByRole('heading', { name: 'Your order is paid.' })).toBeVisible()
+        await expect(panel.locator('code[data-language]')).toHaveCount(0)
+        await panel.getByRole('button', { name: 'Show token', exact: true }).focus()
+        await page.keyboard.press('Enter')
+        const code = panel.locator('code[data-language]')
+        await expect.poll(async () => JSON.parse((await code.textContent())!)).toEqual(token)
+        await panel.getByRole('tab', { name: 'JSON object', exact: true }).focus()
+        await page.keyboard.press('ArrowRight')
+        await expect(panel.getByRole('tab', { name: 'Stringify', exact: true })).toHaveAttribute('aria-selected', 'true')
+        await expect(code).toHaveText(JSON.stringify(JSON.stringify(token)))
+        await page.context().grantPermissions(['clipboard-read', 'clipboard-write'])
+        await panel.getByRole('button', { name: 'Copy Apple Pay token: stringify', exact: true }).click()
+        await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(JSON.stringify(JSON.stringify(token)))
+        await panel.getByRole('tab', { name: 'Apifox', exact: true }).click()
+        await expect.poll(async () => JSON.parse((await code.textContent())!)).toEqual({ tokenInfo: { provider: 'ApplePay', tokenId: JSON.stringify(token) } })
+        await expectNoHorizontalOverflow(page)
+        await panel.getByRole('tab', { name: 'Direct API', exact: true }).click()
+        await expect(code).toContainText('"tokenInfo"')
+        const request = JSON.parse((await code.textContent())!)
+        const info = JSON.parse(request.tokenInfo)
+        expect(info.provider).toBe('ApplePay')
+        expect(JSON.parse(info.tokenId)).toEqual(token)
+        await panel.getByRole('button', { name: 'Copy Direct API tokenInfo', exact: true }).click()
+        await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(await code.textContent())
+        const layout = await panel.evaluate(element => {
+          const button = element.querySelector('button[aria-label$="copied to clipboard"]')!
+          const header = button.parentElement!.parentElement!
+          const icon = button.querySelector('[data-slot=leadingIcon]')!
+          const b = button.getBoundingClientRect(), h = header.getBoundingClientRect(), i = icon.getBoundingClientRect()
+          return { width: b.width, height: b.height, withinHeader: b.top >= h.top && b.bottom <= h.bottom, offsetX: Math.abs(b.x + b.width / 2 - i.x - i.width / 2), offsetY: Math.abs(b.y + b.height / 2 - i.y - i.height / 2) }
+        })
+        expect(layout.withinHeader).toBe(true)
+        expect(layout.width).toBeLessThanOrEqual(32)
+        expect(layout.height).toBeLessThanOrEqual(32)
+        expect(layout.offsetX).toBeLessThanOrEqual(1)
+        expect(layout.offsetY).toBeLessThanOrEqual(1)
+        await expectNoHorizontalOverflow(page)
+        await panel.screenshot({ path: testInfo.outputPath(`token-${width}-${colorScheme}.png`) })
+        await panel.getByRole('button', { name: 'Hide token', exact: true }).click()
+        await expect(code).toHaveCount(0)
+        await panel.getByRole('button', { name: 'Show token', exact: true }).click()
+        await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: true })))
+        await expect(panel.locator('code[data-language]')).toHaveCount(0)
+        await expect(panel.getByRole('button', { name: 'Show token', exact: true })).toHaveCount(0)
+        await page.reload()
+        await expect(panel).toContainText('Restored orders do not retain tokens')
+        expect(mock.calls.filter(path => path.endsWith('/pay'))).toHaveLength(1)
+        mock.assertClean()
+      })
+    }
+  }
+
   for (const width of [320, 790, 1440]) {
     test(`explains callback ownership without changing payment at ${width}px`, async ({ page }, testInfo) => {
       await page.setViewportSize({ width, height: 1100 })
