@@ -5,7 +5,7 @@ const { session, steps, manualCaptured, tokenDebugUnavailable, mode, loading, ch
 const restarting = shallowRef(false)
 const restartError = shallowRef<string | null>(null)
 let disposed = false
-const canRestart = computed(() => !!session.value && ['failed', 'cancelled'].includes(session.value.attempt.status))
+const canRestart = computed(() => !!session.value && submitted.value && !loading.value && !sheetOpen.value && !checking.value && !restarting.value)
 const references = computed(() => session.value ? [
   ['Order', session.value.order.id], ['Attempt', session.value.attempt.id],
   ['Merchant transaction', session.value.attempt.merchantTxnId ?? 'Not assigned'],
@@ -21,7 +21,7 @@ async function restart() {
   try {
     if (!navigator.locks) throw new Error('LOCK_UNAVAILABLE')
     const response = await navigator.locks.request('onerway-payment-intent', { mode: 'exclusive' }, () => disposed ? null : $fetch<{ orderId: string, initial?: DirectRecoveryResponse }>('/api/payment/intent', { method: 'POST', body: { journeyId: 'google-pay-direct', method: 'google-pay', restart: true }, retry: 0 }))
-    if (!disposed && response) await navigateTo(`/halden/direct/${encodeURIComponent(response.orderId)}`)
+    if (!disposed && response) { clearToken(); await navigateTo(`/halden/direct/${encodeURIComponent(response.orderId)}`) }
   }
   catch { if (!disposed) restartError.value = 'A new order could not be opened. Your original order is preserved.' }
   finally { restarting.value = false }
@@ -41,11 +41,11 @@ const resultTitle = computed(() => {
   return manualCaptured.value ? 'Token captured — payment not submitted.' : 'Your Halden order'
 })
 function selectMode(value: unknown) { if (value === 'automatic' || value === 'manual') setMode(value) }
-watch([canPay, buttonHost], () => {
+watch([canPay, buttonHost, restarting], () => {
   const host = buttonHost.value
   if (!host) return
   host.replaceChildren()
-  if (canPay.value) { const button = createButton(); if (button) host.append(button) }
+  if (canPay.value && !restarting.value) { const button = createButton(); if (button) host.append(button) }
 }, { flush: 'post' })
 onMounted(initialize)
 </script>
@@ -62,19 +62,20 @@ onMounted(initialize)
         <section class="space-y-4 rounded-lg border border-default p-5 sm:p-6" aria-labelledby="google-pay-order-title">
           <h2 id="google-pay-order-title" class="text-lg font-semibold text-highlighted">{{ resultTitle }}</h2>
           <UFormField label="After Google Pay authorization" name="google-pay-mode">
-            <URadioGroup :model-value="mode" :items="modeItems" :disabled="loading || submitted || sheetOpen" :ui="{ item: 'min-h-11 touch-manipulation' }" color="neutral" variant="list" @update:model-value="selectMode" />
+            <URadioGroup :model-value="mode" :items="modeItems" :disabled="loading || submitted || sheetOpen || restarting" :ui="{ item: 'min-h-11 touch-manipulation' }" color="neutral" variant="list" @update:model-value="selectMode" />
           </UFormField>
           <p role="status" class="text-sm leading-relaxed text-toned">{{ message }}</p>
-          <p v-if="session?.attempt.status === 'requires_action'" class="text-sm text-toned">Onerway may need card verification on its hosted page. After returning, check this original order’s server result; returning alone does not confirm payment. Do not pay again.</p>
-          <UAlert v-if="error || restartError" :description="error ?? restartError ?? ''" color="warning" variant="subtle" />
+          <p v-if="session?.attempt.status === 'requires_action'" class="text-sm text-toned">Onerway may need card verification on its hosted page. After returning, check this original order’s server result; returning alone does not confirm payment. Do not resubmit this order’s token.</p>
+          <UAlert v-if="error || restartError" :description="restartError ?? error ?? ''" color="warning" variant="subtle" />
           <USkeleton v-if="loading" class="h-12 w-full" aria-label="Preparing Google Pay" />
           <div ref="buttonHost" class="google-pay-control" />
           <div class="flex flex-wrap gap-3">
-            <UButton v-if="!loading && !submitted && !sheetOpen && !canPay" class="min-h-11 touch-manipulation" label="Retry preparation" variant="outline" color="neutral" @click="prepare" />
-            <UButton v-if="submitted" class="min-h-11 touch-manipulation" label="Check this order" :loading="checking" variant="outline" color="neutral" @click="verify" />
-            <UButton v-if="canRestart" class="min-h-11 touch-manipulation" label="Place a new order and pay" :loading="restarting" @click="restart" />
+            <UButton v-if="!loading && !submitted && !sheetOpen && !canPay" class="min-h-11 touch-manipulation" label="Retry preparation" :disabled="restarting" variant="outline" color="neutral" @click="prepare" />
+            <UButton v-if="submitted" class="min-h-11 touch-manipulation" label="Check this order" :loading="checking" :disabled="restarting" variant="outline" color="neutral" @click="verify" />
+            <UButton v-if="session && submitted" class="min-h-11 touch-manipulation" label="Start a new Sandbox order" :loading="restarting" :disabled="!canRestart" @click="restart" />
             <UButton class="min-h-11 touch-manipulation" to="/" label="Demo Hub" variant="link" color="neutral" />
           </div>
+          <p v-if="session && submitted" class="text-sm text-toned">A new Sandbox order is an independent test. It does not cancel this order or resend its token. This browser will restore the new order on your next visit.</p>
         </section>
         <PaymentGooglePayToken :token="tokenDebug" :unavailable="tokenDebugUnavailable" :manual="mode === 'manual'" :captured="manualCaptured" @clear="clearToken" />
         <PaymentGooglePaySteps :steps="steps" :mode="mode" />
@@ -90,7 +91,7 @@ onMounted(initialize)
           <h2 class="font-semibold text-highlighted">Google Pay test conditions</h2>
           <p>Google Pay runs in TEST. Availability depends on your browser, account, card networks and merchant configuration. Google TEST can return mock tokens that the payment gateway rejects; obtaining a token does not prove it can be charged.</p>
           <p>Full PaymentData, card details and tokens are never saved. The encrypted token is available only in this page’s Sandbox debugging view.</p>
-          <p v-if="submitted">Do not pay again while this order is unconfirmed.</p>
+          <p v-if="submitted">Do not resubmit this order’s token. Start a new Sandbox order only for an independent test.</p>
         </section>
         <section v-if="session" class="space-y-3 rounded-lg border border-default p-5 text-sm">
           <h2 class="font-semibold text-highlighted">Safe payment summary</h2>

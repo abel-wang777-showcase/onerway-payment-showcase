@@ -3,6 +3,7 @@ import { mockNuxtImport, mountSuspended } from '@nuxt/test-utils/runtime'
 import { flushPromises } from '@vue/test-utils'
 import { defineComponent } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import GooglePay from '../../app/components/payment/GooglePay.vue'
 import { useGooglePay } from '../../app/composables/useGooglePay'
 
 const mocks = vi.hoisted(() => ({ fetch: vi.fn(), load: vi.fn(), ready: vi.fn(), authorize: vi.fn(), navigate: vi.fn() }))
@@ -12,7 +13,7 @@ vi.mock('../../app/utils/google-pay.client', async original => ({ ...await origi
 function payment() {
   const createdAt = '2026-10-09T00:00:00.000Z'
   const attempt = { id: 'attempt-google', orderId: 'order-google', integration: 'direct-api', method: 'google-pay', status: 'created', createdAt, updatedAt: createdAt }
-  return { order: { id: 'order-google' }, attempt, attempts: [attempt], events: [], submitted: false, canAuthorize: true, config: { environment: 'TEST', gateway: 'synthetic', gatewayMerchantId: 'synthetic-merchant', allowedAuthMethods: ['PAN_ONLY', 'CRYPTOGRAM_3DS'], allowedCardNetworks: ['VISA'], countryCode: 'US', currencyCode: 'USD', totalPrice: '5.00' } }
+  return { order: { id: 'order-google', item: { name: 'Halden sample' }, amount: { minor: 500, currency: 'USD' } }, attempt, attempts: [attempt], events: [], submitted: false, canAuthorize: true, config: { environment: 'TEST', gateway: 'synthetic', gatewayMerchantId: 'synthetic-merchant', allowedAuthMethods: ['PAN_ONLY', 'CRYPTOGRAM_3DS'], allowedCardNetworks: ['VISA'], countryCode: 'US', currencyCode: 'USD', totalPrice: '5.00' } }
 }
 let google: ReturnType<typeof useGooglePay>
 const Harness = defineComponent({ setup() { google = useGooglePay('order-google'); return () => null } })
@@ -226,4 +227,60 @@ describe('Google Pay client', () => {
     wrapper.unmount()
   })
 
+})
+
+
+describe('Google Pay independent Sandbox orders', () => {
+  async function mountOrder(status: string) {
+    const initial = payment()
+    initial.submitted = true
+    initial.attempt.status = status
+    mocks.fetch.mockImplementation(async (url) => url === '/api/payment/intent' ? { orderId: 'new-order-google' } : initial)
+    const wrapper = await mountSuspended(GooglePay, { props: { orderId: 'order-google', initial: initial as unknown as DirectRecoveryResponse }, global: { stubs: { PaymentGooglePaySteps: true, PaymentGooglePayToken: true } } })
+    await flushPromises()
+    return wrapper
+  }
+  it.each(['created', 'requires_action'])('opens an independent order from submitted %s without paying the old order', async (status) => {
+    const wrapper = await mountOrder(status)
+    const action = wrapper.findAll('button').find(button => button.text() === 'Start a new Sandbox order')!
+    expect(action.attributes('disabled')).toBeUndefined()
+    expect(wrapper.text()).toContain('does not cancel this order or resend its token')
+    expect(wrapper.text()).toContain('This browser will restore the new order')
+    await action.trigger('click')
+    await flushPromises()
+    expect(mocks.fetch).toHaveBeenCalledWith('/api/payment/intent', { method: 'POST', body: { journeyId: 'google-pay-direct', method: 'google-pay', restart: true }, retry: 0 })
+    expect(mocks.navigate).toHaveBeenCalledExactlyOnceWith('/halden/direct/new-order-google')
+    expect(mocks.authorize).not.toHaveBeenCalled()
+    expect(mocks.fetch.mock.calls.some(([url]) => url === '/api/payment/google-pay/pay')).toBe(false)
+    wrapper.unmount()
+  })
+  it('preserves the old order and its query action when creating a new order fails', async () => {
+    const wrapper = await mountOrder('requires_action')
+    mocks.fetch.mockRejectedValueOnce(new Error('intent unavailable'))
+    await wrapper.findAll('button').find(button => button.text() === 'Start a new Sandbox order')!.trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('Your original order is preserved')
+    expect(wrapper.text()).toContain('order-google')
+    expect(mocks.navigate).not.toHaveBeenCalled()
+    const check = wrapper.findAll('button').find(button => button.text() === 'Check this order')!
+    expect(check.attributes('disabled')).toBeUndefined()
+    await check.trigger('click')
+    await flushPromises()
+    expect(mocks.fetch).toHaveBeenLastCalledWith('/api/payment/recover', { query: { orderId: 'order-google' }, retry: 0 })
+    expect(mocks.authorize).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+  it('prevents duplicate new-order creation while the request is in flight', async () => {
+    const wrapper = await mountOrder('created')
+    let resolve!: (value: unknown) => void
+    mocks.fetch.mockImplementationOnce(() => new Promise(done => { resolve = done }))
+    const action = wrapper.findAll('button').find(button => button.text() === 'Start a new Sandbox order')!
+    await action.trigger('click')
+    expect(action.attributes('disabled')).toBeDefined()
+    await action.trigger('click')
+    expect(mocks.fetch.mock.calls.filter(([url]) => url === '/api/payment/intent')).toHaveLength(1)
+    resolve({ orderId: 'new-order-google' })
+    await flushPromises()
+    wrapper.unmount()
+  })
 })
