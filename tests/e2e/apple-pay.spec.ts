@@ -99,6 +99,8 @@ test.describe('mock Apple Pay Direct browser journey', () => {
       await page.emulateMedia({ colorScheme: presentation.colorScheme, reducedMotion: 'reduce' })
       const mock = await installAppleMock(page)
       await gotoHydrated(page, '/halden/direct/order-direct')
+      await expect(page.getByRole('radio', { name: 'Manual debugging', exact: true })).toBeVisible()
+      const recoveriesBeforeCapture = mock.calls.filter(path => path.endsWith('/recover')).length
       const manual = page.getByRole('radio', { name: 'Manual debugging', exact: true })
       await manual.focus()
       await page.keyboard.press('Space')
@@ -120,7 +122,8 @@ test.describe('mock Apple Pay Direct browser journey', () => {
       await expect.poll(async () => JSON.parse(await page.evaluate(() => navigator.clipboard.readText()))).toEqual({ tokenInfo: { provider: 'ApplePay', tokenId: JSON.stringify(syntheticToken) } })
       await expect.poll(() => page.evaluate(() => (window as unknown as { __appleAborts?: number }).__appleAborts)).toBe(1)
       expect(await page.evaluate(() => (window as unknown as { __appleCompletions?: number[] }).__appleCompletions ?? [])).toEqual([])
-      expect(mock.calls.filter(path => path.endsWith('/pay') || path.endsWith('/recover'))).toHaveLength(0)
+      expect(mock.calls.filter(path => path.endsWith('/pay'))).toHaveLength(0)
+      expect(mock.calls.filter(path => path.endsWith('/recover'))).toHaveLength(recoveriesBeforeCapture)
       await expectNoHorizontalOverflow(page)
       await page.screenshot({ path: testInfo.outputPath(`apple-pay-manual-${presentation.width}.png`), fullPage: true })
       await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: true })))

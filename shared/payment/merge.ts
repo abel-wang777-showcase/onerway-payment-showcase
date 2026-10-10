@@ -1,4 +1,4 @@
-import { isDirectApplePayAttempt, type PaymentAttempt, type PaymentStatus } from './attempt'
+import { isDirectWalletAttempt, type PaymentAttempt, type PaymentStatus } from './attempt'
 import { isTerminalStatus } from './sdk'
 import type { PaymentEvent } from './event'
 
@@ -107,7 +107,7 @@ export function mapDirectTransactionStatus(status: string): PaymentStatus {
 }
 
 export function mergeAttempt(attempt: PaymentAttempt, event: PaymentEvent): AttemptMerge {
-  const directServer = isDirectApplePayAttempt(attempt) && event.source === 'server'
+  const directServer = isDirectWalletAttempt(attempt) && event.source === 'server'
     && Boolean(event.transactionId) && event.transactionStatus !== undefined
     && mapDirectTransactionStatus(event.transactionStatus) === event.status
   if (isTerminalStatus(event.status) && !trustedTerminalSources.has(event.source) && !directServer) {

@@ -381,23 +381,33 @@ describe('subscription cancellation without Payment ID', () => {
 })
 
 
-describe('Direct Apple Pay persistence', () => {
+describe.each(['apple-pay', 'google-pay'] as const)('Direct %s persistence', (method) => {
   beforeEach(() => {
     vi.stubEnv('DATABASE_URL', 'postgres://mock-only.invalid/test')
     database.query.mockReset()
-    mockAttempt({ integration: 'direct-api', method: 'apple-pay', payment_id: null, transaction_id: null })
+    mockAttempt({ integration: 'direct-api', method, payment_id: null, transaction_id: null })
   })
   afterEach(() => vi.unstubAllEnvs())
   const directFact = { ...cancellation, kind: 'direct' as const, transactionStatus: 'F' as const, status: 'failed' as const }
   const completion = () => createEvent({ id: 'direct-event', attemptId: 'attempt-1', source: 'server', sourceKey: 'direct-create:attempt-1', status: 'succeeded', transactionId: '1001', transactionStatus: 'S', rawStatus: 'S', occurredAt: now })
 
+  it('allows missing IDs only for a Google requires-action create response', async () => {
+    const action = createEvent({ id: 'action', attemptId: 'attempt-1', source: 'server', sourceKey: 'direct-create:attempt-1', status: 'requires_action', transactionStatus: 'R', rawStatus: 'R', occurredAt: now })
+    if (method === 'google-pay') {
+      expect(await completePaymentRecord('attempt-1', undefined, undefined, action)).toMatchObject({ status: 'requires_action', statusSource: 'server' })
+    }
+    else {
+      await expect(completePaymentRecord('attempt-1', undefined, undefined, action)).rejects.toThrow('PAYMENT_ATTEMPT_MISMATCH')
+    }
+    await expect(completePaymentRecord('attempt-1', undefined, undefined, createEvent({ ...action, status: 'succeeded', transactionStatus: 'S' }))).rejects.toThrow('PAYMENT_ATTEMPT_MISMATCH')
+  })
   it('persists a terminal server response without paymentId', async () => {
     expect(await completePaymentRecord('attempt-1', undefined, '1001', completion())).toMatchObject({ status: 'succeeded', statusSource: 'server', transactionId: '1001' })
   })
   it('persists a correlated terminal response after a non-terminal query projection', async () => {
     mockAttempt({
       integration: 'direct-api',
-      method: 'apple-pay',
+      method,
       payment_id: null,
       transaction_id: '1001',
       status: 'processing',
@@ -409,13 +419,13 @@ describe('Direct Apple Pay persistence', () => {
   })
   it('accepts an early failure webhook without paymentId and prevents late response from changing it', async () => {
     expect((await recordWebhookEvent(directFact)).attempt).toMatchObject({ status: 'failed', transactionId: '1001' })
-    mockAttempt({ integration: 'direct-api', method: 'apple-pay', payment_id: null, transaction_id: '1001', status: 'failed', status_source: 'webhook' })
+    mockAttempt({ integration: 'direct-api', method, payment_id: null, transaction_id: '1001', status: 'failed', status_source: 'webhook' })
     expect(await completePaymentRecord('attempt-1', undefined, '1001', completion())).toMatchObject({ status: 'failed', statusSource: 'webhook' })
     const insert = database.query.mock.calls.findLast(([sql]) => sql.includes('INSERT INTO payment_events'))
     expect(insert?.[1]).toContain(true)
   })
   it('rejects cross-transaction webhook even when paymentId matches', async () => {
-    mockAttempt({ integration: 'direct-api', method: 'apple-pay', transaction_id: '2000' })
+    mockAttempt({ integration: 'direct-api', method, transaction_id: '2000' })
     await expect(recordWebhookEvent({ ...directFact, paymentId: '1000' })).rejects.toThrow('PAYMENT_ATTEMPT_MISMATCH')
     await expect(completePaymentRecord('attempt-1', '1000', '1001', completion())).rejects.toThrow('PAYMENT_ATTEMPT_MISMATCH')
   })
@@ -423,15 +433,15 @@ describe('Direct Apple Pay persistence', () => {
     await expect(recordWebhookEvent({ ...directFact, ...fields } as typeof directFact)).rejects.toThrow('PAYMENT_ATTEMPT_MISMATCH')
   })
   it('records query-verified Direct attribution without paymentId on the same transaction', async () => {
-    mockAttempt({ integration: 'direct-api', method: 'apple-pay', payment_id: null, transaction_id: '1001' })
-    const result = await recordPaymentMethodDetails('attempt-1', undefined, { transactionId: '1001', actualWallet: 'apple-pay', fundingNetwork: 'VISA' }, now)
-    expect(result).toMatchObject({ actualWallet: 'apple-pay', fundingNetwork: 'VISA', attributionTransactionId: '1001' })
-    await expect(recordPaymentMethodDetails('attempt-1', undefined, { transactionId: '1002', actualWallet: 'apple-pay', fundingNetwork: 'VISA' }, now)).rejects.toThrow('PAYMENT_ATTEMPT_MISMATCH')
-    await expect(recordPaymentMethodDetails('attempt-1', undefined, { transactionId: '1001', actualWallet: 'google-pay', fundingNetwork: 'VISA' }, now)).rejects.toThrow('PAYMENT_ATTEMPT_MISMATCH')
+    mockAttempt({ integration: 'direct-api', method, payment_id: null, transaction_id: '1001' })
+    const result = await recordPaymentMethodDetails('attempt-1', undefined, { transactionId: '1001', actualWallet: method, fundingNetwork: 'VISA' }, now)
+    expect(result).toMatchObject({ actualWallet: method, fundingNetwork: 'VISA', attributionTransactionId: '1001' })
+    await expect(recordPaymentMethodDetails('attempt-1', undefined, { transactionId: '1002', actualWallet: method, fundingNetwork: 'VISA' }, now)).rejects.toThrow('PAYMENT_ATTEMPT_MISMATCH')
+    await expect(recordPaymentMethodDetails('attempt-1', undefined, { transactionId: '1001', actualWallet: method === 'apple-pay' ? 'google-pay' : 'apple-pay', fundingNetwork: 'VISA' }, now)).rejects.toThrow('PAYMENT_ATTEMPT_MISMATCH')
   })
   it('preserves the SDK paymentId requirement for attribution', async () => {
-    mockAttempt({ integration: 'web-js-sdk', method: 'apple-pay', payment_id: null, transaction_id: '1001' })
-    await expect(recordPaymentMethodDetails('attempt-1', undefined, { transactionId: '1001', actualWallet: 'apple-pay', fundingNetwork: 'VISA' }, now)).rejects.toThrow('PAYMENT_ATTEMPT_MISMATCH')
+    mockAttempt({ integration: 'web-js-sdk', method, payment_id: null, transaction_id: '1001' })
+    await expect(recordPaymentMethodDetails('attempt-1', undefined, { transactionId: '1001', actualWallet: method, fundingNetwork: 'VISA' }, now)).rejects.toThrow('PAYMENT_ATTEMPT_MISMATCH')
   })
   it('allows fresh transaction query to reconcile without paymentId', async () => {
     const result = await recordQueryEvent('attempt-1', undefined, { merchantTxnId: 'merchant-attempt-1', transactionId: '1001', transactionStatus: 'S', rawStatus: 'S', status: 'succeeded' }, now)

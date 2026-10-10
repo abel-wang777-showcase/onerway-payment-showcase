@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import type { ApplePayStep } from '#shared/payment/apple-pay'
+import type { PaymentStep } from '#shared/payment/protocol'
 
-const props = defineProps<{ step: ApplePayStep, index: number }>()
+const props = withDefaults(defineProps<{ step: PaymentStep, index: number, wallet?: 'apple-pay' | 'google-pay' }>(), { wallet: 'apple-pay' })
 const details = useTemplateRef<HTMLDetailsElement>('details')
 const manualChoice = shallowRef<boolean | null>(null)
 const keepOpenForFocus = shallowRef(false)
@@ -27,7 +27,7 @@ const duration = computed(() => {
   const value = props.step.evidence?.durationMs
   return value !== undefined && Number.isFinite(value) && value >= 0 ? `${new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 }).format(value)} ms` : null
 })
-const exampleLanguage = computed(() => ['begin', 'validate', 'authorize'].includes(props.step.id) ? 'js' as const : 'json' as const)
+const exampleLanguage = computed(() => props.step.example?.language ?? (['begin', 'validate', 'authorize'].includes(props.step.id) ? 'js' as const : 'json' as const))
 
 function toggle(): void { manualChoice.value = !isOpen.value }
 function preserveFocusedContent(event: FocusEvent): void {
@@ -36,7 +36,7 @@ function preserveFocusedContent(event: FocusEvent): void {
 </script>
 
 <template>
-  <li class="apple-pay-timeline-step min-w-0" :data-apple-pay-step="step.id" :data-state="step.state" :aria-current="step.state === 'active' ? 'step' : undefined">
+  <li class="apple-pay-timeline-step min-w-0" :data-apple-pay-step="wallet === 'apple-pay' ? step.id : undefined" :data-google-pay-step="wallet === 'google-pay' ? step.id : undefined" :data-state="step.state" :aria-current="step.state === 'active' ? 'step' : undefined">
     <span class="apple-pay-timeline-marker flex size-8 items-center justify-center rounded-full border bg-default text-sm font-medium tabular-nums text-highlighted" :class="step.state === 'active' ? 'border-primary' : 'border-default'" aria-hidden="true">{{ index + 1 }}</span>
     <div class="min-w-0">
       <div class="flex min-w-0 flex-wrap items-start justify-between gap-x-3 gap-y-1">
@@ -80,8 +80,8 @@ function preserveFocusedContent(event: FocusEvent): void {
                   </dd>
                 </div>
               </dl>
-              <PaymentApplePayMessage v-if="step.evidence.request" :label="`${step.title}: safe request`" :value="step.evidence.request" />
-              <PaymentApplePayMessage v-if="step.evidence.response" :label="`${step.title}: safe response`" :value="step.evidence.response" />
+              <PaymentMessage v-if="step.evidence.request" :label="`${step.title}: safe request`" :value="step.evidence.request" />
+              <PaymentMessage v-if="step.evidence.response" :label="`${step.title}: safe response`" :value="step.evidence.response" />
               <p v-if="!step.evidence.request && !step.evidence.response" class="text-xs leading-relaxed text-toned">No request or response body is retained for this step.</p>
             </template>
             <p v-else class="text-sm leading-relaxed text-toned">No data was recorded for this step in this visit. The explanation below describes the integration; it does not prove that this step ran.</p>
@@ -99,8 +99,8 @@ function preserveFocusedContent(event: FocusEvent): void {
           <section v-if="step.example?.request || step.example?.response" :aria-label="`${step.title}: synthetic example`" class="min-w-0 space-y-3 border-t border-dashed border-default pt-4">
             <h4 class="text-sm font-semibold tracking-tight text-highlighted">Synthetic example</h4>
             <p class="text-xs leading-relaxed text-toned">Illustrative values only. This example is not a message from your payment.</p>
-            <PaymentApplePayMessage v-if="step.example.request" :label="`${step.title}: example request`" :value="step.example.request" :language="exampleLanguage" />
-            <PaymentApplePayMessage v-if="step.example.response" :label="`${step.title}: example response`" :value="step.example.response" language="json" />
+            <PaymentMessage v-if="step.example.request" :label="`${step.title}: example request`" :value="step.example.request" :language="exampleLanguage" />
+            <PaymentMessage v-if="step.example.response" :label="`${step.title}: example response`" :value="step.example.response" language="json" />
           </section>
         </div>
       </details>

@@ -154,6 +154,12 @@ watch(() => selection.value.integration, (integration) => {
   journeyId.value = integration === 'direct-api' ? 'apple-pay-direct' : integration === 'checkout' ? 'hosted-checkout' : 'standard-success'
 })
 
+watch(() => selection.value.method, (method) => {
+  if (selection.value.integration === 'direct-api') {
+    journeyId.value = method === 'google-pay' ? 'google-pay-direct' : 'apple-pay-direct'
+  }
+})
+
 const journeyItems = computed<RadioGroupItem[]>(() => JOURNEY_IDS
   .filter(id => JOURNEYS[id].integration === selection.value.integration)
   .map(id => ({

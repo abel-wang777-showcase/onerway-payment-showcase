@@ -44,6 +44,13 @@ function defineCapability(
     })
   }
 
+  if (scene === 'ecommerce' && integration === 'direct-api' && method === 'google-pay') {
+    return Object.freeze({
+      scene, integration, method, status: 'conditional', runnable: true,
+      condition: 'Requires merchant Google Pay configuration and an eligible Google TEST account. Token processing and hosted authentication depend on Sandbox support.',
+    })
+  }
+
   if (scene === 'ecommerce' && integration === 'checkout' && method === 'card') {
     return Object.freeze({
       scene,

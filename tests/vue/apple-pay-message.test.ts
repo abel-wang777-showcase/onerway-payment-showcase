@@ -1,7 +1,7 @@
 import { mockNuxtImport, mountSuspended } from '@nuxt/test-utils/runtime'
 import { flushPromises } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import ApplePayMessage from '../../app/components/payment/ApplePayMessage.vue'
+import PaymentMessage from '../../app/components/payment/Message.vue'
 
 const highlight = vi.hoisted(() => ({
   blockedValue: undefined as string | undefined,
@@ -51,7 +51,7 @@ function installClipboard() {
 describe('Apple Pay safe message', () => {
   it('tokenizes real JSON while rendering message text as escaped spans', async () => {
     const value = '{"payload":"<img src=x onerror=alert(1)>","ok":true,"count":2}'
-    const wrapper = await mountSuspended(ApplePayMessage, { props: { label: 'Safe request', value } })
+    const wrapper = await mountSuspended(PaymentMessage, { props: { label: 'Safe request', value } })
     await flushPromises()
 
     const code = wrapper.get('code')
@@ -71,7 +71,7 @@ describe('Apple Pay safe message', () => {
   it('copies the unchanged source value after highlighting', async () => {
     const value = '  {\n  "safe": true,\n  "text": "<script>escaped</script>"\n}\n'
     const clipboard = installClipboard()
-    const wrapper = await mountSuspended(ApplePayMessage, {
+    const wrapper = await mountSuspended(PaymentMessage, {
       attachTo: document.body,
       props: { label: 'Safe response', value },
     })
@@ -94,7 +94,7 @@ describe('Apple Pay safe message', () => {
 
   it('keeps a labelled copy icon and visible focus without a tooltip wrapper', async () => {
     const warn = vi.spyOn(console, 'warn')
-    const wrapper = await mountSuspended(ApplePayMessage, { props: { label: 'Safe request', value: '{}' } })
+    const wrapper = await mountSuspended(PaymentMessage, { props: { label: 'Safe request', value: '{}' } })
     const button = wrapper.get('button[aria-label="Copy Safe request"]')
 
     expect(button.get('[data-slot="leadingIcon"]').classes()).toContain('i-lucide:copy')
@@ -117,7 +117,7 @@ describe('Apple Pay safe message', () => {
       if (originalExecCommand) Object.defineProperty(document, 'execCommand', originalExecCommand)
       else Reflect.deleteProperty(document, 'execCommand')
     })
-    const wrapper = await mountSuspended(ApplePayMessage, { props: { label: 'Safe response', value } })
+    const wrapper = await mountSuspended(PaymentMessage, { props: { label: 'Safe response', value } })
 
     const button = wrapper.get('button[aria-label="Copy Safe response"]')
     await button.trigger('click')
@@ -137,7 +137,7 @@ describe('Apple Pay safe message', () => {
     let release!: () => void
     highlight.blockedValue = oldValue
     highlight.gate = new Promise<void>((resolve) => { release = resolve })
-    const wrapper = await mountSuspended(ApplePayMessage, { props: { label: 'Example', value: oldValue } })
+    const wrapper = await mountSuspended(PaymentMessage, { props: { label: 'Example', value: oldValue } })
     await vi.waitFor(() => expect(highlight.tokenize).toHaveBeenCalledWith(oldValue, 'json', expect.any(Function)))
 
     await wrapper.setProps({ value: newValue, language: 'js' })
@@ -158,7 +158,7 @@ describe('Apple Pay safe message', () => {
   it('keeps plain text when tokenization is unavailable', async () => {
     const value = '{"fallback":true}'
     highlight.failedValue = value
-    const wrapper = await mountSuspended(ApplePayMessage, { props: { label: 'Fallback', value } })
+    const wrapper = await mountSuspended(PaymentMessage, { props: { label: 'Fallback', value } })
     await flushPromises()
 
     const code = wrapper.get('code')

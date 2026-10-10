@@ -4,7 +4,7 @@ import type { PoolClient, QueryResultRow } from '@neondatabase/serverless'
 import {
   createAttempt,
   getRetryDecision,
-  isDirectApplePayAttempt,
+  isDirectWalletAttempt,
   type PaymentAttempt,
   type PaymentStatus,
 } from '../../shared/payment/attempt'
@@ -1143,7 +1143,7 @@ export async function recordSubscriptionCreationRecoveryAllowed(
 export async function completePaymentRecord(
   attemptId: string,
   paymentId: string | undefined,
-  transactionId: string,
+  transactionId: string | undefined,
   event: PaymentEvent,
 ): Promise<PaymentAttempt> {
   const sourceKey = event.sourceKey
@@ -1196,7 +1196,11 @@ export async function completePaymentRecord(
       return attempt
     }
 
-    const direct = isDirectApplePayAttempt(current)
+    const direct = isDirectWalletAttempt(current)
+    if (!transactionId && !(direct && current.method === 'google-pay' && event.source === 'server'
+      && event.status === 'requires_action' && event.transactionStatus === 'R' && !paymentId && !current.transactionId)) {
+      throw new PaymentStoreError('PAYMENT_ATTEMPT_MISMATCH')
+    }
     if (direct && (event.transactionId !== transactionId
       || !event.transactionStatus
       || mapDirectTransactionStatus(event.transactionStatus) !== event.status)) {
@@ -1284,7 +1288,7 @@ export async function recordQueryEvent(
     if (current.authorization) throw new PaymentStoreError('PAYMENT_ATTEMPT_MISMATCH')
 
     const checkout = current.integration === 'checkout'
-    const direct = isDirectApplePayAttempt(current)
+    const direct = isDirectWalletAttempt(current)
 
     if (
       current.paymentId !== paymentId
@@ -1398,12 +1402,12 @@ export async function recordPaymentMethodDetails(
 
     if (current.authorization) throw new PaymentStoreError('PAYMENT_ATTEMPT_MISMATCH')
 
-    const direct = isDirectApplePayAttempt(current)
+    const direct = isDirectWalletAttempt(current)
     if (
       current.paymentId !== paymentId
       || (!direct && (!paymentId || details.paymentId !== paymentId))
       || (direct && ((current.paymentId && details.paymentId && details.paymentId !== current.paymentId)
-        || details.actualWallet !== 'apple-pay' || !details.fundingNetwork))
+        || details.actualWallet !== current.method || !details.fundingNetwork))
       || !current.transactionId || current.transactionId !== details.transactionId
     ) {
       throw new PaymentStoreError('PAYMENT_ATTEMPT_MISMATCH')
@@ -1953,7 +1957,7 @@ export async function recordWebhookEvent(
     const current = attemptFromRow(row)
 
     if (current.authorization) throw new PaymentStoreError('PAYMENT_ATTEMPT_MISMATCH')
-    const direct = isDirectApplePayAttempt(current)
+    const direct = isDirectWalletAttempt(current)
     const checkoutCancellation = current.integration === 'checkout'
       && fact.transactionStatus === 'N'
       && fact.paymentStatus === undefined
