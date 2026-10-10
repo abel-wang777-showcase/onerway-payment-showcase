@@ -157,6 +157,25 @@ describe('Google Pay Direct transaction', () => {
     expect(() => readGooglePayQueryResponse(query([txn, txn]), 'synthetic-merchant', queryContext)).toThrow('GOOGLE_PAY_RESPONSE_INVALID')
     expect(() => readGooglePayQueryResponse(query([txn]), 'synthetic-merchant', { ...queryContext, transactionId: 'other' })).toThrow('GOOGLE_PAY_RESPONSE_INVALID')
   })
+  it('records a correlated business decline instead of treating it as an unknown submission', () => {
+    const value = { respCode: '12003', respMsg: 'Declined by router', data: {
+      transactionId: 'txn', paymentId: 'payment', orderAmount: '5.00', orderCurrency: 'USD', status: 'F', paymentStatus: 'N',
+    } }
+    expect(readGooglePayCreateResponse(value, 'synthetic-merchant', queryContext)).toEqual({
+      merchantTxnId: 'merchant-txn', transactionId: 'txn', paymentId: 'payment', rawStatus: 'F', status: 'failed',
+    })
+    expect(() => readGooglePayQueryResponse(value, 'synthetic-merchant', queryContext)).toThrow('GOOGLE_PAY_GATEWAY_REJECTED')
+  })
+  it.each([
+    { status: 'S' }, { status: 'N' }, { status: 'R' }, { status: 'P' },
+    { transactionId: undefined }, { merchantTxnId: 'another-order' }, { merchantNo: 'another-merchant' },
+    { orderAmount: undefined }, { orderAmount: '6.00' }, { orderCurrency: undefined }, { orderCurrency: 'EUR' },
+  ])('does not trust incomplete, mismatched or non-failed business error data', (change) => {
+    expect(() => readGooglePayCreateResponse({ respCode: '12003', data: { ...txn, status: 'F', ...change } }, 'synthetic-merchant', queryContext)).toThrow()
+  })
+  it.each([undefined, null, {}, '12003', { respCode: '12003' }, { respCode: 'invalid', data: { ...txn, status: 'F' } }])('keeps malformed business errors unknown', (value) => {
+    expect(() => readGooglePayCreateResponse(value, 'synthetic-merchant', queryContext)).toThrow('GOOGLE_PAY_GATEWAY_REJECTED')
+  })
   it.each([['S', 'succeeded'], ['F', 'failed'], ['N', 'cancelled'], ['R', 'requires_action'], ['P', 'processing'], ['U', 'processing'], ['I', 'processing']])('maps transaction %s independently of Payment status', (status, mapped) => {
     expect(readGooglePayCreateResponse(response({ ...txn, status, paymentStatus: 'S' }), 'synthetic-merchant', queryContext).status).toBe(mapped)
   })
