@@ -77,7 +77,8 @@ export async function refreshDirectRecovery(profile: SandboxProfile, recovery: P
     if (!(error instanceof DirectGatewayError)) throw error
     const latest = await getPaymentRecovery(recovery.order.id, recovery.attempt.id)
     if (!latest) throw new PaymentStoreError('PAYMENT_ATTEMPT_NOT_FOUND')
-    return { ...toDirectRecovery(latest), verificationPending: true }
+    return { ...toDirectRecovery(latest), verificationPending: true,
+      ...(recovery.attempt.method === 'google-pay' && error.code === 'PAYMENT_QUERY_NOT_FOUND' ? { transactionNotFound: true } : {}) }
   }
   await completePaymentRecord(recovery.attempt.id, found.paymentId, found.transactionId, createEvent({
     id: randomUUID(), attemptId: recovery.attempt.id, source: 'query',

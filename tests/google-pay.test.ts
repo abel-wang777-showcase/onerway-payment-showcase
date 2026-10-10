@@ -137,6 +137,18 @@ describe('Google Pay Direct transaction', () => {
     expect(readGooglePayCreateResponse(value, 'synthetic-merchant', queryContext)).not.toHaveProperty('redirectUrl')
     expect(readGooglePayCreateResponse(value, 'synthetic-merchant', queryContext, 'https://wrong.example')).not.toHaveProperty('redirectUrl')
   })
+  it('accepts the synchronous hosted response without echoed order or provider identifiers', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => response({
+      orderAmount: '5.00', orderCurrency: 'USD', status: 'R', redirectUrl: hostedUrl(),
+    }) }))
+    const result = await createGooglePayPayment(sandboxProfile, createContext)
+    expect(result).toMatchObject({ merchantTxnId: 'merchant-txn', rawStatus: 'R', status: 'requires_action', redirectUrl: hostedUrl() })
+    expect(result).not.toHaveProperty('transactionId')
+    expect(result.evidence.request).not.toContain('synthetic-hosted-key')
+  })
+  it.each([{ orderAmount: undefined }, { orderAmount: '6.00' }, { orderCurrency: undefined }, { orderCurrency: 'EUR' }, { merchantTxnId: 'other' }, { status: 'S' }])('rejects uncorrelated or mismatched identifier-free hosted responses', (change) => {
+    expect(() => readGooglePayCreateResponse(response({ orderAmount: '5.00', orderCurrency: 'USD', status: 'R', redirectUrl: hostedUrl(), ...change }), 'synthetic-merchant', queryContext, createContext.returnUrl)).toThrow('GOOGLE_PAY_RESPONSE_INVALID')
+  })
   it('forwards a verified hosted URL transiently but excludes it from evidence', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => response({ merchantTxnId: 'merchant-txn', status: 'R', redirectUrl: hostedUrl() }) }))
     const result = await createGooglePayPayment(sandboxProfile, createContext)
@@ -156,6 +168,12 @@ describe('Google Pay Direct transaction', () => {
     }
     expect(() => readGooglePayQueryResponse(query([txn, txn]), 'synthetic-merchant', queryContext)).toThrow('GOOGLE_PAY_RESPONSE_INVALID')
     expect(() => readGooglePayQueryResponse(query([txn]), 'synthetic-merchant', { ...queryContext, transactionId: 'other' })).toThrow('GOOGLE_PAY_RESPONSE_INVALID')
+  })
+  it('treats the observed empty Sandbox records page as not found without inventing a status', () => {
+    expect(() => readGooglePayQueryResponse(response({ records: [], total: '0', current: '1', size: '10' }), 'synthetic-merchant', queryContext)).toThrow('PAYMENT_QUERY_NOT_FOUND')
+  })
+  it.each([{ records: [txn] }, { total: '1' }, { total: undefined }, { current: '2' }, { content: null }])('does not generalize the empty records exception to unknown or inconsistent envelopes', (change) => {
+    expect(() => readGooglePayQueryResponse(response({ records: [], total: '0', current: '1', ...change }), 'synthetic-merchant', queryContext)).toThrow('GOOGLE_PAY_RESPONSE_INVALID')
   })
   it('records a correlated business decline instead of treating it as an unknown submission', () => {
     const value = { respCode: '12003', respMsg: 'Declined by router', data: {
