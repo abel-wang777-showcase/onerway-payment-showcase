@@ -5,8 +5,9 @@ import { defineComponent } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useGooglePay } from '../../app/composables/useGooglePay'
 
-const mocks = vi.hoisted(() => ({ fetch: vi.fn(), load: vi.fn(), ready: vi.fn(), authorize: vi.fn() }))
+const mocks = vi.hoisted(() => ({ fetch: vi.fn(), load: vi.fn(), ready: vi.fn(), authorize: vi.fn(), navigate: vi.fn() }))
 mockNuxtImport('$fetch', () => mocks.fetch)
+mockNuxtImport('navigateTo', () => mocks.navigate)
 vi.mock('../../app/utils/google-pay.client', async original => ({ ...await original<typeof import('../../app/utils/google-pay.client')>(), loadGooglePay: mocks.load }))
 function payment() {
   const createdAt = '2026-10-09T00:00:00.000Z'
@@ -16,7 +17,8 @@ function payment() {
 let google: ReturnType<typeof useGooglePay>
 const Harness = defineComponent({ setup() { google = useGooglePay('order-google'); return () => null } })
 beforeEach(() => {
-  vi.clearAllMocks()
+  vi.resetAllMocks()
+  mocks.navigate.mockResolvedValue(undefined)
   mocks.fetch.mockResolvedValue(payment())
   mocks.ready.mockResolvedValue({ result: true })
   mocks.load.mockResolvedValue({ isReadyToPay: mocks.ready, loadPaymentData: mocks.authorize, createButton: vi.fn() })
@@ -44,6 +46,73 @@ describe('Google Pay client', () => {
     wrapper.unmount()
   })
 
+
+  it.each([false, true])('opens hosted verification without retaining its URL or racing a query (navigation fails: %s)', async (fails) => {
+    vi.useFakeTimers()
+    const redirectUrl = `https://sandbox-checkout.onerway.com/additional-information?key=synthetic-hosted-key&returnUrl=${encodeURIComponent(`${window.location.origin}/halden/direct/order-google`)}`
+    const response = { ...payment(), submitted: true, redirectUrl }
+    response.attempt.status = 'requires_action'
+    mocks.authorize.mockResolvedValue({ paymentMethodData: { tokenizationData: { token: 'synthetic-token' } } })
+    if (fails) mocks.navigate.mockRejectedValue(new Error('navigation blocked'))
+    const wrapper = await mountSuspended(Harness)
+    await google.prepare()
+    mocks.fetch.mockResolvedValue(response)
+    google.pay()
+    await flushPromises()
+    await vi.advanceTimersByTimeAsync(60000)
+    expect(mocks.navigate).toHaveBeenCalledExactlyOnceWith(redirectUrl, { external: true })
+    expect(google.session.value?.attempt.status).toBe('requires_action')
+    expect(google.tokenDebug.value).toBeNull()
+    expect(JSON.stringify({ session: google.session.value, steps: google.steps.value })).not.toContain('synthetic-hosted-key')
+    expect(mocks.fetch.mock.calls.map(([url]) => url)).toEqual(['/api/payment/google-pay/prepare', '/api/payment/google-pay/pay'])
+    google.pay()
+    expect(mocks.authorize).toHaveBeenCalledOnce()
+    expect(google.steps.value.find(step => step.id === 'action')?.state).toBe(fails ? 'interrupted' : 'active')
+    if (fails) {
+      expect(google.error.value).toContain('could not be opened')
+      await google.verify()
+      expect(mocks.fetch).toHaveBeenLastCalledWith('/api/payment/recover', expect.anything())
+    }
+    wrapper.unmount()
+  })
+
+  it.each([
+    ['requires_action', 'https://untrusted.example/additional-information?key=synthetic'],
+    ['requires_action', `https://sandbox-checkout.onerway.com/additional-information?key=synthetic&returnUrl=${encodeURIComponent('https://wrong.example/order')}`],
+    ['succeeded', `https://sandbox-checkout.onerway.com/additional-information?key=synthetic&returnUrl=${encodeURIComponent(`${window.location.origin}/halden/direct/order-google`)}`],
+  ])('does not navigate for an invalid destination or non-action state: %s', async (status, redirectUrl) => {
+    const response = { ...payment(), submitted: true, redirectUrl }
+    response.attempt.status = status!
+    mocks.authorize.mockResolvedValue({ paymentMethodData: { tokenizationData: { token: 'synthetic-token' } } })
+    const wrapper = await mountSuspended(Harness)
+    await google.prepare()
+    mocks.fetch.mockImplementation(async (url) => url === '/api/payment/google-pay/pay' ? response : { ...response, redirectUrl: undefined })
+    google.pay()
+    await flushPromises()
+    expect(mocks.navigate).not.toHaveBeenCalled()
+    expect(JSON.stringify(google.session.value)).not.toContain(redirectUrl)
+    expect(google.submitted.value).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('freshly queries the original order on hosted return without authorizing again', async () => {
+    const initial = payment()
+    initial.submitted = true
+    initial.attempt.status = 'requires_action'
+    const recovered = { ...payment(), submitted: true }
+    recovered.attempt.status = 'succeeded'
+    mocks.fetch.mockResolvedValue(recovered)
+    const Restored = defineComponent({ setup() { google = useGooglePay('order-google', initial as unknown as DirectRecoveryResponse); return () => null } })
+    const wrapper = await mountSuspended(Restored)
+    await google.initialize()
+    expect(mocks.fetch).toHaveBeenCalledExactlyOnceWith('/api/payment/recover', { query: { orderId: 'order-google' }, retry: 0 })
+    expect(google.session.value?.attempt.status).toBe('succeeded')
+    expect(mocks.load).not.toHaveBeenCalled()
+    expect(mocks.authorize).not.toHaveBeenCalled()
+    expect(mocks.navigate).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
   it('captures manual authorization without submission, polling or order changes', async () => {
     vi.useFakeTimers()
     mocks.authorize.mockResolvedValue({ paymentMethodData: { tokenizationData: { token: 'synthetic-token' } } })
@@ -61,6 +130,7 @@ describe('Google Pay client', () => {
     expect(google.steps.value.filter(step => ['submit', 'result'].includes(step.id)).every(step => step.state === 'waiting' && !step.evidence)).toBe(true)
     expect(JSON.stringify(google.steps.value)).not.toContain('synthetic-token')
     expect(mocks.fetch).toHaveBeenCalledTimes(1)
+    expect(mocks.navigate).not.toHaveBeenCalled()
     google.setMode('automatic')
     expect(google.tokenDebug.value).toBeNull()
     expect(google.steps.value.find(step => step.id === 'authorize')?.state).toBe('waiting')

@@ -65,7 +65,7 @@ onMounted(initialize)
             <URadioGroup :model-value="mode" :items="modeItems" :disabled="loading || submitted || sheetOpen" :ui="{ item: 'min-h-11 touch-manipulation' }" color="neutral" variant="list" @update:model-value="selectMode" />
           </UFormField>
           <p role="status" class="text-sm leading-relaxed text-toned">{{ message }}</p>
-          <p v-if="session?.attempt.status === 'requires_action'" class="text-sm text-toned">No supported browser action is available for this response. Keep this order and check its server result; do not pay again.</p>
+          <p v-if="session?.attempt.status === 'requires_action'" class="text-sm text-toned">Onerway may need card verification on its hosted page. After returning, check this original order’s server result; returning alone does not confirm payment. Do not pay again.</p>
           <UAlert v-if="error || restartError" :description="error ?? restartError ?? ''" color="warning" variant="subtle" />
           <USkeleton v-if="loading" class="h-12 w-full" aria-label="Preparing Google Pay" />
           <div ref="buttonHost" class="google-pay-control" />

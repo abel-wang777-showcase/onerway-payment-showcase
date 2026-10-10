@@ -2,7 +2,7 @@ import { DirectGatewayError, buildDirectPayload, directRequestEvidence, postDire
 import type { GooglePayConfiguration } from '../../shared/payment/google-pay'
 import type { Order } from '../../shared/payment/order'
 import type { CreateContext } from './gateway'
-import { googlePayTokenInfo } from '../../shared/payment/google-pay'
+import { googlePayTokenInfo, readGooglePayRedirectUrl } from '../../shared/payment/google-pay'
 import type { ServerProfile } from './profile'
 
 
@@ -64,16 +64,19 @@ export function buildGooglePayPayload(profile: SandboxProfile, context: GooglePa
   return buildDirectPayload(profile, context, googlePayTokenInfo(context.token), 'GooglePay')
 }
 export type GooglePayQueryContext = DirectQueryContext
-export type GooglePayTransaction = DirectTransaction & { readonly actualWallet?: 'google-pay' }
-export function readGooglePayCreateResponse(value: unknown, merchantNo: string, context: DirectQueryContext): GooglePayTransaction {
-  return readDirectCreateResponse(value, merchantNo, context, 'GooglePay') as GooglePayTransaction
+export type GooglePayTransaction = DirectTransaction & { readonly actualWallet?: 'google-pay'; readonly redirectUrl?: string }
+export function readGooglePayCreateResponse(value: unknown, merchantNo: string, context: DirectQueryContext, expectedReturnUrl?: string): GooglePayTransaction {
+  const result = readDirectCreateResponse(value, merchantNo, context, 'GooglePay') as GooglePayTransaction
+  const redirectUrl = result.status === 'requires_action' && expectedReturnUrl !== undefined && record(value) && record(value.data)
+    ? readGooglePayRedirectUrl(value.data.redirectUrl, expectedReturnUrl) : undefined
+  return { ...result, ...(redirectUrl ? { redirectUrl } : {}) }
 }
 export function readGooglePayQueryResponse(value: unknown, merchantNo: string, context: DirectQueryContext): GooglePayTransaction {
   return readDirectQueryResponse(value, merchantNo, context, 'GooglePay') as GooglePayTransaction
 }
 export async function createGooglePayPayment(profile: SandboxProfile, context: GooglePayCreateContext): Promise<GooglePayTransaction & { readonly evidence: { readonly request: string } }> {
   const payload = buildGooglePayPayload(profile, context)
-  const result = readGooglePayCreateResponse(await postDirect(profile, '/v1/txn/doTransaction', payload, 'GooglePay'), profile.merchantNo, { merchantTxnId: context.merchantTxnId, amountMinor: context.order.amount.minor, currency: context.order.amount.currency, appId: profile.appId })
+  const result = readGooglePayCreateResponse(await postDirect(profile, '/v1/txn/doTransaction', payload, 'GooglePay'), profile.merchantNo, { merchantTxnId: context.merchantTxnId, amountMinor: context.order.amount.minor, currency: context.order.amount.currency, appId: profile.appId }, context.returnUrl)
   return { ...result, evidence: directRequestEvidence(payload, 'GooglePay') }
 }
 export async function queryGooglePayPayment(profile: SandboxProfile, context: DirectQueryContext): Promise<GooglePayTransaction> {

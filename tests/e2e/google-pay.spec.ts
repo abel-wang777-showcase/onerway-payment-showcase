@@ -15,7 +15,7 @@ function payment(status: PrepareGooglePayResponse['attempt']['status'] = 'create
   }
 }
 
-async function installMock(page: Page) {
+async function installMock(page: Page, hostedVerification = false) {
   let current = payment()
   const calls: string[] = []
   const violations: string[] = []
@@ -31,6 +31,12 @@ async function installMock(page: Page) {
       } } } };` })
       return
     }
+    if (hostedVerification && url.origin === 'https://sandbox-checkout.onerway.com' && url.pathname === '/additional-information') {
+      expect(url.searchParams.get('returnUrl')).toBe(`${origin}/halden/direct/order-google`)
+      current = payment('succeeded')
+      await route.fulfill({ contentType: 'text/html', body: `<h1>Synthetic hosted verification</h1><a href="${origin}/halden/direct/order-google">Return to original order</a>` })
+      return
+    }
     if (url.origin !== origin) { violations.push(url.origin + url.pathname); await route.abort('blockedbyclient'); return }
     if (url.pathname === '/api/profile') { await route.fulfill({ json: { profile: 'sandbox', environment: 'Sandbox', transactionPolicy: 'sandbox-only', canonicalOrigin: origin } }); return }
     if (url.pathname.startsWith('/api/payment/')) {
@@ -39,8 +45,9 @@ async function installMock(page: Page) {
       if (url.pathname === '/api/payment/google-pay/pay') {
         expect(request.postDataJSON()).toMatchObject({ orderId: 'order-google', attemptId: 'attempt-google', token })
         expect(current.submitted).toBe(false)
-        current = payment('failed')
-        await route.fulfill({ json: current }); return
+        current = payment(hostedVerification ? 'requires_action' : 'failed')
+        const redirectUrl = `https://sandbox-checkout.onerway.com/additional-information?key=synthetic-hosted-key&returnUrl=${encodeURIComponent(`${origin}/halden/direct/order-google`)}`
+        await route.fulfill({ json: { ...current, ...(hostedVerification ? { redirectUrl } : {}) } }); return
       }
       violations.push(url.pathname); await route.fulfill({ status: 403, json: {} }); return
     }
@@ -50,6 +57,24 @@ async function installMock(page: Page) {
 }
 
 test.describe('Google Pay Direct with synthetic provider boundary', () => {
+  test('completes a synthetic hosted R round trip on the original order without resubmission', async ({ page }) => {
+    const mock = await installMock(page, true)
+    await gotoHydrated(page, '/halden/direct/order-google')
+    await expect(page.getByRole('button', { name: 'Pay with Google Pay', exact: true })).toBeVisible()
+    const initialRecoveries = mock.calls.filter(path => path.endsWith('/recover')).length
+    await page.getByRole('button', { name: 'Pay with Google Pay', exact: true }).click()
+    await expect(page.getByRole('heading', { name: 'Synthetic hosted verification' })).toBeVisible()
+    expect(mock.calls.filter(path => path.endsWith('/recover'))).toHaveLength(initialRecoveries)
+    await page.getByRole('link', { name: 'Return to original order' }).click()
+    await expect(page).toHaveURL(`${origin}/halden/direct/order-google`)
+    await expect(page.getByText('Your order is paid.', { exact: true })).toBeVisible()
+    expect(mock.calls.filter(path => path.endsWith('/pay'))).toHaveLength(1)
+    expect(mock.calls.filter(path => path.endsWith('/recover'))).toHaveLength(initialRecoveries + 1)
+    await expect(page.getByRole('button', { name: 'Pay with Google Pay', exact: true })).toHaveCount(0)
+    await expect(page.getByRole('button', { name: 'Show token', exact: true })).toHaveCount(0)
+    expect(mock.violations).toEqual([])
+  })
+
   for (const width of [320, 1440]) {
     test(`explains protocol stages without creating payments at ${width}px`, async ({ page }, testInfo) => {
       await page.setViewportSize({ width, height: 1000 })
@@ -58,7 +83,7 @@ test.describe('Google Pay Direct with synthetic provider boundary', () => {
       await gotoHydrated(page, '/halden/direct/order-google')
       const flow = page.locator('[data-google-pay-flow]')
       await expect(flow.getByRole('heading', { name: 'Google Pay protocol map' })).toBeVisible()
-      for (const stage of ['prepare', 'ready', 'authorize', 'submit', 'result', 'cancel']) {
+      for (const stage of ['prepare', 'ready', 'authorize', 'submit', 'action', 'result', 'cancel']) {
         const button = flow.locator(`[data-flow-step="${stage}"]`)
         await button.focus()
         await button.press('Enter')

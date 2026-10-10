@@ -279,6 +279,21 @@ describe('Google Pay routes', () => {
     expect(result).not.toHaveProperty('actionURL')
     expect(mocks.completePaymentRecord).toHaveBeenCalledWith('direct-attempt', undefined, undefined, expect.objectContaining({ status: 'requires_action', transactionStatus: 'R' }))
   })
+  it('returns the hosted action only transiently and persists only the R payment state', async () => {
+    const redirectUrl = `https://sandbox-checkout.onerway.com/additional-information?key=synthetic-key&returnUrl=${encodeURIComponent('https://showcase.example/halden/direct/HLD-DIRECT-TEST')}`
+    mocks.createGooglePayPayment.mockResolvedValue({ rawStatus: 'R', status: 'requires_action', redirectUrl })
+    const { default: handler } = await import('../server/api/payment/google-pay/pay.post')
+    expect(await handler(event)).toMatchObject({ redirectUrl, actionUnavailable: false })
+    expect(JSON.stringify(mocks.completePaymentRecord.mock.calls)).not.toContain('synthetic-key')
+    expect(mocks.completePaymentRecord).toHaveBeenCalledWith('direct-attempt', undefined, undefined, expect.objectContaining({ status: 'requires_action' }))
+  })
+  it('retains R when the hosted link belongs to another return URL', async () => {
+    mocks.createGooglePayPayment.mockResolvedValue({ rawStatus: 'R', status: 'requires_action', redirectUrl: 'https://sandbox-checkout.onerway.com/additional-information?key=synthetic-key&returnUrl=https%3A%2F%2Fother.example' })
+    const { default: handler } = await import('../server/api/payment/google-pay/pay.post')
+    const result = await handler(event)
+    expect(result.actionUnavailable).toBe(true)
+    expect(result).not.toHaveProperty('redirectUrl')
+  })
   it('unknown creation remains submitted and recovers through Google query only', async () => {
     mocks.createGooglePayPayment.mockRejectedValueOnce(new Error('unknown'))
     const { default: handler } = await import('../server/api/payment/google-pay/pay.post')
