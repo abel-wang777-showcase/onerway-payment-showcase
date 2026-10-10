@@ -106,7 +106,13 @@ function readTransaction(data: unknown, merchantNo: string, context: DirectQuery
     ...(attributed ? { actualWallet: provider === 'GooglePay' ? 'google-pay' as const : 'apple-pay' as const, fundingNetwork: network } : {}) }
 }
 export function readDirectCreateResponse(value: unknown, merchantNo: string, context: DirectQueryContext, provider: DirectWalletProvider): DirectTransaction {
-  return readTransaction(responseData(value, provider), merchantNo, context, false, provider)
+  // A business decline can include a definitive failed transaction despite a non-success envelope.
+  // Keep query envelopes strict and require the full amount/currency on this exception path.
+  const declined = record(value) && typeof value.respCode === 'string' && /^\d{5}$/.test(value.respCode)
+    && value.respCode !== '20000' && record(value.data) && value.data.status === 'F'
+    && typeof value.data.orderAmount === 'string' && /^5(?:\.0{1,2})?$/.test(value.data.orderAmount)
+    && value.data.orderCurrency === context.currency
+  return readTransaction(declined ? value.data : responseData(value, provider), merchantNo, context, false, provider)
 }
 export function readDirectQueryResponse(value: unknown, merchantNo: string, context: DirectQueryContext, provider: DirectWalletProvider): DirectTransaction {
   const data = responseData(value, provider)
