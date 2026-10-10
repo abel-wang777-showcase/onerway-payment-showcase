@@ -57,6 +57,90 @@ async function installMock(page: Page, hostedVerification = false) {
 }
 
 test.describe('Google Pay Direct with synthetic provider boundary', () => {
+  for (const width of [390, 1440]) {
+    test(`shows a wallet receipt while the authorized payment response is pending at ${width}px`, async ({ page }, testInfo) => {
+      await page.setViewportSize({ width, height: 844 })
+      await page.emulateMedia({ reducedMotion: 'reduce', colorScheme: width === 1440 ? 'dark' : 'light' })
+      const mock = await installMock(page)
+      let release!: () => void
+      const pending = new Promise<void>(resolve => { release = resolve })
+      let submissions = 0
+      await page.route('**/api/payment/google-pay/pay', async route => {
+        submissions++
+        expect(route.request().postDataJSON()).toMatchObject({ orderId: 'order-google', attemptId: 'attempt-google', token })
+        await pending
+        await route.fulfill({ json: payment('succeeded') })
+      })
+      await gotoHydrated(page, '/halden/direct/order-google')
+      const receipt = page.locator('[data-wallet-receipt]')
+      const feedback = receipt.locator('[data-wallet-feedback]')
+      const summary = receipt.locator('[data-wallet-order-summary]')
+      await expect(summary).toContainText('order-google')
+      await expect(receipt.locator('[data-wallet-amount]')).toContainText('5.00')
+      const summaryBox = await summary.boundingBox()
+      const tutorialBox = await page.locator('[data-google-pay-flow]').boundingBox()
+      expect(summaryBox).not.toBeNull()
+      expect(tutorialBox).not.toBeNull()
+      expect(summaryBox!.y + summaryBox!.height).toBeLessThan(tutorialBox!.y)
+      await page.getByRole('button', { name: 'Pay with Google Pay', exact: true }).click()
+      try {
+        await expect(feedback).toHaveAttribute('data-busy', 'true')
+        await expect(feedback.locator('[aria-hidden="true"]').first()).toHaveCSS('animation-name', 'none')
+        await expect(page.getByRole('button', { name: 'Check this order', exact: true })).toBeDisabled()
+        await expect(feedback.getByRole('heading')).toContainText('Processing your payment')
+        await expect(feedback).toBeInViewport()
+        await expect(page.getByRole('button', { name: 'Pay with Google Pay', exact: true })).toHaveCount(0)
+        expect(submissions).toBe(1)
+        await expectNoHorizontalOverflow(page)
+        await page.screenshot({ path: testInfo.outputPath(`wallet-google-pending-${width}.png`) })
+      }
+      finally { release() }
+      await expect(feedback.getByRole('heading', { name: 'Your order is paid.', exact: true })).toBeVisible()
+      await expect(feedback).toHaveAttribute('data-busy', 'false')
+      await expect(summary).toContainText('order-google')
+      expect(submissions).toBe(1)
+      expect(mock.violations).toEqual([])
+    })
+  }
+
+  test('shows a wallet receipt during hosted return recovery and then its confirmed result', async ({ page }, testInfo) => {
+    await page.setViewportSize({ width: 1440, height: 1000 })
+    const mock = await installMock(page, true)
+    await gotoHydrated(page, '/halden/direct/order-google')
+    await page.getByRole('button', { name: 'Pay with Google Pay', exact: true }).click()
+    await expect(page.getByRole('heading', { name: 'Synthetic hosted verification' })).toBeVisible()
+    let release!: () => void
+    const pending = new Promise<void>(resolve => { release = resolve })
+    let recoveries = 0
+    await page.route('**/api/payment/recover?*', async route => {
+      recoveries++
+      expect(new URL(route.request().url()).searchParams.get('orderId')).toBe('order-google')
+      await pending
+      await route.fulfill({ json: payment('succeeded') })
+    })
+    await page.getByRole('link', { name: 'Return to original order' }).click()
+    const receipt = page.locator('[data-wallet-receipt]')
+    const feedback = receipt.locator('[data-wallet-feedback]')
+    try {
+      await expect(page).toHaveURL(`${origin}/halden/direct/order-google`)
+      await expect(feedback).toHaveAttribute('data-busy', 'true')
+      await expect(feedback.getByRole('heading')).toContainText('Checking your payment')
+      await expect(receipt.locator('[data-wallet-order-summary]')).toContainText('order-google')
+      await expect(feedback).toBeInViewport()
+      await expect(page.getByRole('heading', { name: 'Your order is paid.', exact: true })).toHaveCount(0)
+      await page.screenshot({ path: testInfo.outputPath('wallet-google-return-checking.png') })
+    }
+    finally { release() }
+    await expect(feedback.getByRole('heading', { name: 'Your order is paid.', exact: true })).toBeVisible()
+    await expect(feedback).toHaveAttribute('data-busy', 'false')
+    await expect(receipt.locator('[data-wallet-amount]')).toContainText('5.00')
+    await expect(feedback).toBeInViewport()
+    expect(recoveries).toBe(1)
+    expect(mock.calls.filter(path => path.endsWith('/pay'))).toHaveLength(1)
+    expect(mock.violations).toEqual([])
+    await page.screenshot({ path: testInfo.outputPath('wallet-google-return-paid.png') })
+  })
+
   for (const status of ['created', 'requires_action'] as const) {
     test(`starts a separate Sandbox order from submitted ${status} without paying the old order`, async ({ page }) => {
       const mock = await installMock(page)
@@ -223,10 +307,10 @@ test.describe('Google Pay Direct with synthetic provider boundary', () => {
     expect(mock.calls.filter(path => path.endsWith('/pay'))).toHaveLength(0)
     await button.click()
     await expect.poll(() => mock.calls.filter(path => path.endsWith('/pay')).length).toBe(1)
-    await expect(page.getByRole('radio', { name: 'Manual debugging', exact: true })).toBeDisabled()
+    await expect(page.getByRole('radio', { name: 'Manual debugging', exact: true })).toHaveCount(0)
     expect(await page.evaluate(() => (window as unknown as { __googleLoads: number }).__googleLoads)).toBe(2)
     await page.reload()
-    await expect(page.getByRole('radio', { name: 'Manual debugging', exact: true })).toBeDisabled()
+    await expect(page.getByRole('radio', { name: 'Manual debugging', exact: true })).toHaveCount(0)
     await expect(panel.getByRole('button', { name: 'Show token', exact: true })).toHaveCount(0)
     expect(mock.calls.filter(path => path.endsWith('/pay'))).toHaveLength(1)
     expect(mock.violations).toEqual([])

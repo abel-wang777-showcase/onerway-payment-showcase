@@ -174,6 +174,7 @@ export function useGooglePay(orderId: string, initial?: DirectRecoveryResponse) 
         let sent = false
         sheetOpen.value = true
         phase.value = 'submit'
+        message.value = 'Processing your payment… Keep this page open.'
         recordStep('submit', 'active')
         try {
           const response = await navigator.locks.request('onerway-payment-intent', { mode: 'exclusive', signal: abort.signal }, () => {
@@ -236,7 +237,11 @@ export function useGooglePay(orderId: string, initial?: DirectRecoveryResponse) 
         error.value = null
         message.value = missingTransactionMessage(session.value)
       }
-      else if (!terminal.value) { await verify(); schedule() }
+      else if (!terminal.value) {
+        if (initial?.verificationPending) error.value = 'A fresh result is unavailable. Keep this order and check again.'
+        if (!initial) await verify()
+        schedule()
+      }
       return
     }
     await prepare()

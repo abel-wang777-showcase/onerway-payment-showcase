@@ -141,6 +141,10 @@ Web JS SDK 集成内的 Google Pay / Apple Pay 不新增 create adapter、钱包
 
 Demo Hub 继续提供两条同结果、可重复的本地模拟旅程。模拟会话使用版本化 `sessionStorage` 在单个浏览器标签页内保存 Order、PaymentAttempt 和 PaymentEvent，刷新时恢复同一 attempt；Retry 追加新 attempt 并保留旧历史。该存储不包含凭据、PAN / CVV 或原始 provider payload，也不替代第 6 节要求的服务端持久化。真实 Sandbox 会话不写入该 simulation 存储。为避免 Provider-created 非终态阻塞后续受控测试，Demo Hub 的真实 Sandbox 按钮与支付页的 clean-run 按钮都显式启动一个新的独立 Sandbox Order；这不是旧 Order 的 PaymentAttempt Retry，不取消、不覆盖旧 Attempt，也不改变其支付真值，旧 Attempt 仍由 query / Webhook 收敛。该测试入口只在 Sandbox profile 开放，普通恢复入口仍复用同一非终态 Attempt，不能据此推导 Production 的放弃或重试语义。
 
+### Direct 钱包付款反馈
+
+Apple Pay 与 Google Pay 的主付款区域均先展示商品、订单号和金额，移动端不把这些信息放在流程讲解之后。自动授权后的在途提交、回跳恢复和实际查询提供可见且可被辅助技术读出的等待反馈；等待动画仅对应实际请求，不把已提交、待验证或暂未查到交易当作持续加载。确认的成功、失败或取消在主区域展示，查询失败保留已确认结果。钱包关闭及 returnUrl 本身不产生成功效果；手动捕获明确显示未提交。授权触发的提交将付款回执带回可见区域，不抢夺键盘焦点；不因此新增支付调用、修改状态真值或重提 token。
+
 ### Apple Pay Direct API（Issue #17）
 
 固定范围为 `apple-pay-direct`：E-commerce、USD 5.00、SALE，商品 `HL-APPLE-005`。沿用现有 Sandbox merchantNo/appId；Merchant ID 为 `merchant.com.onerway.showcase`，域名为 `https://onerway-payment-showcase.vercel.app`。本期使用自有 Merchant Identity 验证商户，Payment Processing 私钥及 token 代解密由 Onerway 承担；不调用代理验证接口，不采集卡号，不含订阅、AUTH、其他 Direct 方式或 Production 交易。渠道及域名准备的确认不替代真实支付证据。

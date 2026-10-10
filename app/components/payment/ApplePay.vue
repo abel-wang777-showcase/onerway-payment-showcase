@@ -2,28 +2,15 @@
 import type { CreatePaymentIntentResponse } from '#shared/payment/sdk'
 
 const props = defineProps<{ orderId: string }>()
-const { session, steps, mode, manualCaptured, tokenDebug, tokenDebugUnavailable, loading, checking, canPay, submitted, sheetOpen, sheetMessage, error, prepare, pay, verify, clearToken, setMode } = useApplePay(props.orderId)
-const title = useTemplateRef<HTMLElement>('title')
+const { session, steps, mode, manualCaptured, tokenDebug, tokenDebugUnavailable, loading, checking, submitting, canPay, submitted, sheetOpen, sheetMessage, error, prepare, pay, verify, clearToken, setMode } = useApplePay(props.orderId)
 const restarting = shallowRef(false)
 const restartError = shallowRef<string | null>(null)
 let disposed = false
-const amount = computed(() => session.value ? formatMoney(session.value.order.amount) : 'USD 5.00')
 const modeItems = [
   { label: 'Automatic payment', value: 'automatic', description: 'Authorize in Wallet to submit this Sandbox payment.' },
   { label: 'Manual debugging', value: 'manual', description: 'Capture a token without submitting this order. Copy it to Apifox to call the Direct API.' },
 ]
 const modeLocked = computed(() => loading.value || sheetOpen.value || submitted.value)
-const resultTitle = computed(() => {
-  if (!session.value) return loading.value ? 'Preparing your order…' : 'This order could not be restored.'
-  if (manualCaptured.value && !submitted.value) return 'Token captured — payment not submitted.'
-  switch (session.value?.attempt.status) {
-    case 'succeeded': return 'Your order is paid.'
-    case 'failed': return 'This payment failed.'
-    case 'cancelled': return 'This transaction was cancelled.'
-    case 'requires_action': return 'This payment needs further confirmation.'
-    default: return submitted.value ? 'Payment result is being confirmed.' : 'Your order is ready.'
-  }
-})
 const canRestart = computed(() => session.value && ['failed', 'cancelled'].includes(session.value.attempt.status))
 const references = computed(() => session.value ? [
   { label: 'Order', value: session.value.order.id },
@@ -62,7 +49,6 @@ function restoreFromHistory(event: PageTransitionEvent): void {
 onMounted(async () => {
   window.addEventListener('pageshow', restoreFromHistory)
   await prepare()
-  if (!disposed) { await nextTick(); title.value?.focus() }
 })
 onScopeDispose(() => {
   disposed = true
@@ -71,29 +57,30 @@ onScopeDispose(() => {
 </script>
 
 <template>
-  <UContainer class="py-8 pb-16 lg:py-12">
+  <UContainer class="py-6 pb-16 lg:py-12">
     <div class="grid gap-8 lg:grid-cols-3 lg:items-start">
       <div class="min-w-0 space-y-8 lg:col-span-2">
         <header>
           <UBadge label="Sandbox · Direct API · Apple Pay" variant="soft" />
-          <h1 ref="title" tabindex="-1" class="mt-4 text-3xl font-semibold tracking-tight text-highlighted sm:text-4xl">Pay with Apple Pay.</h1>
+          <h1 class="mt-3 text-2xl font-semibold tracking-tight text-highlighted sm:text-3xl">Pay with Apple Pay.</h1>
           <p class="mt-4 max-w-2xl text-sm leading-relaxed text-toned">Complete your Halden order in Apple Pay, then explore how your browser, Halden, Apple and Onerway work together.</p>
         </header>
         <section class="space-y-4 rounded-lg border border-default p-5 sm:p-6" aria-labelledby="apple-pay-order-title">
-          <h2 id="apple-pay-order-title" class="text-lg font-semibold text-highlighted">{{ resultTitle }}</h2>
+          <PaymentWalletReceipt
+            :order-id="orderId" :order="session?.order" :status="session?.attempt.status" heading-id="apple-pay-order-title"
+            :submitted="submitted" :submitting="submitting" :checking="checking" :loading="loading" :sheet-open="sheetOpen"
+            :manual-captured="manualCaptured" :verification-pending="session?.verificationPending" :message="sheetMessage" />
           <p v-if="submitted && !canRestart && session?.attempt.status !== 'succeeded'" class="text-sm leading-relaxed text-toned">Please do not pay again while this order is unconfirmed. Closing Apple Pay, leaving this page or a timeout does not cancel a payment already submitted.</p>
           <p v-if="manualCaptured && !submitted" class="text-sm leading-relaxed text-toned">Copy the token below to Apifox and match this USD 5.00 order’s amount and currency. A call made in Apifox is separate from this Showcase order; check that call’s result in Apifox. This page’s order remains unsubmitted.</p>
           <p v-if="canRestart" class="text-sm leading-relaxed text-toned">The original result is preserved. Paying again creates a new order and requires fresh Apple Pay authorization.</p>
-          <UFormField label="After Wallet authorization" name="apple-pay-mode" :help="sheetOpen ? 'Close Wallet before changing mode.' : submitted ? 'The mode is locked after payment submission.' : undefined">
+          <UFormField v-if="!submitted" label="After Wallet authorization" name="apple-pay-mode" :help="sheetOpen ? 'Close Wallet before changing mode.' : submitted ? 'The mode is locked after payment submission.' : undefined">
             <URadioGroup :model-value="mode" :items="modeItems" :disabled="modeLocked" color="neutral" variant="list" :ui="{ item: 'min-h-11 touch-manipulation' }" @update:model-value="selectMode" />
           </UFormField>
-          <p role="status" aria-live="polite" class="text-sm leading-relaxed text-toned">{{ sheetMessage }}</p>
           <UAlert v-if="error || restartError" :description="error ?? restartError ?? ''" color="warning" variant="subtle" />
-          <USkeleton v-if="loading" class="h-12 w-full rounded-sm" aria-label="Preparing Apple Pay" />
-          <component :is="'apple-pay-button'" v-else-if="canPay" buttonstyle="black" type="pay" locale="en-US" class="apple-pay-control" @click="pay" />
+          <component :is="'apple-pay-button'" v-if="canPay" buttonstyle="black" type="pay" locale="en-US" class="apple-pay-control" @click="pay" />
           <div class="flex flex-wrap gap-3">
             <UButton v-if="!submitted && !loading && !sheetOpen && !canPay" label="Retry preparation" color="neutral" variant="outline" class="min-h-11 touch-manipulation" @click="prepare" />
-            <UButton v-if="session && submitted" label="Check this order" :loading="checking" :disabled="checking" color="neutral" variant="outline" class="min-h-11 touch-manipulation" @click="verify" />
+            <UButton v-if="session && submitted" label="Check this order" :loading="checking" :disabled="checking || submitting" color="neutral" variant="outline" class="min-h-11 touch-manipulation" @click="verify" />
             <UButton v-if="canRestart" label="Place a new order and pay" :loading="restarting" :disabled="restarting" class="min-h-11 touch-manipulation" @click="restart" />
             <UButton to="/" label="Demo Hub" color="neutral" variant="link" class="min-h-11 touch-manipulation" />
           </div>
@@ -102,13 +89,6 @@ onScopeDispose(() => {
         <PaymentApplePaySteps :steps="steps" />
       </div>
       <aside class="min-w-0 space-y-6 lg:sticky lg:top-24" aria-label="Order and test conditions">
-        <section class="rounded-lg border border-default p-5 sm:p-6">
-          <h2 class="text-lg font-semibold text-highlighted">Your Halden order</h2>
-          <p class="mt-4 text-sm text-toned">{{ session?.order.item.name ?? 'Sandbox order' }}</p>
-          <p v-if="session" class="mt-1 text-sm text-muted">{{ session.order.item.variant }} · Quantity {{ session.order.item.quantity }}</p>
-          <p class="mt-6 text-2xl font-semibold text-highlighted">{{ amount }}</p>
-          <p class="mt-1 text-xs text-muted">One-time Sandbox payment · SALE</p>
-        </section>
         <section class="rounded-lg border border-default bg-muted p-5 text-sm leading-relaxed">
           <h2 class="font-semibold text-highlighted">Before you test</h2>
           <p class="mt-2 text-toned">Use an Apple Sandbox tester with a supported test card in Wallet. A regular Wallet card is not the supported test path for this demo.</p>

@@ -35,8 +35,12 @@ onScopeDispose(() => { generation++ })
 <template>
   <PaymentGooglePay v-if="method === 'google-pay'" :key="orderId" :order-id="orderId" :initial="recovered ?? undefined" />
   <PaymentApplePay v-else-if="method === 'apple-pay'" :key="orderId" :order-id="orderId" />
-  <UContainer v-else class="space-y-4 py-12">
-    <p role="status">{{ failed ? 'This order could not be restored. Your existing payment is preserved.' : 'Restoring your wallet order…' }}</p>
-    <UButton v-if="failed" label="Retry restoration" :loading="loading" class="touch-manipulation" @click="restore" />
+  <UContainer v-else class="space-y-6 py-6 pb-16 lg:py-12">
+    <h1 class="text-2xl font-semibold tracking-tight text-highlighted sm:text-3xl">Your Halden payment</h1>
+    <section class="max-w-2xl space-y-5 rounded-lg border border-default p-5 sm:p-6" aria-labelledby="wallet-restore-title">
+      <PaymentWalletReceipt :order-id="orderId" heading-id="wallet-restore-title" :checking="!failed" :loading="loading" />
+      <UAlert v-if="failed" description="This order could not be restored. Your existing payment is preserved. Retry restoration to check it again." color="warning" variant="subtle" />
+      <UButton v-if="failed" label="Retry restoration" :loading="loading" class="min-h-11 touch-manipulation" @click="restore" />
+    </section>
   </UContainer>
 </template>

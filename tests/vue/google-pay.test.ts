@@ -100,7 +100,7 @@ describe('Google Pay client', () => {
     wrapper.unmount()
   })
 
-  it('freshly queries the original order on hosted return without authorizing again', async () => {
+  it('uses the recovered hosted order without an immediate duplicate query, then allows a manual check', async () => {
     const initial = payment()
     initial.submitted = true
     initial.attempt.status = 'requires_action'
@@ -110,11 +110,65 @@ describe('Google Pay client', () => {
     const Restored = defineComponent({ setup() { google = useGooglePay('order-google', initial as unknown as DirectRecoveryResponse); return () => null } })
     const wrapper = await mountSuspended(Restored)
     await google.initialize()
+    expect(mocks.fetch).not.toHaveBeenCalled()
+    expect(google.session.value?.attempt.status).toBe('requires_action')
+    await google.verify()
     expect(mocks.fetch).toHaveBeenCalledExactlyOnceWith('/api/payment/recover', { query: { orderId: 'order-google' }, retry: 0 })
     expect(google.session.value?.attempt.status).toBe('succeeded')
     expect(mocks.load).not.toHaveBeenCalled()
     expect(mocks.authorize).not.toHaveBeenCalled()
     expect(mocks.navigate).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('shows processing after authorization while the payment response is pending', async () => {
+    mocks.authorize.mockResolvedValue({ paymentMethodData: { tokenizationData: { token: 'synthetic-token' } } })
+    const wrapper = await mountSuspended(Harness)
+    await google.prepare()
+    let resolve!: (value: unknown) => void
+    mocks.fetch.mockImplementationOnce(() => new Promise(done => { resolve = done }))
+    google.pay()
+    await flushPromises()
+    expect(google.phase.value).toBe('submit')
+    expect(google.sheetOpen.value).toBe(true)
+    expect(google.message.value).toContain('Processing your payment')
+    expect(google.message.value).not.toContain('Continue in Google Pay')
+    google.pay()
+    expect(mocks.authorize).toHaveBeenCalledOnce()
+    const result = { ...payment(), submitted: true }
+    result.attempt.status = 'succeeded'
+    resolve(result)
+    await flushPromises()
+    expect(google.phase.value).toBe('result')
+    expect(google.sheetOpen.value).toBe(false)
+    expect(google.session.value?.attempt.status).toBe('succeeded')
+    wrapper.unmount()
+  })
+
+  it('keeps an initial recovery failure visible without immediately repeating the query', async () => {
+    const initial = { ...payment(), submitted: true, verificationPending: true }
+    initial.attempt.status = 'requires_action'
+    const Restored = defineComponent({ setup() { google = useGooglePay('order-google', initial as unknown as DirectRecoveryResponse); return () => null } })
+    const wrapper = await mountSuspended(Restored)
+    await google.initialize()
+    expect(mocks.fetch).not.toHaveBeenCalled()
+    expect(google.error.value).toContain('fresh result is unavailable')
+    expect(google.steps.value.find(step => step.id === 'result')?.state).toBe('interrupted')
+    wrapper.unmount()
+  })
+
+  it.each(['requires_action', 'processing'])('does not immediately query a recovered %s order and preserves its polling policy', async (status) => {
+    vi.useFakeTimers()
+    const initial = { ...payment(), submitted: true }
+    initial.attempt.status = status
+    mocks.fetch.mockResolvedValue(initial)
+    const Restored = defineComponent({ setup() { google = useGooglePay('order-google', initial as unknown as DirectRecoveryResponse); return () => null } })
+    const wrapper = await mountSuspended(Restored)
+    await google.initialize()
+    expect(mocks.fetch).not.toHaveBeenCalled()
+    expect(google.checking.value).toBe(false)
+    await vi.advanceTimersByTimeAsync(1250)
+    expect(mocks.fetch).toHaveBeenCalledTimes(status === 'processing' ? 1 : 0)
     wrapper.unmount()
   })
 
@@ -126,6 +180,7 @@ describe('Google Pay client', () => {
     const Restored = defineComponent({ setup() { google = useGooglePay('order-google', initial as unknown as DirectRecoveryResponse); return () => null } })
     const wrapper = await mountSuspended(Restored)
     await google.initialize()
+    await google.verify()
     expect(google.error.value).toBeNull()
     expect(google.message.value).toContain(status === 'requires_action' ? 'Complete hosted card verification first' : 'If hosted card verification is still open')
     expect(google.steps.value.find(step => step.id === 'result')).toMatchObject({ state: 'active', evidence: { source: 'stored' } })
@@ -199,6 +254,7 @@ describe('Google Pay client', () => {
     const Restored = defineComponent({ setup() { google = useGooglePay('order-google', initial as unknown as DirectRecoveryResponse); return () => null } })
     const wrapper = await mountSuspended(Restored)
     await google.initialize()
+    await google.verify()
     expect(google.error.value).not.toBeNull()
     expect(google.steps.value.find(step => step.id === 'result')?.state).toBe('interrupted')
     await vi.advanceTimersByTimeAsync(60000)
@@ -216,6 +272,8 @@ describe('Google Pay client', () => {
     expect(mocks.authorize).toHaveBeenCalledOnce()
     await flushPromises()
     await vi.advanceTimersByTimeAsync(60000)
+    expect(google.sheetOpen.value).toBe(false)
+    expect(google.phase.value).toBe('captured')
     expect(google.tokenDebug.value).toBe('synthetic-token')
     expect(google.session.value?.attempt.status).toBe('created')
     expect(google.submitted.value).toBe(false)
@@ -282,6 +340,9 @@ describe('Google Pay client', () => {
     await google.prepare()
     google.pay()
     await flushPromises()
+    expect(google.phase.value).toBe('submit')
+    expect(google.message.value).toContain('Processing your payment')
+    expect(google.submitted.value).toBe(false)
     await vi.advanceTimersByTimeAsync(30001)
     expect(google.sheetOpen.value).toBe(false)
     expect(google.submitted.value).toBe(false)

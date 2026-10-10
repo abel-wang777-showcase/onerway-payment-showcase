@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { DirectRecoveryResponse } from '#shared/payment/apple-pay'
 const props = defineProps<{ orderId: string, initial?: DirectRecoveryResponse }>()
-const { session, steps, manualCaptured, tokenDebugUnavailable, mode, loading, checking, sheetOpen, submitted, tokenDebug, error, message, canPay, setMode, initialize, prepare, verify, clearToken, createButton } = useGooglePay(props.orderId, props.initial)
+const { session, steps, manualCaptured, tokenDebugUnavailable, mode, loading, checking, sheetOpen, phase, submitted, tokenDebug, error, message, canPay, setMode, initialize, prepare, verify, clearToken, createButton } = useGooglePay(props.orderId, props.initial)
 const restarting = shallowRef(false)
 const restartError = shallowRef<string | null>(null)
 let disposed = false
@@ -32,14 +32,6 @@ const modeItems = [
   { label: 'Automatic payment', value: 'automatic', description: 'Authorize in Google Pay to submit this Sandbox order.' },
   { label: 'Manual debugging', value: 'manual', description: 'Capture a token for Apifox. Showcase does not submit or track that separate call.' },
 ]
-const resultTitle = computed(() => {
-  if (session.value?.attempt.status === 'succeeded') return 'Your order is paid.'
-  if (session.value?.attempt.status === 'failed') return 'This payment failed.'
-  if (session.value?.attempt.status === 'cancelled') return 'This transaction was cancelled.'
-  if (session.value?.attempt.status === 'requires_action') return 'Further confirmation is required.'
-  if (submitted.value) return 'Payment result is being confirmed.'
-  return manualCaptured.value ? 'Token captured — payment not submitted.' : 'Your Halden order'
-})
 function selectMode(value: unknown) { if (value === 'automatic' || value === 'manual') setMode(value) }
 watch([canPay, buttonHost, restarting], () => {
   const host = buttonHost.value
@@ -51,27 +43,28 @@ onMounted(initialize)
 </script>
 
 <template>
-  <UContainer class="py-8 pb-16 lg:py-12">
+  <UContainer class="py-6 pb-16 lg:py-12">
     <div class="grid gap-8 lg:grid-cols-3 lg:items-start">
       <div class="min-w-0 space-y-8 lg:col-span-2">
         <header>
           <UBadge label="Sandbox · Direct API · Google Pay" variant="soft" />
-          <h1 class="mt-4 text-3xl font-semibold tracking-tight text-highlighted sm:text-4xl">Pay with Google Pay.</h1>
+          <h1 class="mt-3 text-2xl font-semibold tracking-tight text-highlighted sm:text-3xl">Pay with Google Pay.</h1>
           <p class="mt-4 text-sm text-toned">Authorize your Halden purchase, then explore how Google Pay and Onerway process it.</p>
         </header>
         <section class="space-y-4 rounded-lg border border-default p-5 sm:p-6" aria-labelledby="google-pay-order-title">
-          <h2 id="google-pay-order-title" class="text-lg font-semibold text-highlighted">{{ resultTitle }}</h2>
-          <UFormField label="After Google Pay authorization" name="google-pay-mode">
+          <PaymentWalletReceipt
+            :order-id="orderId" :order="session?.order" :status="session?.attempt.status" heading-id="google-pay-order-title"
+            :submitted="submitted" :submitting="phase === 'submit' && sheetOpen" :checking="checking" :loading="loading" :sheet-open="sheetOpen"
+            :manual-captured="manualCaptured" :verification-pending="session?.verificationPending" :transaction-not-found="session?.transactionNotFound" :message="message" />
+          <UFormField v-if="!submitted" label="After Google Pay authorization" name="google-pay-mode">
             <URadioGroup :model-value="mode" :items="modeItems" :disabled="loading || submitted || sheetOpen || restarting" :ui="{ item: 'min-h-11 touch-manipulation' }" color="neutral" variant="list" @update:model-value="selectMode" />
           </UFormField>
-          <p role="status" class="text-sm leading-relaxed text-toned">{{ message }}</p>
           <p v-if="session?.attempt.status === 'requires_action'" class="text-sm text-toned">Onerway may need card verification on its hosted page. After returning, check this original order’s server result; returning alone does not confirm payment. Do not resubmit this order’s token.</p>
           <UAlert v-if="error || restartError" :description="restartError ?? error ?? ''" color="warning" variant="subtle" />
-          <USkeleton v-if="loading" class="h-12 w-full" aria-label="Preparing Google Pay" />
-          <div ref="buttonHost" class="google-pay-control" />
+          <div v-show="canPay" ref="buttonHost" class="google-pay-control" />
           <div class="flex flex-wrap gap-3">
             <UButton v-if="!loading && !submitted && !sheetOpen && !canPay" class="min-h-11 touch-manipulation" label="Retry preparation" :disabled="restarting" variant="outline" color="neutral" @click="prepare" />
-            <UButton v-if="submitted" class="min-h-11 touch-manipulation" label="Check this order" :loading="checking" :disabled="restarting" variant="outline" color="neutral" @click="verify" />
+            <UButton v-if="submitted" class="min-h-11 touch-manipulation" label="Check this order" :loading="checking" :disabled="restarting || checking || (phase === 'submit' && sheetOpen)" variant="outline" color="neutral" @click="verify" />
             <UButton v-if="session && submitted" class="min-h-11 touch-manipulation" label="Start a new Sandbox order" :loading="restarting" :disabled="!canRestart" @click="restart" />
             <UButton class="min-h-11 touch-manipulation" to="/" label="Demo Hub" variant="link" color="neutral" />
           </div>
@@ -81,12 +74,6 @@ onMounted(initialize)
         <PaymentGooglePaySteps :steps="steps" :mode="mode" />
       </div>
       <aside class="min-w-0 space-y-6 lg:sticky lg:top-24" aria-label="Order and test conditions">
-        <section class="rounded-lg border border-default p-5 sm:p-6">
-          <h2 class="font-semibold text-highlighted">Your Halden order</h2>
-          <p class="mt-4 text-sm text-toned">{{ session?.order.item.name ?? 'Sandbox order' }}</p>
-          <p class="mt-6 text-2xl font-semibold text-highlighted">{{ session ? formatMoney(session.order.amount) : 'USD 5.00' }}</p>
-          <p class="mt-2 text-xs text-muted">One-time Sandbox payment · SALE</p>
-        </section>
         <section class="space-y-3 rounded-lg border border-default bg-muted p-5 text-sm text-toned">
           <h2 class="font-semibold text-highlighted">Google Pay test conditions</h2>
           <p>Google Pay runs in TEST. Availability depends on your browser, account, card networks and merchant configuration. Google TEST can return mock tokens that the payment gateway rejects; obtaining a token does not prove it can be charged.</p>
