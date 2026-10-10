@@ -92,7 +92,8 @@ export default defineEventHandler(async (event): Promise<CreatePaymentIntentResp
       // the caller asks to restart or selects another integration.
       const pendingDirect = previous?.attempt.integration === 'direct-api'
         && !isTerminalStatus(previous.attempt.status)
-        && Boolean(['apple-pay-direct', 'google-pay-direct'].includes(input.journeyId ?? '') || previous.attempt.paymentId || previous.attempt.transactionId
+        && Boolean((getJourney(input.journeyId).integration === 'direct-api' && input.method === previous.attempt.method)
+          || previous.attempt.status !== 'created' || previous.attempt.paymentId || previous.attempt.transactionId
           || previous.events.some(item => item.source === 'server' && item.sourceKey === `create-claim:${previous.attempt.id}`))
       if (ref && (!input.restart || pendingDirect)) {
         const existing = previous

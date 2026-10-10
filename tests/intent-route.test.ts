@@ -92,6 +92,41 @@ describe('payment intent route', () => {
     expect(mocks.createPaymentRecord).toHaveBeenCalledOnce()
   })
 
+  it.each([
+    ['apple-pay', 'google-pay', 'google-pay-direct'],
+    ['google-pay', 'apple-pay', 'apple-pay-direct'],
+  ])('switches an unsubmitted %s order to %s on explicit restart', async (previousMethod, method, journeyId) => {
+    const previous = recoveryFixture()
+    mocks.getPaymentRecovery.mockResolvedValue({ ...previous,
+      attempt: { ...previous.attempt, integration: 'direct-api', method: previousMethod, status: 'created', paymentId: undefined },
+    })
+    vi.stubGlobal('readBody', vi.fn().mockResolvedValue({ journeyId, method, restart: true }))
+    const { default: handler } = await import('../server/api/payment/intent.post')
+    const result = await (handler as (event: unknown) => Promise<{ orderId: string, create: boolean }>)({})
+    expect(result.create).toBe(true)
+    expect(result.orderId).not.toBe(previous.order.id)
+    expect(mocks.createPaymentRecord).toHaveBeenCalledOnce()
+    expect(mocks.createPaymentRecord.mock.calls[0]![1]).toMatchObject({ method, integration: 'direct-api', status: 'created' })
+    expect(mocks.setPaymentRecovery).toHaveBeenCalledWith(expect.anything(), 'test-secret', result.orderId, expect.any(String))
+  })
+
+  it.each([
+    { status: 'created', claimed: true },
+    { status: 'processing', claimed: false },
+    { status: 'requires_action', claimed: false },
+  ])('preserves a $status Direct order when switching wallets after a possible submission', async ({ status, claimed }) => {
+    const previous = recoveryFixture()
+    mocks.getPaymentRecovery.mockResolvedValue({ ...previous,
+      attempt: { ...previous.attempt, integration: 'direct-api', method: 'apple-pay', status, paymentId: undefined },
+      events: claimed ? [{ source: 'server', sourceKey: 'create-claim:attempt-1' }] : [],
+    })
+    vi.stubGlobal('readBody', vi.fn().mockResolvedValue({ journeyId: 'google-pay-direct', method: 'google-pay', restart: true }))
+    const { default: handler } = await import('../server/api/payment/intent.post')
+    expect(await (handler as (event: unknown) => Promise<unknown>)({})).toEqual({ orderId: 'order-1', create: false })
+    expect(mocks.createPaymentRecord).not.toHaveBeenCalled()
+    expect(mocks.setPaymentRecovery).not.toHaveBeenCalled()
+  })
+
   it('persists Direct Apple Pay with new identities after a terminal outcome', async () => {
     const previous = recoveryFixture()
     mocks.getPaymentRecovery.mockResolvedValue({ ...previous, attempt: { ...previous.attempt, integration: 'direct-api', method: 'apple-pay', status: 'failed', statusSource: 'server' } })
@@ -109,7 +144,7 @@ describe('payment intent route', () => {
     expect(attempt.retryOf).toBeUndefined()
   })
 
-  it.each(['apple-pay-direct', 'standard-success'])('keeps unknown Direct recovery even when restart selects %s', async (journeyId) => {
+  it.each(['apple-pay-direct', 'google-pay-direct', 'standard-success'])('keeps unknown Direct recovery even when restart selects %s', async (journeyId) => {
     const previous = recoveryFixture()
     mocks.getPaymentRecovery.mockResolvedValue({ ...previous, attempt: { ...previous.attempt, integration: 'direct-api', method: 'apple-pay' } })
     vi.stubGlobal('readBody', vi.fn().mockResolvedValue({ journeyId, restart: true }))
