@@ -36,7 +36,7 @@ window.ApplePaySession = class {
   abort() { window.__appleAborts = (window.__appleAborts || 0) + 1; this.oncancel?.(); }
 };`
 
-async function installAppleMock(page: Page, result: 'succeeded' | 'failed' = 'succeeded', initial: PrepareApplePayResponse['attempt']['status'] = 'created', token: Record<string, unknown> = syntheticToken) {
+async function installAppleMock(page: Page, result: 'succeeded' | 'failed' = 'succeeded', initial: PrepareApplePayResponse['attempt']['status'] = 'created', token: Record<string, unknown> = syntheticToken, payGate?: Promise<void>) {
   let current = payment(initial)
   const calls: string[] = []
   const violations: string[] = []
@@ -70,6 +70,7 @@ async function installAppleMock(page: Page, result: 'succeeded' | 'failed' = 'su
       else if (url.pathname === '/api/payment/apple-pay/pay') {
         expect(current.submitted).toBe(false)
         expect(body).toMatchObject({ orderId: current.order.id, attemptId: current.attempt.id, token, browser: { language: 'en-US' } })
+        await payGate
         current = payment(result, current.order.id)
         await route.fulfill({ json: { ...current, evidence: { request: JSON.stringify({ method: 'POST', path: '/v1/txn/doTransaction', body: { merchantTxnId: 'merc…rect', orderAmount: '5.00', orderCurrency: 'USD', tokenInfo: JSON.stringify({ provider: 'ApplePay', tokenId: '[encrypted payment token omitted]' }) } }, null, 2) } } })
       }
@@ -150,7 +151,7 @@ test.describe('mock Apple Pay Direct browser journey', () => {
     expect(mock.calls.filter(path => path.endsWith('/pay'))).toHaveLength(0)
     await page.locator('apple-pay-button').getByRole('button').click()
     await expect(page.getByRole('heading', { name: 'Your order is paid.' })).toBeVisible()
-    await expect(page.getByRole('radio', { name: 'Manual debugging', exact: true })).toBeDisabled()
+    await expect(page.getByRole('radio', { name: 'Manual debugging', exact: true })).toHaveCount(0)
     expect(mock.calls.filter(path => path.endsWith('/pay'))).toHaveLength(1)
     mock.assertClean()
   })
@@ -321,6 +322,51 @@ test.describe('mock Apple Pay Direct browser journey', () => {
     })
   }
 
+  for (const width of [320, 1440]) {
+    test(`shows the order receipt while an authorized payment is pending at ${width}px`, async ({ page }, testInfo) => {
+      await page.setViewportSize({ width, height: 900 })
+      await page.emulateMedia({ reducedMotion: 'reduce' })
+      let releasePayment!: () => void
+      const payGate = new Promise<void>(resolve => { releasePayment = resolve })
+      const mock = await installAppleMock(page, 'succeeded', 'created', syntheticToken, payGate)
+      await gotoHydrated(page, '/halden/direct/order-direct')
+      const receipt = page.locator('[data-wallet-receipt]')
+      const summary = receipt.locator('[data-wallet-order-summary]')
+      const feedback = receipt.locator('[data-wallet-feedback]')
+      await expect(summary).toContainText('Halden Field Jacket')
+      await expect(summary).toContainText('order-direct')
+      await expect(receipt.locator('[data-wallet-amount]')).toContainText('5.00')
+      // Summary precedes both the feedback and the long teaching flow in DOM order.
+      expect(await summary.evaluate(element => {
+        const feedback = document.querySelector('[data-wallet-feedback]')
+        const flow = document.querySelector('[data-flow-step]')
+        return Boolean(feedback && flow
+          && (element.compareDocumentPosition(feedback) & Node.DOCUMENT_POSITION_FOLLOWING)
+          && (element.compareDocumentPosition(flow) & Node.DOCUMENT_POSITION_FOLLOWING))
+      })).toBe(true)
+      await page.locator('apple-pay-button').getByRole('button').click()
+      try {
+        await expect(feedback).toHaveAttribute('data-busy', 'true')
+        await expect(feedback.getByRole('heading')).toHaveText('Processing your payment…')
+        await expect(summary).toBeInViewport()
+        await expect(feedback).toBeInViewport()
+        await expect(page.locator('apple-pay-button')).toHaveCount(0)
+        expect(mock.calls.filter(path => path.endsWith('/pay'))).toHaveLength(1)
+        await expectNoHorizontalOverflow(page)
+        await page.screenshot({ path: testInfo.outputPath(`wallet-apple-pending-${width}.png`) })
+      }
+      finally { releasePayment() }
+      await expect(feedback).toHaveAttribute('data-busy', 'false')
+      await expect(feedback.getByRole('heading')).toHaveText('Your order is paid.')
+      await expect(feedback).toContainText('Payment confirmed.')
+      await expect(feedback).toBeInViewport()
+      expect(mock.calls.filter(path => path.endsWith('/pay'))).toHaveLength(1)
+      await expect(page.locator('body')).not.toContainText('synthetic-only')
+      await page.screenshot({ path: testInfo.outputPath(`wallet-apple-confirmed-${width}.png`) })
+      mock.assertClean()
+    })
+  }
+
   test('pays once and restores the existing order after refresh without replaying browser events', async ({ page }) => {
     const mock = await installAppleMock(page)
     await gotoHydrated(page, '/halden/direct/order-direct')
@@ -374,7 +420,7 @@ test.describe('mock Apple Pay Direct browser journey', () => {
   test('restores an unknown submitted order without offering another payment', async ({ page }) => {
     const mock = await installAppleMock(page, 'succeeded', 'processing')
     await gotoHydrated(page, '/halden/direct/order-direct')
-    await expect(page.getByRole('heading', { name: 'Payment result is being confirmed.' })).toBeVisible()
+    await expect(page.locator('[data-wallet-feedback]').getByRole('heading', { name: 'Payment is not confirmed yet' })).toBeVisible()
     await expect(page.locator('apple-pay-button')).toHaveCount(0)
     await expect(page.getByRole('button', { name: 'Place a new order and pay' })).toHaveCount(0)
     await page.getByRole('button', { name: 'Check this order' }).click()

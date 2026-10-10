@@ -57,6 +57,7 @@ export function useApplePay(orderId: string) {
   const eligible = shallowRef(false)
   const sheetOpen = shallowRef(false)
   const submitted = shallowRef(false)
+  const submitting = shallowRef(false)
   const error = shallowRef<string | null>(null)
   const sheetMessage = shallowRef('Preparing Apple Pay…')
   const tokenDebug = shallowRef<string | null>(null)
@@ -106,6 +107,7 @@ export function useApplePay(orderId: string) {
     if (!pendingSubmission || pendingSubmission.sent) return
     pendingSubmission.abort.abort()
     pendingSubmission = null
+    submitting.value = false
     submitted.value = Boolean(session.value?.submitted || terminal.value)
   }
 
@@ -321,6 +323,7 @@ export function useApplePay(orderId: string) {
         sheetMessage.value = 'Authorization received. Confirming this order with Onerway…'
         const submission = { abort: new AbortController(), sent: false }
         pendingSubmission = submission
+        submitting.value = true
         try {
           // Snapshot once so debugging and the eventual submission use identical JSON.
           const token = snapshotToken(event.payment.token)
@@ -355,7 +358,10 @@ export function useApplePay(orderId: string) {
           error.value = 'The payment response was not confirmed. Check this order; its token will not be resubmitted.'
         }
         finally {
-          if (pendingSubmission === submission) pendingSubmission = null
+          if (pendingSubmission === submission) {
+            pendingSubmission = null
+            submitting.value = false
+          }
         }
         if (!disposed && !terminal.value) void verify().then(scheduleRecovery)
       }
@@ -405,5 +411,5 @@ export function useApplePay(orderId: string) {
     appleSession = null
   })
 
-  return { session: readonly(session), steps: readonly(steps), mode: readonly(mode), manualCaptured: readonly(manualCaptured), setMode, tokenDebug: readonly(tokenDebug), tokenDebugUnavailable: readonly(tokenDebugUnavailable), loading: readonly(loading), checking: readonly(checking), canPay, terminal, submitted: readonly(submitted), sheetOpen: readonly(sheetOpen), sheetMessage: readonly(sheetMessage), error: readonly(error), prepare, pay, verify, clearToken }
+  return { session: readonly(session), steps: readonly(steps), mode: readonly(mode), manualCaptured: readonly(manualCaptured), setMode, tokenDebug: readonly(tokenDebug), tokenDebugUnavailable: readonly(tokenDebugUnavailable), loading: readonly(loading), checking: readonly(checking), canPay, terminal, submitted: readonly(submitted), submitting: readonly(submitting), sheetOpen: readonly(sheetOpen), sheetMessage: readonly(sheetMessage), error: readonly(error), prepare, pay, verify, clearToken }
 }
