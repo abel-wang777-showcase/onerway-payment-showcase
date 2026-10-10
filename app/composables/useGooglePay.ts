@@ -40,8 +40,16 @@ export function useGooglePay(orderId: string, initial?: DirectRecoveryResponse) 
     observations.value = Object.fromEntries(Object.entries(observations.value).filter(([key]) => ['prepare', 'ready'].includes(key)))
     starts.clear()
   }
+  function missingTransactionMessage(value: DirectRecoveryResponse) {
+    if (isTerminalStatus(value.attempt.status)) return 'The saved payment result is preserved. This check did not find a matching transaction; it does not replace the saved result.'
+    return value.attempt.status === 'requires_action'
+      ? 'No transaction was found yet. Complete hosted card verification first. If its page is no longer available, start a new Sandbox order.'
+      : 'No transaction was found yet. If hosted card verification is still open, complete it there; otherwise you can start a new Sandbox order.'
+  }
   function recordResult(value: DirectRecoveryResponse, source: PaymentEvidence['source']) {
-    recordStep('result', value.verificationPending ? 'interrupted' : isTerminalStatus(value.attempt.status) ? 'completed' : 'active', googleResultEvidence(value, value.verificationPending ? 'stored' : source))
+    const notFound = value.verificationPending && value.transactionNotFound
+    const evidence = googleResultEvidence(value, value.verificationPending ? 'stored' : source)
+    recordStep('result', notFound ? (isTerminalStatus(value.attempt.status) ? 'completed' : 'active') : value.verificationPending ? 'interrupted' : isTerminalStatus(value.attempt.status) ? 'completed' : 'active', notFound ? { ...evidence, summary: missingTransactionMessage(value) } : evidence)
   }
   let client: GooglePaymentsClient | undefined
   let generation = 0
@@ -70,7 +78,7 @@ export function useGooglePay(orderId: string, initial?: DirectRecoveryResponse) 
     if (session.value && (value.attempt.id !== session.value.attempt.id || Date.parse(value.attempt.updatedAt) < Date.parse(session.value.attempt.updatedAt) || (terminal.value && !isTerminalStatus(value.attempt.status)))) return
     session.value = value
     submitted.value ||= value.submitted || isTerminalStatus(value.attempt.status)
-    if (terminal.value) clearTimeout(timer)
+    if (terminal.value || value.attempt.status === 'requires_action' || value.transactionNotFound) clearTimeout(timer)
   }
   async function verify() {
     if (disposed || hidden || checking.value || !submitted.value) return
@@ -82,14 +90,21 @@ export function useGooglePay(orderId: string, initial?: DirectRecoveryResponse) 
       if (!current(id)) return
       accept(response)
       if (session.value) recordResult(session.value, 'live')
-      error.value = response.verificationPending ? 'A fresh result is unavailable. Keep this order and check again.' : null
+      if (response.transactionNotFound && response.verificationPending) {
+        error.value = null
+        message.value = missingTransactionMessage(response)
+      }
+      else {
+        error.value = response.verificationPending ? 'A fresh result is unavailable. Keep this order and check again.' : null
+        if (!response.verificationPending) message.value = 'The server returned this order’s payment result.'
+      }
     }
     catch { if (current(id)) { error.value = 'Payment is unconfirmed. Check this order; do not pay again.'; recordStep('result', 'interrupted', session.value ? { ...googleResultEvidence(session.value, 'stored'), summary: 'The fresh check failed. The saved order state is preserved.' } : googleInterruptionEvidence('The fresh check failed. No payment result is inferred.')) } }
     finally { checking.value = false }
   }
   function schedule() {
-    if (disposed || hidden || terminal.value || !submitted.value || polls >= 12) return
     clearTimeout(timer)
+    if (disposed || hidden || terminal.value || !submitted.value || session.value?.attempt.status === 'requires_action' || session.value?.transactionNotFound || polls >= 12) return
     timer = setTimeout(() => { polls++; void verify().then(schedule) }, 1250)
   }
   async function prepare() {
@@ -191,6 +206,7 @@ export function useGooglePay(orderId: string, initial?: DirectRecoveryResponse) 
               }
               error.value = 'Card verification is required, but a verified continuation link is unavailable. Keep this order and check its status.'
               recordStep('action', 'interrupted', googleInterruptionEvidence('A verified hosted continuation link is unavailable. No navigation was attempted.'))
+              return
             }
           }
           else { error.value = 'The submission wait timed out before payment was sent. Start a new Google Pay authorization.'; recordStep('submit', 'interrupted', googleInterruptionEvidence('The request lock expired before submission. No payment was sent.')) }
@@ -216,7 +232,11 @@ export function useGooglePay(orderId: string, initial?: DirectRecoveryResponse) 
       phase.value = 'result'
       message.value = 'Your existing order has been restored.'
       if (session.value) recordResult(session.value, 'stored')
-      if (!terminal.value) { await verify(); schedule() }
+      if (session.value?.transactionNotFound && session.value.verificationPending) {
+        error.value = null
+        message.value = missingTransactionMessage(session.value)
+      }
+      else if (!terminal.value) { await verify(); schedule() }
       return
     }
     await prepare()

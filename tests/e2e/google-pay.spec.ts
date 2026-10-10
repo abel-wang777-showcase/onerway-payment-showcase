@@ -89,6 +89,25 @@ test.describe('Google Pay Direct with synthetic provider boundary', () => {
     })
   }
 
+  test('restores a hosted order with no upstream transaction as waiting, without automatic polling', async ({ page }) => {
+    const mock = await installMock(page)
+    const waiting = payment('requires_action')
+    delete waiting.attempt.transactionId
+    let recoveries = 0
+    await page.route('**/api/payment/recover?*', async route => {
+      recoveries++
+      await route.fulfill({ json: { ...waiting, verificationPending: true, transactionNotFound: true } })
+    })
+    await gotoHydrated(page, '/halden/direct/order-google')
+    await expect(page.getByText('A fresh result is unavailable.', { exact: false })).toHaveCount(0)
+    await expect(page.getByText('Complete hosted card verification first.', { exact: false }).first()).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Start a new Sandbox order', exact: true })).toBeVisible()
+    await page.clock.install()
+    await page.clock.fastForward(60_000)
+    expect(recoveries).toBe(1)
+    expect(mock.calls.filter(path => path.endsWith('/pay'))).toHaveLength(0)
+  })
+
   test('completes a synthetic hosted R round trip on the original order without resubmission', async ({ page }) => {
     const mock = await installMock(page, true)
     await gotoHydrated(page, '/halden/direct/order-google')

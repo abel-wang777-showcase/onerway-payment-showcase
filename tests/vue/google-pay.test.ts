@@ -78,10 +78,12 @@ describe('Google Pay client', () => {
   })
 
   it.each([
+    ['requires_action', undefined],
     ['requires_action', 'https://untrusted.example/additional-information?key=synthetic'],
     ['requires_action', `https://sandbox-checkout.onerway.com/additional-information?key=synthetic&returnUrl=${encodeURIComponent('https://wrong.example/order')}`],
     ['succeeded', `https://sandbox-checkout.onerway.com/additional-information?key=synthetic&returnUrl=${encodeURIComponent(`${window.location.origin}/halden/direct/order-google`)}`],
   ])('does not navigate for an invalid destination or non-action state: %s', async (status, redirectUrl) => {
+    vi.useFakeTimers()
     const response = { ...payment(), submitted: true, redirectUrl }
     response.attempt.status = status!
     mocks.authorize.mockResolvedValue({ paymentMethodData: { tokenizationData: { token: 'synthetic-token' } } })
@@ -91,7 +93,9 @@ describe('Google Pay client', () => {
     google.pay()
     await flushPromises()
     expect(mocks.navigate).not.toHaveBeenCalled()
-    expect(JSON.stringify(google.session.value)).not.toContain(redirectUrl)
+    if (redirectUrl) expect(JSON.stringify(google.session.value)).not.toContain(redirectUrl)
+    await vi.advanceTimersByTimeAsync(60000)
+    expect(mocks.fetch.mock.calls.filter(([url]) => url === '/api/payment/recover')).toHaveLength(0)
     expect(google.submitted.value).toBe(true)
     wrapper.unmount()
   })
@@ -111,6 +115,94 @@ describe('Google Pay client', () => {
     expect(mocks.load).not.toHaveBeenCalled()
     expect(mocks.authorize).not.toHaveBeenCalled()
     expect(mocks.navigate).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it.each(['requires_action', 'processing'])('keeps a missing transaction neutral and stops polling for %s, then allows manual convergence', async (status) => {
+    vi.useFakeTimers()
+    const initial = { ...payment(), submitted: true }
+    initial.attempt.status = status
+    mocks.fetch.mockResolvedValue({ ...initial, verificationPending: true, transactionNotFound: true })
+    const Restored = defineComponent({ setup() { google = useGooglePay('order-google', initial as unknown as DirectRecoveryResponse); return () => null } })
+    const wrapper = await mountSuspended(Restored)
+    await google.initialize()
+    expect(google.error.value).toBeNull()
+    expect(google.message.value).toContain(status === 'requires_action' ? 'Complete hosted card verification first' : 'If hosted card verification is still open')
+    expect(google.steps.value.find(step => step.id === 'result')).toMatchObject({ state: 'active', evidence: { source: 'stored' } })
+    await vi.advanceTimersByTimeAsync(60000)
+    expect(mocks.fetch).toHaveBeenCalledOnce()
+    const confirmed = { ...payment(), submitted: true }
+    confirmed.attempt.status = 'succeeded'
+    mocks.fetch.mockResolvedValue(confirmed)
+    await google.verify()
+    expect(mocks.fetch).toHaveBeenCalledTimes(2)
+    expect(google.session.value?.attempt.status).toBe('succeeded')
+    expect(google.steps.value.find(step => step.id === 'result')?.state).toBe('completed')
+    expect(google.message.value).not.toContain('No transaction')
+    google.pay()
+    expect(mocks.authorize).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('does not infer an absent transaction from an empty query for requires_action with a Provider ID', async () => {
+    const base = payment()
+    const initial = { ...base, submitted: true, verificationPending: true, transactionNotFound: true, attempt: { ...base.attempt, status: 'requires_action', transactionId: 'synthetic-existing-transaction' } }
+    const Restored = defineComponent({ setup() { google = useGooglePay('order-google', initial as unknown as DirectRecoveryResponse); return () => null } })
+    const wrapper = await mountSuspended(Restored)
+    await google.initialize()
+    expect(google.message.value).toContain('No transaction was found')
+    expect(google.message.value).toContain('Complete hosted card verification')
+    expect(google.message.value).not.toContain('has been created')
+    expect(google.session.value?.attempt.transactionId).toBe('synthetic-existing-transaction')
+    expect(google.steps.value.find(step => step.id === 'result')).toMatchObject({ state: 'active', evidence: { source: 'stored' } })
+    wrapper.unmount()
+  })
+
+  it('preserves a known terminal result when a later query finds no transaction', async () => {
+    const initial = { ...payment(), submitted: true }
+    initial.attempt.status = 'succeeded'
+    mocks.fetch.mockResolvedValue({ ...initial, verificationPending: true, transactionNotFound: true })
+    const Restored = defineComponent({ setup() { google = useGooglePay('order-google', initial as unknown as DirectRecoveryResponse); return () => null } })
+    const wrapper = await mountSuspended(Restored)
+    await google.initialize()
+    await google.verify()
+    expect(google.session.value?.attempt.status).toBe('succeeded')
+    expect(google.message.value).toContain('saved payment result is preserved')
+    expect(google.message.value).not.toContain('No transaction has been created')
+    expect(google.error.value).toBeNull()
+    expect(google.steps.value.find(step => step.id === 'result')).toMatchObject({ state: 'completed', evidence: { source: 'stored' } })
+    wrapper.unmount()
+  })
+
+  it('does not repeat the page recovery query when initial recovery already found no transaction', async () => {
+    vi.useFakeTimers()
+    const initial = { ...payment(), submitted: true, verificationPending: true, transactionNotFound: true }
+    initial.attempt.status = 'requires_action'
+    const Restored = defineComponent({ setup() { google = useGooglePay('order-google', initial as unknown as DirectRecoveryResponse); return () => null } })
+    const wrapper = await mountSuspended(Restored)
+    await google.initialize()
+    await vi.advanceTimersByTimeAsync(60000)
+    expect(mocks.fetch).not.toHaveBeenCalled()
+    expect(google.error.value).toBeNull()
+    expect(google.message.value).toContain('No transaction was found')
+    expect(google.message.value).not.toContain('has been created')
+    expect(google.steps.value.find(step => step.id === 'result')).toMatchObject({ state: 'active', evidence: { source: 'stored' } })
+    wrapper.unmount()
+  })
+
+  it.each(['network', 'pending'])('preserves real query errors during hosted recovery: %s', async (failure) => {
+    vi.useFakeTimers()
+    const initial = { ...payment(), submitted: true }
+    initial.attempt.status = 'requires_action'
+    if (failure === 'network') mocks.fetch.mockRejectedValue(new Error('synthetic network failure'))
+    else mocks.fetch.mockResolvedValue({ ...initial, verificationPending: true })
+    const Restored = defineComponent({ setup() { google = useGooglePay('order-google', initial as unknown as DirectRecoveryResponse); return () => null } })
+    const wrapper = await mountSuspended(Restored)
+    await google.initialize()
+    expect(google.error.value).not.toBeNull()
+    expect(google.steps.value.find(step => step.id === 'result')?.state).toBe('interrupted')
+    await vi.advanceTimersByTimeAsync(60000)
+    expect(mocks.fetch).toHaveBeenCalledOnce()
     wrapper.unmount()
   })
 

@@ -81,7 +81,9 @@ export interface DirectTransaction {
 }
 function readTransaction(data: unknown, merchantNo: string, context: DirectQueryContext, query: boolean, provider: DirectWalletProvider): DirectTransaction {
   const missingActionIds = provider === 'GooglePay' && !query && record(data) && data.status === 'R'
-    && data.transactionId == null && data.paymentId == null && data.merchantTxnId === context.merchantTxnId
+    && data.transactionId == null && data.paymentId == null
+    && (data.merchantTxnId === context.merchantTxnId || (data.merchantTxnId === undefined
+      && typeof data.orderAmount === 'string' && /^5(?:\.0{1,2})?$/.test(data.orderAmount) && data.orderCurrency === context.currency))
   if (!record(data) || !id(context.merchantTxnId) || context.amountMinor !== 500 || context.currency !== 'USD'
     || (!id(data.transactionId) && !missingActionIds) || (context.transactionId !== undefined && data.transactionId !== context.transactionId)
     || (query ? data.merchantTxnId !== context.merchantTxnId : data.merchantTxnId !== undefined && data.merchantTxnId !== context.merchantTxnId)
@@ -116,6 +118,9 @@ export function readDirectCreateResponse(value: unknown, merchantNo: string, con
 }
 export function readDirectQueryResponse(value: unknown, merchantNo: string, context: DirectQueryContext, provider: DirectWalletProvider): DirectTransaction {
   const data = responseData(value, provider)
+  // Sandbox returns a different envelope when no transaction exists before hosted CVV submission.
+  if (record(data) && data.content === undefined && Array.isArray(data.records) && data.records.length === 0
+    && (data.total === '0' || data.total === 0) && (data.current === '1' || data.current === 1)) failDirect('PAYMENT_QUERY_NOT_FOUND')
   if (!record(data) || !Array.isArray(data.content) || Number(data.totalPages ?? 1) > 1) failDirect(code(provider, 'RESPONSE_INVALID'))
   const matches = data.content.filter(item => record(item) && item.merchantTxnId === context.merchantTxnId)
   if (!matches.length) failDirect('PAYMENT_QUERY_NOT_FOUND')

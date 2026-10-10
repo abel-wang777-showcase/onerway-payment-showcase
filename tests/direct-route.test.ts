@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createError, type H3Event } from 'h3'
+import { DirectGatewayError } from '../server/utils/direct-gateway'
 import { createAttempt } from '../shared/payment/attempt'
 import { createEvent } from '../shared/payment/event'
 import { createOrder } from '../shared/payment/order'
@@ -116,6 +117,17 @@ describe('Direct recovery permissions', () => {
       { ...recovery, order: { ...recovery.order, amount: { minor: 5000, currency: 'USD' as const } } },
       { ...recovery, customer: null },
     ]) expect(() => assertDirectRecovery(profile, invalid)).toThrow('DIRECT_PAY_ORDER_MISMATCH')
+  })
+  it.each(['PAYMENT_QUERY_NOT_FOUND', 'GOOGLE_PAY_NETWORK_ERROR'])('distinguishes an absent Google transaction from a query failure: %s', async (code) => {
+    const pending = fixture('google-pay')
+    pending.attempt = { ...pending.attempt, status: 'requires_action', statusSource: 'server' }
+    mocks.getPaymentRecovery.mockResolvedValue(pending)
+    mocks.queryGooglePayPayment.mockRejectedValue(new DirectGatewayError(code))
+    const result = await refreshDirectRecovery(profile, pending)
+    expect(result.verificationPending).toBe(true)
+    expect(result.transactionNotFound).toBe(code === 'PAYMENT_QUERY_NOT_FOUND' ? true : undefined)
+    expect(result.attempt.status).toBe('requires_action')
+    expect(mocks.completePaymentRecord).not.toHaveBeenCalled()
   })
   it('persists every fresh query observation separately for S-F-S reconciliation', async () => {
     const pending = submitted()

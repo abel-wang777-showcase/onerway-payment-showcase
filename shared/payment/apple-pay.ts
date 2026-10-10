@@ -10,6 +10,7 @@ export interface ApplePayRequest {
 
 export interface DirectRecoveryResponse extends RecoverSdkPaymentResponse {
   readonly verificationPending?: boolean
+  readonly transactionNotFound?: boolean
 }
 
 export interface PrepareApplePayResponse extends DirectRecoveryResponse {
