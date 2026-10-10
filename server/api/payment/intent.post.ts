@@ -88,9 +88,12 @@ export default defineEventHandler(async (event): Promise<CreatePaymentIntentResp
         ? isMerchantCustomerInScope(previous.customer, profile)
         : null
 
-      // Unknown Direct submissions must retain their recovery binding even if
-      // the caller asks to restart or selects another integration.
-      const pendingDirect = previous?.attempt.integration === 'direct-api'
+      // Google Sandbox users may explicitly start an independent order without
+      // cancelling or resubmitting the previous attempt. Ordinary recovery and
+      // every other pending Direct journey retain their existing binding.
+      const newGoogleOrder = input.restart === true && input.journeyId === 'google-pay-direct'
+        && previous?.attempt.integration === 'direct-api' && previous.attempt.method === 'google-pay'
+      const pendingDirect = !newGoogleOrder && previous?.attempt.integration === 'direct-api'
         && !isTerminalStatus(previous.attempt.status)
         && Boolean((getJourney(input.journeyId).integration === 'direct-api' && input.method === previous.attempt.method)
           || previous.attempt.status !== 'created' || previous.attempt.paymentId || previous.attempt.transactionId

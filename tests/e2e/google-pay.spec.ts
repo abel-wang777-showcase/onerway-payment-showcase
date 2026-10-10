@@ -57,6 +57,38 @@ async function installMock(page: Page, hostedVerification = false) {
 }
 
 test.describe('Google Pay Direct with synthetic provider boundary', () => {
+  for (const status of ['created', 'requires_action'] as const) {
+    test(`starts a separate Sandbox order from submitted ${status} without paying the old order`, async ({ page }) => {
+      const mock = await installMock(page)
+      const original = { ...payment(status), submitted: true, canAuthorize: false }
+      const base = payment()
+      const attempt = { ...base.attempt, id: 'new-attempt-google', orderId: 'new-order-google' }
+      const fresh = { ...base, order: { ...base.order, id: 'new-order-google' }, attempt, attempts: [attempt] }
+      let creations = 0
+      await page.route('**/api/payment/recover?*', async route => {
+        const id = new URL(route.request().url()).searchParams.get('orderId')
+        await route.fulfill({ json: id === 'new-order-google' ? fresh : original })
+      })
+      await page.route('**/api/payment/google-pay/prepare', async route => {
+        expect(route.request().postDataJSON().orderId).toBe('new-order-google')
+        await route.fulfill({ json: fresh })
+      })
+      await page.route('**/api/payment/intent', async route => {
+        creations++
+        expect(route.request().postDataJSON()).toEqual({ journeyId: 'google-pay-direct', method: 'google-pay', restart: true })
+        await route.fulfill({ json: { orderId: 'new-order-google' } })
+      })
+      await gotoHydrated(page, '/halden/direct/order-google')
+      await expect(page.getByRole('button', { name: 'Pay with Google Pay', exact: true })).toHaveCount(0)
+      await page.getByRole('button', { name: 'Start a new Sandbox order', exact: true }).click()
+      await expect(page).toHaveURL(`${origin}/halden/direct/new-order-google`)
+      await expect(page.getByRole('button', { name: 'Pay with Google Pay', exact: true })).toBeVisible()
+      expect(creations).toBe(1)
+      expect(mock.calls.filter(path => path.endsWith('/pay'))).toHaveLength(0)
+      expect(mock.violations).toEqual([])
+    })
+  }
+
   test('completes a synthetic hosted R round trip on the original order without resubmission', async ({ page }) => {
     const mock = await installMock(page, true)
     await gotoHydrated(page, '/halden/direct/order-google')
