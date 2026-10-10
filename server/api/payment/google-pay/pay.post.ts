@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { readGooglePayRedirectUrl } from '../../../../shared/payment/google-pay'
 import { createEvent } from '../../../../shared/payment/event'
 import { buildGooglePayPayload, createGooglePayPayment } from '../../../utils/google-pay'
 import { readBrowserData } from '../../../utils/browser'
@@ -42,6 +43,8 @@ export default defineEventHandler(async (event) => {
     }))
     const updated = await getPaymentRecovery(recovery.order.id, recovery.attempt.id)
     if (!updated) throw createError({ statusCode: 503, statusMessage: 'PAYMENT_RECOVERY_PENDING' })
-    return { ...toDirectRecovery(updated), evidence: result.evidence, actionUnavailable: result.status === 'requires_action' }
+    const redirectUrl = result.status === 'requires_action' ? readGooglePayRedirectUrl(result.redirectUrl, context.returnUrl) : undefined
+    return { ...toDirectRecovery(updated), evidence: result.evidence,
+      ...(redirectUrl ? { redirectUrl } : {}), actionUnavailable: result.status === 'requires_action' && !redirectUrl }
   }).catch(directFailure)
 })

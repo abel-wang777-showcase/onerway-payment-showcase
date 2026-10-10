@@ -2,7 +2,7 @@ import type { PaymentEvidence, PaymentStep } from '#shared/payment/protocol'
 import { googlePaySteps, type GooglePayMode } from '~/utils/google-pay-flow'
 import { googleAuthorizationEvidence, googleInterruptionEvidence, googlePreparationEvidence, googleReadinessEvidence, googleResultEvidence, googleSubmissionEvidence } from '~/utils/google-pay-evidence'
 import type { DirectRecoveryResponse } from '#shared/payment/apple-pay'
-import { readGooglePayToken, type PayGooglePayResponse, type PrepareGooglePayResponse } from '#shared/payment/google-pay'
+import { readGooglePayRedirectUrl, readGooglePayToken, type PayGooglePayResponse, type PrepareGooglePayResponse } from '#shared/payment/google-pay'
 import { isTerminalStatus } from '#shared/payment/sdk'
 import { canDisplayGooglePayToken } from '~/utils/google-pay-token'
 import { browserData } from '~/utils/browser.client'
@@ -170,7 +170,29 @@ export function useGooglePay(orderId: string, initial?: DirectRecoveryResponse) 
             return $fetch<PayGooglePayResponse>('/api/payment/google-pay/pay', { method: 'POST', body: { orderId, attemptId: order.attempt.id, token, browser: browserData() }, retry: 0, timeout: 30000 })
           })
           if (!current(id)) return
-          if (response) { accept(response); submissionRequest.value = response.evidence?.request ?? null; recordStep('submit', 'completed', googleSubmissionEvidence(response, response.evidence?.request)); if (session.value) recordResult(session.value, 'live'); phase.value = 'result'; message.value = 'The server returned this order’s payment result.' }
+          if (response) {
+            const { redirectUrl, ...recovery } = response
+            accept(recovery)
+            submissionRequest.value = response.evidence?.request ?? null
+            recordStep('submit', 'completed', googleSubmissionEvidence(recovery, response.evidence?.request))
+            if (session.value) recordResult(session.value, 'live')
+            phase.value = 'result'
+            message.value = 'The server returned this order’s payment result.'
+            if (session.value?.attempt.status === 'requires_action') {
+              token = ''
+              clearToken()
+              const destination = readGooglePayRedirectUrl(redirectUrl, `${window.location.origin}/halden/direct/${encodeURIComponent(orderId)}`)
+              if (destination) {
+                message.value = 'Continue on Onerway to complete card verification. Your original order will be checked when you return.'
+                recordStep('action', 'active', { source: 'live', summary: 'Onerway requires hosted card verification. The verified continuation URL is omitted.', fields: [{ label: 'Payment status', value: 'requires_action' }, { label: 'CVV collection', value: 'Onerway hosted page only' }] })
+                try { await navigateTo(destination, { external: true }) }
+                catch { if (current(id)) { error.value = 'The card verification page could not be opened. Keep this order and check its status; do not submit the token again.'; recordStep('action', 'interrupted', googleInterruptionEvidence('Hosted navigation could not finish. The original submitted order is preserved.')) } }
+                return
+              }
+              error.value = 'Card verification is required, but a verified continuation link is unavailable. Keep this order and check its status.'
+              recordStep('action', 'interrupted', googleInterruptionEvidence('A verified hosted continuation link is unavailable. No navigation was attempted.'))
+            }
+          }
           else { error.value = 'The submission wait timed out before payment was sent. Start a new Google Pay authorization.'; recordStep('submit', 'interrupted', googleInterruptionEvidence('The request lock expired before submission. No payment was sent.')) }
         }
         catch { if (current(id)) { error.value = sent ? 'Submission result is unknown. This token will not be submitted again; check this order.' : 'The submission wait timed out before payment was sent. Authorize again.'; recordStep('submit', 'interrupted', googleInterruptionEvidence(sent ? 'The submission result is unknown. Recover this order without sending the token again.' : 'Submission did not start. A new authorization is required.')) } }

@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { buildGooglePayPayload, createGooglePayPayment, readGooglePayCreateResponse, readGooglePayQueryResponse, consultGooglePay, readGooglePayConfiguration } from '../server/utils/google-pay'
 import { signPayload } from '../server/utils/gateway'
 import { readProfile } from '../server/utils/profile'
-import { googlePayTokenInfo, readGooglePayToken } from '../shared/payment/google-pay'
+import { googlePayTokenInfo, readGooglePayToken, readGooglePayRedirectUrl } from '../shared/payment/google-pay'
 import type { Order } from '../shared/payment/order'
 
 const profile = readProfile({
@@ -87,6 +87,29 @@ const queryContext = { appId: 'synthetic-app', merchantTxnId: 'merchant-txn', am
 const txn = { merchantTxnId: 'merchant-txn', transactionId: 'txn', orderAmount: '5.00', orderCurrency: 'USD', status: 'S', txnType: 'SALE', subProductType: 'DIRECT' }
 const sandboxProfile = profile as Extract<typeof profile, { profile: 'sandbox' }>
 
+
+const hostedUrl = (returnUrl = createContext.returnUrl) => `https://sandbox-checkout.onerway.com/additional-information?name=%7B%7D&returnUrl=${encodeURIComponent(returnUrl)}&key=synthetic-hosted-key`
+
+describe('Google Pay hosted action URL', () => {
+  it('preserves the opaque link only for the exact hosted route and expected return URL', () => {
+    expect(readGooglePayRedirectUrl(hostedUrl(), createContext.returnUrl)).toBe(hostedUrl())
+    expect(readGooglePayRedirectUrl(hostedUrl())).toBe(hostedUrl())
+  })
+  it.each([
+    undefined, '', 'javascript:alert(1)', hostedUrl().replace('https:', 'http:'),
+    hostedUrl().replace('.com/', '.com.evil.example/'), hostedUrl().replace('.com/', '.com:8443/'),
+    hostedUrl().replace('sandbox-checkout', 'user:password@sandbox-checkout'),
+    hostedUrl().replace('/additional-information?', '/additional-information/other?'),
+    hostedUrl() + '#fragment', hostedUrl() + '&returnUrl=https%3A%2F%2Fevil.example',
+    hostedUrl() + '&key=another', hostedUrl().replace('key=synthetic-hosted-key', 'key='),
+    hostedUrl().replace('&key=synthetic-hosted-key', ''), hostedUrl('https://other.example/return'),
+    hostedUrl('javascript:alert(1)'), hostedUrl('https://user:password@showcase.example/return'),
+    hostedUrl('https://showcase.example/return#fragment'), hostedUrl().replace('https:', 'https:\n'),
+  ])('rejects invalid or mismatched links without throwing or echoing them', (url) => {
+    expect(readGooglePayRedirectUrl(url, createContext.returnUrl)).toBeUndefined()
+  })
+})
+
 describe('Google Pay Direct transaction', () => {
   it('sends Google token string verbatim and exposes only a safe request projection', async () => {
     const fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => response(txn) })
@@ -104,9 +127,25 @@ describe('Google Pay Direct transaction', () => {
   it('retains R without provider IDs and drops all action and token material', () => {
     const result = readGooglePayCreateResponse(response({ merchantTxnId: 'merchant-txn', status: 'R', actionType: 'RedirectURL', transactionId: null, paymentId: null, actionURL: 'https://unverified.example/secret', token: 'secret' }), 'synthetic-merchant', queryContext)
     expect(result).toEqual({ merchantTxnId: 'merchant-txn', rawStatus: 'R', status: 'requires_action' })
-    for (const change of [{ status: 'S' }, { actionType: 'Other' }, { merchantTxnId: 'other' }, { paymentId: 'payment' }]) {
+    for (const change of [{ status: 'S' }, { merchantTxnId: 'other' }, { paymentId: 'payment' }]) {
       expect(() => readGooglePayCreateResponse(response({ merchantTxnId: 'merchant-txn', status: 'R', actionType: 'RedirectURL', transactionId: null, paymentId: null, ...change }), 'synthetic-merchant', queryContext)).toThrow('GOOGLE_PAY_RESPONSE_INVALID')
     }
+  })
+  it.each([undefined, 'RedirectURL', 'Other'])('accepts R plus redirectUrl without depending on actionType %s', (actionType) => {
+    const value = response({ merchantTxnId: 'merchant-txn', status: 'R', redirectUrl: hostedUrl(), actionType })
+    expect(readGooglePayCreateResponse(value, 'synthetic-merchant', queryContext, createContext.returnUrl)).toEqual({ merchantTxnId: 'merchant-txn', rawStatus: 'R', status: 'requires_action', redirectUrl: hostedUrl() })
+    expect(readGooglePayCreateResponse(value, 'synthetic-merchant', queryContext)).not.toHaveProperty('redirectUrl')
+    expect(readGooglePayCreateResponse(value, 'synthetic-merchant', queryContext, 'https://wrong.example')).not.toHaveProperty('redirectUrl')
+  })
+  it('forwards a verified hosted URL transiently but excludes it from evidence', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => response({ merchantTxnId: 'merchant-txn', status: 'R', redirectUrl: hostedUrl() }) }))
+    const result = await createGooglePayPayment(sandboxProfile, createContext)
+    expect(result.redirectUrl).toBe(hostedUrl())
+    expect(result.evidence.request).not.toContain('synthetic-hosted-key')
+    expect(result.evidence.request).not.toContain('additional-information')
+  })
+  it('never exposes a redirect on a non-action response', () => {
+    expect(readGooglePayCreateResponse(response({ ...txn, redirectUrl: hostedUrl() }), 'synthetic-merchant', queryContext, createContext.returnUrl)).not.toHaveProperty('redirectUrl')
   })
   it('requires unique correlated query and attributes only Google Pay', () => {
     const query = (rows: unknown[]) => response({ content: rows })

@@ -80,7 +80,7 @@ export interface DirectTransaction {
   readonly fundingNetwork?: string
 }
 function readTransaction(data: unknown, merchantNo: string, context: DirectQueryContext, query: boolean, provider: DirectWalletProvider): DirectTransaction {
-  const missingActionIds = provider === 'GooglePay' && !query && record(data) && data.status === 'R' && data.actionType === 'RedirectURL'
+  const missingActionIds = provider === 'GooglePay' && !query && record(data) && data.status === 'R'
     && data.transactionId == null && data.paymentId == null && data.merchantTxnId === context.merchantTxnId
   if (!record(data) || !id(context.merchantTxnId) || context.amountMinor !== 500 || context.currency !== 'USD'
     || (!id(data.transactionId) && !missingActionIds) || (context.transactionId !== undefined && data.transactionId !== context.transactionId)
