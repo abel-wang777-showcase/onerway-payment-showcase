@@ -22,7 +22,7 @@ const isHome = computed(() => route.path === '/')
         </NuxtLink>
 
         <nav aria-label="Primary navigation" class="flex shrink-0 items-center gap-1">
-          <UColorModeButton class="min-h-11 min-w-11" />
+          <UColorModeButton size="sm" class="min-h-11 min-w-11" />
           <UButton
             to="/"
             label="Demo Hub"

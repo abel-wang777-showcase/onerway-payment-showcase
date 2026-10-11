@@ -7,5 +7,11 @@ export default defineAppConfig({
     colors: {
       ...base.ui.colors,
     },
+    button: {
+      variants: {
+        // Icon-only controls stay centered when their touch target grows.
+        square: { true: 'justify-center' },
+      },
+    },
   },
 })

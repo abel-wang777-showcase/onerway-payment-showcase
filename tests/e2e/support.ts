@@ -1,4 +1,4 @@
-import { expect, type Page } from '@playwright/test'
+import { expect, type Locator, type Page } from '@playwright/test'
 import { waitForHydration } from '@nuxt/test-utils/e2e'
 import type { JourneyId } from '../../shared/payment/journey'
 import type { PaymentMethodId } from '../../shared/payment/capability'
@@ -66,4 +66,16 @@ export async function expectNoHorizontalOverflow(page: Page): Promise<void> {
   await expect.poll(async () => page.evaluate(() =>
     document.documentElement.scrollWidth - document.documentElement.clientWidth,
   )).toBeLessThanOrEqual(1)
+}
+
+export async function expectCenteredButtonIcon(button: Locator): Promise<void> {
+  const icon = button.locator('.iconify:visible')
+  await expect(icon).toHaveCount(1)
+  const [control, glyph] = await Promise.all([button.boundingBox(), icon.boundingBox()])
+  expect(control).not.toBeNull()
+  expect(glyph).not.toBeNull()
+  expect(glyph!.width).toBeGreaterThanOrEqual(16)
+  expect(glyph!.width).toBeLessThanOrEqual(24)
+  expect(Math.abs(control!.x + control!.width / 2 - glyph!.x - glyph!.width / 2)).toBeLessThanOrEqual(1)
+  expect(Math.abs(control!.y + control!.height / 2 - glyph!.y - glyph!.height / 2)).toBeLessThanOrEqual(1)
 }

@@ -387,6 +387,12 @@ onMounted(async () => {
             Continue on the configured demo site to keep payment and return links together. Review your selection there before starting a Sandbox payment.
           </p>
           <p
+            v-else-if="profile?.transactionPolicy === 'locked'"
+            class="mt-3 text-sm leading-relaxed text-toned"
+          >
+            Sandbox payments are disabled in this preview. Open a demo configured for Sandbox to try a real test payment.
+          </p>
+          <p
             v-if="launching"
             role="status"
             aria-live="polite"

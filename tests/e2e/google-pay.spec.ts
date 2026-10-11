@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test'
 import type { PrepareGooglePayResponse } from '../../shared/payment/google-pay'
-import { expectNoHorizontalOverflow, gotoHydrated } from './support'
+import { expectCenteredButtonIcon, expectNoHorizontalOverflow, gotoHydrated } from './support'
 
 const origin = 'http://127.0.0.1:4173'
 const token = JSON.stringify({ protocolVersion: 'ECv2', signature: 'synthetic-signature', signedMessage: JSON.stringify({ encryptedMessage: 'synthetic-encrypted-message', ephemeralPublicKey: 'synthetic-key', tag: 'synthetic-tag' }) })
@@ -273,6 +273,29 @@ test.describe('Google Pay Direct with synthetic provider boundary', () => {
     })
   }
 
+  test.describe('touch copy controls', () => {
+    test.use({ hasTouch: true })
+
+    test('centers the copy icon in an enlarged touch target', async ({ page }) => {
+      await page.setViewportSize({ width: 390, height: 844 })
+      const mock = await installMock(page)
+      await gotoHydrated(page, '/halden/direct/order-google')
+      await page.getByRole('radio', { name: 'Manual debugging', exact: true }).click()
+      await page.getByRole('button', { name: 'Pay with Google Pay', exact: true }).click()
+      const panel = page.locator('[data-google-pay-token]')
+      await panel.getByRole('button', { name: 'Show token', exact: true }).click()
+      const copy = panel.getByRole('button', { name: /^Copy / })
+      await expect(copy).toBeVisible()
+      expect(await page.evaluate(() => matchMedia('(pointer: coarse)').matches)).toBe(true)
+      const box = await copy.boundingBox()
+      expect(box!.width).toBeGreaterThanOrEqual(44)
+      expect(box!.height).toBeGreaterThanOrEqual(44)
+      await expectCenteredButtonIcon(copy)
+      expect(mock.calls.filter(path => path.endsWith('/pay'))).toHaveLength(0)
+      expect(mock.violations).toEqual([])
+    })
+  })
+
   for (const width of [320, 390, 834, 1440]) {
     test(`manual capture and four copy formats at ${width}px`, async ({ page }, testInfo) => {
       await page.setViewportSize({ width, height: 1000 })
@@ -298,7 +321,10 @@ test.describe('Google Pay Direct with synthetic provider boundary', () => {
         ['Direct API', 'Direct API tokenInfo', JSON.stringify({ tokenInfo: JSON.stringify({ provider: 'GooglePay', tokenId: token }) }, null, 2)],
       ] as const) {
         await panel.getByRole('tab', { name: tab, exact: true }).click()
-        await panel.getByRole('button', { name: `Copy ${label}`, exact: true }).click()
+        const copy = panel.getByRole('button', { name: `Copy ${label}`, exact: true })
+        await expectCenteredButtonIcon(copy)
+        await copy.click()
+        await expectCenteredButtonIcon(panel.getByRole('button', { name: `${label} copied to clipboard`, exact: true }))
         await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(expected)
       }
       expect(mock.calls.filter(path => path.endsWith('/pay'))).toHaveLength(0)
