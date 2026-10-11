@@ -132,7 +132,6 @@ const verificationEvent = computed(() => {
 })
 const sdkJourney = computed(() => sdk.value ? findOrderJourney(sdk.value.order) : null)
 const returned = computed(() => sdk.value?.events.some(event => event.source === 'return') ?? false)
-const clientResult = computed(() => sdk.value?.events.some(event => event.source === 'client') ?? false)
 const paymentMethodLabels: Record<PaymentMethodId, string> = {
   card: 'Card',
   apm: 'APM',
@@ -140,9 +139,6 @@ const paymentMethodLabels: Record<PaymentMethodId, string> = {
   'google-pay': 'Google Pay',
   'apple-pay': 'Apple Pay',
 }
-const interaction = computed(() => clientResult.value
-  ? 'SDK callback'
-  : returned.value ? 'browser return' : 'client-visible state')
 const outcome = computed(() => {
   if (contract.value?.state === 'active' && succeeded.value) {
     return {
@@ -191,8 +187,8 @@ const outcome = computed(() => {
       badge: sandbox.value ? 'Server verified' : 'Simulated outcome',
       title: sandbox.value ? 'Sandbox payment verified.' : 'Simulated payment complete.',
       description: sandbox.value
-        ? `The ${interaction.value} remained non-final until the ${verification.value.label} durably established succeeded.`
-        : 'The active PaymentAttempt reached succeeded through the selected deterministic event sequence. No real payment was submitted.',
+        ? `Your payment was confirmed by a ${verification.value.label}. This is a Sandbox order; no goods will be shipped.`
+        : 'The selected simulation is complete. No real payment was submitted and no goods will be shipped.',
     }
   }
 
@@ -203,10 +199,10 @@ const outcome = computed(() => {
     icon: failed ? 'i-lucide-circle-x' : 'i-lucide-circle-alert',
     color: failed ? 'error' as const : 'warning' as const,
     badge: sandbox.value ? 'Server verified' : 'Simulated outcome',
-    title: failed ? 'Payment failed.' : 'Payment was not completed.',
+    title: failed ? 'Payment failed.' : status === 'cancelled' ? 'Payment cancelled.' : 'Payment is not confirmed yet.',
     description: sandbox.value
-      ? `The ${verification.value.label} established the normalized status as ${status}. The ${interaction.value} was not treated as final proof.`
-      : `The deterministic simulation reached ${status}. No real payment or provider response was created.`,
+      ? `A ${verification.value.label} confirmed the current status: ${status}. Review the available next step below.`
+      : `This simulation ended with status ${status}. No real payment was submitted.`,
   }
 })
 const details = computed(() => {
@@ -399,7 +395,7 @@ onMounted(async () => {
           Subscription status restored.
         </h1>
         <p class="mx-auto mt-4 max-w-xl text-sm leading-relaxed text-toned">
-          The 30-day Payment audit record has expired. This view uses fresh Provider queries for the same initial payment and the independently retained subscription contract.
+          The 30-day Payment audit record has expired. These are the last confirmed states of the initial payment and retained subscription. Verify below to check for an update.
         </p>
         <p class="mt-6 font-mono text-3xl font-semibold tracking-tight text-highlighted">
           {{ formatMoney(retainedContract.amount) }}
@@ -410,6 +406,29 @@ onMounted(async () => {
         :payment="retainedSubscriptionPaymentStatus"
         :subscription="retainedContract"
       />
+
+      <UAlert
+        v-if="sdkError"
+        role="alert"
+        title="The latest update could not be checked"
+        :description="`${sdkError} The last confirmed subscription status is still shown.`"
+        color="warning"
+        variant="subtle"
+        class="mt-6"
+      />
+
+      <div class="mt-8 flex flex-col-reverse gap-3 sm:flex-row sm:justify-center">
+        <UButton to="/" label="Return to Demo Hub" color="neutral" variant="outline" size="lg" class="min-h-11" />
+        <UButton
+          label="Verify retained subscription"
+          icon="i-lucide-shield-check"
+          size="lg"
+          class="min-h-11"
+          :loading="restoring"
+          :disabled="restoring"
+          @click="verifyRetainedSubscription"
+        />
+      </div>
 
       <PaymentTechnicalDetails
         id="payment-technical-details"
@@ -426,18 +445,6 @@ onMounted(async () => {
         class="mt-6"
       />
 
-      <div class="mt-8 flex flex-col-reverse gap-3 sm:flex-row sm:justify-center">
-        <UButton to="/" label="Return to Demo Hub" color="neutral" variant="outline" size="lg" class="min-h-11" />
-        <UButton
-          label="Verify retained subscription"
-          icon="i-lucide-shield-check"
-          size="lg"
-          class="min-h-11"
-          :loading="restoring"
-          :disabled="restoring"
-          @click="verifyRetainedSubscription"
-        />
-      </div>
     </section>
 
     <section
@@ -515,51 +522,6 @@ onMounted(async () => {
         />
       </template>
 
-      <section aria-labelledby="result-order-title" class="mt-10 rounded-lg border border-default p-5 sm:p-6">
-        <div class="flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <p class="text-sm text-muted">Halden order</p>
-            <h2 id="result-order-title" class="mt-1 font-mono text-base font-semibold text-highlighted">
-              {{ order.id }}
-            </h2>
-          </div>
-          <UBadge
-            :label="`${authorization?.fundsStatus ?? attempt.status} · ${sandbox ? 'Sandbox' : 'Simulation'}`"
-            :color="outcome.color"
-            variant="soft"
-          />
-        </div>
-
-        <USeparator class="my-5" />
-
-        <PaymentAttempts :attempts="attempts" :active-id="attempt.id" />
-      </section>
-
-      <SubscriptionStatusPair
-        v-if="contract"
-        :payment="attempt.status"
-        :subscription="contract"
-      />
-
-      <UAlert
-        v-if="sdkError"
-        role="alert"
-        :title="sdkFailure?.title"
-        :description="sdkError"
-        color="warning"
-        variant="subtle"
-        icon="i-lucide-circle-alert"
-        class="mt-6"
-      />
-
-      <PaymentTechnicalDetails
-        id="payment-technical-details"
-        :rows="details"
-        :mode="sandbox ? 'sandbox' : 'simulation'"
-        :badge-label="authorization ? 'Sandbox authorization facts' : undefined"
-        class="mt-6"
-      />
-
       <div ref="actions" class="mt-8 flex flex-col-reverse gap-3 sm:flex-row sm:justify-center">
         <UButton
           to="/"
@@ -608,6 +570,52 @@ onMounted(async () => {
           @click="retryCurrentSdkOrder"
         />
       </div>
+
+      <section aria-labelledby="result-order-title" class="mt-10 rounded-lg border border-default p-5 sm:p-6">
+        <div class="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <p class="text-sm text-muted">Halden order</p>
+            <h2 id="result-order-title" class="mt-1 font-mono text-base font-semibold text-highlighted">
+              {{ order.id }}
+            </h2>
+          </div>
+          <UBadge
+            :label="`${authorization?.fundsStatus ?? attempt.status} · ${sandbox ? 'Sandbox' : 'Simulation'}`"
+            :color="outcome.color"
+            variant="soft"
+          />
+        </div>
+
+        <USeparator class="my-5" />
+
+        <PaymentAttempts :attempts="attempts" :active-id="attempt.id" />
+      </section>
+
+      <SubscriptionStatusPair
+        v-if="contract"
+        :payment="attempt.status"
+        :subscription="contract"
+      />
+
+      <UAlert
+        v-if="sdkError"
+        role="alert"
+        :title="sdkFailure?.title"
+        :description="sdkError"
+        color="warning"
+        variant="subtle"
+        icon="i-lucide-circle-alert"
+        class="mt-6"
+      />
+
+      <PaymentTechnicalDetails
+        id="payment-technical-details"
+        :rows="details"
+        :mode="sandbox ? 'sandbox' : 'simulation'"
+        :badge-label="authorization ? 'Sandbox authorization facts' : undefined"
+        class="mt-6"
+      />
+
     </div>
   </UContainer>
 </template>

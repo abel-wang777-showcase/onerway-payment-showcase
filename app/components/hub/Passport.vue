@@ -17,62 +17,63 @@ defineProps<{
 
 <template>
   <aside
+    id="demo-launch"
     aria-labelledby="passport-title"
-    class="demo-passport min-w-0 rounded-lg border border-default p-6 lg:sticky lg:top-8"
+    tabindex="-1"
+    class="demo-passport min-w-0 scroll-mt-6 rounded-lg border border-default bg-muted p-5 focus-visible:outline-2 focus-visible:outline-primary sm:p-6 lg:sticky lg:top-8"
   >
-    <div class="flex items-start justify-between gap-4">
-      <div>
-        <p class="font-mono text-xs font-medium uppercase tracking-[0.16em] text-muted">
-          Demo passport
-        </p>
-        <h2
-          id="passport-title"
-          class="mt-2 text-xl font-semibold tracking-tight text-highlighted"
-        >
-          {{ title }}
-        </h2>
-      </div>
+    <div class="flex flex-wrap items-start justify-between gap-3">
+      <p class="text-sm font-medium text-toned">
+        Your demo
+      </p>
       <UBadge
         :label="sandbox ? (simulation === false ? 'Sandbox' : 'Simulation + Sandbox') : 'Simulation'"
         color="info"
         variant="soft"
       />
     </div>
+    <h2
+      id="passport-title"
+      class="mt-2 text-xl font-semibold tracking-tight text-highlighted"
+    >
+      {{ title }}
+    </h2>
 
     <p class="mt-3 text-sm leading-relaxed text-toned">
       {{ description }}
     </p>
 
-    <p class="mt-8 font-mono text-4xl font-semibold tracking-tight text-highlighted">
+    <p class="mt-5 text-3xl font-semibold tracking-tight text-highlighted tabular-nums">
       {{ amount }}
     </p>
 
-    <dl class="mt-8 divide-y divide-default border-y border-default">
+    <slot />
+
+    <dl class="mt-6 divide-y divide-default border-y border-default">
       <div
         v-for="fact in facts"
         :key="fact.label"
-        class="grid grid-cols-[minmax(0,8rem)_minmax(0,1fr)] gap-4 py-3 text-sm"
+        class="flex flex-wrap justify-between gap-x-4 gap-y-1 py-2 text-sm"
       >
-        <dt class="text-muted">
+        <dt class="text-toned">
           {{ fact.label }}
         </dt>
-        <dd class="text-right font-medium text-highlighted">
+        <dd class="min-w-0 break-words font-medium text-highlighted">
           {{ fact.value }}
         </dd>
       </div>
     </dl>
 
-    <div class="mt-6 flex items-start gap-3 rounded-md border border-default bg-default p-3">
+    <div class="mt-4 flex items-start gap-2">
       <UIcon
         name="i-lucide-circle-check"
         class="mt-0.5 size-4 shrink-0 text-primary"
         aria-hidden="true"
       />
       <p class="text-xs leading-relaxed text-toned">
-        {{ profile }}. Simulation stays local; the real Sandbox button uses signed server calls and Onerway-hosted payment pages or fields. Production remains locked.
+        {{ profile }}. Simulation uses no payment data. Sandbox tests a payment integration. No production payments.
       </p>
     </div>
 
-    <slot />
   </aside>
 </template>

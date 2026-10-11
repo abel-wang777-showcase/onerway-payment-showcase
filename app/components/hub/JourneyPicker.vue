@@ -23,17 +23,14 @@ const value = computed({
     class="min-w-0 space-y-4"
   >
     <div class="space-y-2">
-      <p class="text-sm font-medium text-primary">
-        {{ hosted ? 'Hosted payment' : 'Deterministic journey' }}
-      </p>
       <h2
         id="journey-title"
         class="text-2xl font-semibold tracking-tight text-highlighted"
       >
-        {{ hosted ? 'Pay on Onerway Checkout.' : 'Pick the outcome you want to explore.' }}
+        {{ hosted ? 'Choose your hosted payment.' : 'What would you like to demonstrate?' }}
       </h2>
       <p class="text-sm leading-relaxed text-toned">
-        {{ hosted ? 'Choose your payment method on the hosted page. The outcome depends on the selected method and Sandbox conditions; it is verified after your return.' : 'Every fixture below has a local simulation. Confirmed fixtures can also expose a real Sandbox entry using the same shared Order → PaymentAttempt → PaymentEvent model.' }}
+        {{ hosted ? 'Choose a journey, then pay on Onerway. Halden checks the result when you return.' : 'Try a successful payment, a 3DS challenge, or show how a customer recovers when payment is interrupted. Simulations do not charge a card.' }}
       </p>
     </div>
 
@@ -45,6 +42,7 @@ const value = computed({
       indicator="end"
       size="lg"
       class="min-w-0"
+      :ui="{ fieldset: 'grid gap-3 sm:grid-cols-2', description: 'text-toned', item: 'min-w-0' }"
     />
   </section>
 </template>

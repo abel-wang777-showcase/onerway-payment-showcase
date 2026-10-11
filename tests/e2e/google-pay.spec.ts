@@ -57,6 +57,24 @@ async function installMock(page: Page, hostedVerification = false) {
 }
 
 test.describe('Google Pay Direct with synthetic provider boundary', () => {
+  test('navigates a long wallet page without recreating or submitting its order', async ({ page }) => {
+    await page.setViewportSize({ width: 320, height: 844 })
+    const mock = await installMock(page)
+    await gotoHydrated(page, '/halden/direct/order-google')
+    await expect(page.getByRole('button', { name: 'Pay with Google Pay', exact: true })).toBeVisible()
+    const calls = [...mock.calls]
+    const navigation = page.getByRole('navigation', { name: 'Payment page sections' })
+    for (const [label, target] of [['How it works', '#wallet-explainer'], ['References', '#wallet-references'], ['Your payment', '#wallet-payment']]) {
+      await navigation.getByRole('link', { name: label, exact: true }).click()
+      await expect(page.locator(target!)).toBeFocused()
+      await expect(page.locator(target!)).toBeInViewport()
+      await expect(navigation).toBeInViewport()
+      await expectNoHorizontalOverflow(page)
+    }
+    expect(mock.calls).toEqual(calls)
+    expect(mock.violations).toEqual([])
+  })
+
   for (const width of [390, 1440]) {
     test(`shows a wallet receipt while the authorized payment response is pending at ${width}px`, async ({ page }, testInfo) => {
       await page.setViewportSize({ width, height: 844 })

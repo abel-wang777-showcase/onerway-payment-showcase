@@ -44,6 +44,7 @@ onMounted(initialize)
 
 <template>
   <UContainer class="py-6 pb-16 lg:py-12">
+    <PaymentNavigation :references="Boolean(session)" />
     <div class="grid gap-8 lg:grid-cols-3 lg:items-start">
       <div class="min-w-0 space-y-8 lg:col-span-2">
         <header>
@@ -51,7 +52,7 @@ onMounted(initialize)
           <h1 class="mt-3 text-2xl font-semibold tracking-tight text-highlighted sm:text-3xl">Pay with Google Pay.</h1>
           <p class="mt-4 text-sm text-toned">Authorize your Halden purchase, then explore how Google Pay and Onerway process it.</p>
         </header>
-        <section class="space-y-4 rounded-lg border border-default p-5 sm:p-6" aria-labelledby="google-pay-order-title">
+        <section id="wallet-payment" tabindex="-1" class="scroll-mt-24 space-y-4 rounded-lg border border-default p-5 focus-visible:outline-2 focus-visible:outline-primary sm:p-6" aria-labelledby="google-pay-order-title">
           <PaymentWalletReceipt
             :order-id="orderId" :order="session?.order" :status="session?.attempt.status" heading-id="google-pay-order-title"
             :submitted="submitted" :submitting="phase === 'submit' && sheetOpen" :checking="checking" :loading="loading" :sheet-open="sheetOpen"
@@ -61,6 +62,7 @@ onMounted(initialize)
           </UFormField>
           <p v-if="session?.attempt.status === 'requires_action'" class="text-sm text-toned">Onerway may need card verification on its hosted page. After returning, check this original order’s server result; returning alone does not confirm payment. Do not resubmit this order’s token.</p>
           <UAlert v-if="error || restartError" :description="restartError ?? error ?? ''" color="warning" variant="subtle" />
+          <p v-if="!submitted" class="text-sm leading-relaxed text-toned">Google Pay runs in TEST and needs an eligible browser and account. A test token can still be declined by the payment gateway.</p>
           <div v-show="canPay" ref="buttonHost" class="google-pay-control" />
           <div class="flex flex-wrap gap-3">
             <UButton v-if="!loading && !submitted && !sheetOpen && !canPay" class="min-h-11 touch-manipulation" label="Retry preparation" :disabled="restarting" variant="outline" color="neutral" @click="prepare" />
@@ -71,7 +73,9 @@ onMounted(initialize)
           <p v-if="session && submitted" class="text-sm text-toned">A new Sandbox order is an independent test. It does not cancel this order or resend its token. This browser will restore the new order on your next visit.</p>
         </section>
         <PaymentGooglePayToken :token="tokenDebug" :unavailable="tokenDebugUnavailable" :manual="mode === 'manual'" :captured="manualCaptured" @clear="clearToken" />
-        <PaymentGooglePaySteps :steps="steps" :mode="mode" />
+        <div id="wallet-explainer" tabindex="-1" class="scroll-mt-24 focus-visible:outline-2 focus-visible:outline-primary">
+          <PaymentGooglePaySteps :steps="steps" :mode="mode" />
+        </div>
       </div>
       <aside class="min-w-0 space-y-6 lg:sticky lg:top-24" aria-label="Order and test conditions">
         <section class="space-y-3 rounded-lg border border-default bg-muted p-5 text-sm text-toned">
@@ -80,7 +84,7 @@ onMounted(initialize)
           <p>Full PaymentData, card details and tokens are never saved. The encrypted token is available only in this page’s Sandbox debugging view.</p>
           <p v-if="submitted">Do not resubmit this order’s token. Start a new Sandbox order only for an independent test.</p>
         </section>
-        <section v-if="session" class="space-y-3 rounded-lg border border-default p-5 text-sm">
+        <section v-if="session" id="wallet-references" tabindex="-1" class="scroll-mt-24 space-y-3 rounded-lg border border-default p-5 text-sm focus-visible:outline-2 focus-visible:outline-primary">
           <h2 class="font-semibold text-highlighted">Safe payment summary</h2>
           <dl class="space-y-3 break-all"><div v-for="[label, value] in references" :key="label"><dt class="text-muted">{{ label }}</dt><dd class="font-mono">{{ value }}</dd></div></dl>
         </section>

@@ -12,13 +12,23 @@
  * Keep registry-managed foundation styles in main.css unchanged.
  */
 
-.demo-passport {
-  background:
-    linear-gradient(
-      135deg,
-      color-mix(in srgb, var(--ui-primary) 10%, var(--ui-bg)) 0%,
-      var(--ui-bg-elevated) 72%
-    );
+.demo-passport button,
+.demo-passport button [data-slot="label"] {
+  white-space: normal;
+  text-align: center;
+  overflow: visible;
+}
+
+.demo-mobile-nav {
+  padding-bottom: calc(0.75rem + env(safe-area-inset-bottom));
+}
+
+html {
+  scroll-padding-block: 1.5rem 7rem;
+}
+
+button, a, summary {
+  touch-action: manipulation;
 }
 
 .halden-shell {

@@ -90,7 +90,8 @@ onMounted(async () => {
       <UButton v-else to="/" label="Return to Demo Hub" class="mt-6 min-h-11" />
     </section>
     <div v-else class="grid gap-8 lg:grid-cols-[minmax(0,1fr)_24rem] lg:items-start">
-      <div class="min-w-0 space-y-8">
+      <HaldenSummary class="lg:col-start-2 lg:row-start-1" :lines="lines" :total="amount" pay-label="Continue to Onerway Checkout" :disabled="!canOpenCheckout || busy" :busy="stage === 'redirecting'" @pay="openCheckout" />
+      <div class="min-w-0 space-y-8 lg:col-start-1 lg:row-start-1">
         <div>
           <UBadge label="Sandbox · Hosted Checkout" variant="soft" />
           <h1 ref="title" tabindex="-1" class="mt-4 text-3xl font-semibold tracking-tight text-highlighted sm:text-4xl">
@@ -141,7 +142,6 @@ onMounted(async () => {
           </dl>
         </section>
       </div>
-      <HaldenSummary :lines="lines" :total="amount" pay-label="Continue to Onerway Checkout" :disabled="!canOpenCheckout || busy" :busy="stage === 'redirecting'" @pay="openCheckout" />
     </div>
   </UContainer>
 </template>

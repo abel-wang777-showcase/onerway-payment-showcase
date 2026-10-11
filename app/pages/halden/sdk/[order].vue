@@ -365,7 +365,17 @@ onMounted(async () => {
     </section>
 
     <div v-else class="grid gap-8 lg:grid-cols-[minmax(0,1fr)_24rem] lg:items-start">
-      <div class="space-y-8">
+      <HaldenSummary
+        class="lg:col-start-2 lg:row-start-1"
+        :lines="summaryLines"
+        :total="amount"
+        :pay-label="payLabel"
+        :disabled="disabled"
+        :busy="busy"
+        footer="Payment methods are hosted by Onerway Sandbox; the merchant button submits Card only."
+        @pay="pay"
+      />
+      <div class="min-w-0 space-y-8 lg:col-start-1 lg:row-start-1">
         <div>
           <div class="flex flex-wrap gap-2">
             <UBadge label="Real Sandbox" color="warning" variant="soft" />
@@ -406,6 +416,29 @@ onMounted(async () => {
           icon="i-lucide-circle-alert"
         />
 
+        <PaymentElement
+          v-if="collecting"
+          :key="`${current.paymentId}:${elementRevision}`"
+          ref="element"
+          :payment-id="current.paymentId"
+          :url="sdkUrl"
+          :generation="elementRevision"
+          :expected-method="current.attempt.method"
+          @ready="handleElementReady"
+          @error="handleElementError"
+          @result="handleElementResult"
+        />
+
+        <PaymentActions
+          v-if="actionItems.length"
+          title="Choose the safe next step"
+          :description="currentSubscription
+            ? 'Reload keeps this Payment intact and verification queries this same Attempt. Subscription recovery never creates or confirms another payment.'
+            : 'Reload keeps this Payment intact, verification queries this Attempt, and a separate Sandbox order never cancels or overwrites it.'"
+          :items="actionItems"
+          @action="handleAction"
+        />
+
         <section
           v-if="references.length"
           aria-labelledby="payment-references-title"
@@ -441,39 +474,7 @@ onMounted(async () => {
           </dl>
         </section>
 
-        <PaymentElement
-          v-if="collecting"
-          :key="`${current.paymentId}:${elementRevision}`"
-          ref="element"
-          :payment-id="current.paymentId"
-          :url="sdkUrl"
-          :generation="elementRevision"
-          :expected-method="current.attempt.method"
-          @ready="handleElementReady"
-          @error="handleElementError"
-          @result="handleElementResult"
-        />
-
-        <PaymentActions
-          v-if="actionItems.length"
-          title="Choose the safe next step"
-          :description="currentSubscription
-            ? 'Reload keeps this Payment intact and verification queries this same Attempt. Subscription recovery never creates or confirms another payment.'
-            : 'Reload keeps this Payment intact, verification queries this Attempt, and a separate Sandbox order never cancels or overwrites it.'"
-          :items="actionItems"
-          @action="handleAction"
-        />
       </div>
-
-      <HaldenSummary
-        :lines="summaryLines"
-        :total="amount"
-        :pay-label="payLabel"
-        :disabled="disabled"
-        :busy="busy"
-        footer="Payment methods are hosted by Onerway Sandbox; the merchant button submits Card only."
-        @pay="pay"
-      />
     </div>
   </UContainer>
 </template>

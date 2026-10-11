@@ -27,15 +27,15 @@ beforeEach(() => {
 })
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals() })
 describe('Google Pay client', () => {
-  it('restores a paid order without depending on wallet configuration', async () => {
+  it.each(['succeeded', 'failed', 'cancelled'])('preserves a confirmed %s order when a fresh check fails', async (status) => {
     const initial = payment()
     initial.submitted = true
-    initial.attempt.status = 'succeeded'
+    initial.attempt.status = status
     mocks.fetch.mockRejectedValue(new Error('consult unavailable'))
     const Restored = defineComponent({ setup() { google = useGooglePay('order-google', initial as unknown as DirectRecoveryResponse); return () => null } })
     const wrapper = await mountSuspended(Restored)
     await google.initialize()
-    expect(google.session.value?.attempt.status).toBe('succeeded')
+    expect(google.session.value?.attempt.status).toBe(status)
     expect(google.submitted.value).toBe(true)
     expect(mocks.fetch).not.toHaveBeenCalled()
     expect(mocks.load).not.toHaveBeenCalled()
@@ -43,7 +43,9 @@ describe('Google Pay client', () => {
     expect(google.steps.value.filter(step => step.id !== 'result').every(step => step.state === 'waiting' && !step.evidence)).toBe(true)
     await google.verify()
     expect(mocks.fetch).toHaveBeenCalledWith('/api/payment/recover', expect.anything())
-    expect(google.session.value?.attempt.status).toBe('succeeded')
+    expect(google.session.value?.attempt.status).toBe(status)
+    expect(google.error.value).toContain('confirmed payment result is preserved')
+    expect(google.error.value).not.toContain('Payment is unconfirmed')
     wrapper.unmount()
   })
 

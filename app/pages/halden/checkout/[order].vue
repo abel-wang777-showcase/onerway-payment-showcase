@@ -146,7 +146,16 @@ onMounted(async () => {
       v-else
       class="grid gap-8 lg:grid-cols-[minmax(0,1fr)_24rem] lg:items-start"
     >
-      <div class="space-y-8">
+      <HaldenSummary
+        class="lg:col-start-2 lg:row-start-1"
+        :lines="summaryLines"
+        :total="amount"
+        :pay-label="payLabel"
+        :disabled="disabled"
+        :busy="busy"
+        @pay="pay"
+      />
+      <div class="min-w-0 space-y-8 lg:col-start-1 lg:row-start-1">
         <div>
           <p class="font-mono text-xs font-medium uppercase tracking-[0.16em] text-muted">
             {{ journey?.label }}
@@ -207,14 +216,6 @@ onMounted(async () => {
         </p>
       </div>
 
-      <HaldenSummary
-        :lines="summaryLines"
-        :total="amount"
-        :pay-label="payLabel"
-        :disabled="disabled"
-        :busy="busy"
-        @pay="pay"
-      />
     </div>
   </UContainer>
 </template>

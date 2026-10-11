@@ -73,7 +73,8 @@ describe('application routes', () => {
 
     expect(response.status).toBe(200)
     expect(html).toContain('<title>Demo Hub · Onerway Payment Showcase</title>')
-    expect(html).toContain('Choose a payment journey. See exactly what happens.')
+    expect(html).toContain('id="demo-launch"')
+    expect(html).toContain('id="demo-selection"')
     expect(html).toContain('Start simulated checkout')
     expect(sandboxAction).toBeDefined()
     expect(sandboxAction).toMatch(disabled)

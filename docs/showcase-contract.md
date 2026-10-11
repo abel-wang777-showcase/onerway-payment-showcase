@@ -417,6 +417,8 @@ Sandbox 基础域名为 `https://sandbox-acq.onerway.com`，create 与 query 请
 - 初始只安装 `geist-foundation`；复制动作复用同一已锁定 revision 的 registry `foundation-copy-button` / `foundation-use-copy`，不复制旧 `assets/starter`、旧 export、playground 或 API Docs kit。
 - 验收 1440、834、390、320 宽度；独立静态画板不等于真实响应式已通过。
 - Demo Hub 的选择器使用正确的 radio / `aria-pressed` 语义。
+- Demo Hub 优先展示当前可运行选择与明确的启动入口；未开放选项保留在展开区。移动端先给当前演示摘要，并提供长页面返回启动区的入口；链接只记录 journey、method、mode、plan 等公开选择。跨接入方式切换时保留仍受支持的钱包，订阅模式不展示不能控制初次支付的普通支付方式选择。
+- 商户支付页先展示订单摘要、付款表单和当前可执行动作，再展示排查引用。无法执行且未加载的付款按钮不占据移动端固定操作栏。结果页先展示结果与下一步，再展示尝试历史和技术详情；刷新失败保留此前确认状态并单独报告本次更新失败。
 - 页面提供 `main`、`nav`、`aria-current`、`aria-controls`、可见键盘焦点和状态播报。
 - `Change`、`Back to cart` 等控件在演示中必须有真实行为，否则删除。
 - 不承诺未实现的邮件发送；卡数据文案只陈述经 SDK / 合规确认的边界。

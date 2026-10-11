@@ -18,10 +18,11 @@ const isHome = computed(() => route.path === '/')
           to="/"
           class="inline-flex min-h-11 items-center rounded-sm text-sm font-semibold tracking-tight text-highlighted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
         >
-          Onerway Payment Showcase
+          <span>Onerway<span class="hidden sm:inline"> Payment Showcase</span></span>
         </NuxtLink>
 
-        <nav aria-label="Primary navigation">
+        <nav aria-label="Primary navigation" class="flex shrink-0 items-center gap-1">
+          <UColorModeButton class="min-h-11 min-w-11" />
           <UButton
             to="/"
             label="Demo Hub"
