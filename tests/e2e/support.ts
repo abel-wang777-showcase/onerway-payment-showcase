@@ -2,6 +2,8 @@ import { expect, type Locator, type Page } from '@playwright/test'
 import { waitForHydration } from '@nuxt/test-utils/e2e'
 import type { JourneyId } from '../../shared/payment/journey'
 import type { PaymentMethodId } from '../../shared/payment/capability'
+import { createSession, serializeSession } from '../../shared/demo/session'
+import { DEMO_STORAGE_KEY } from '../../shared/demo/runtime'
 
 const BASE_URL = 'http://127.0.0.1:4173'
 const PAYMENT_PATH = /^\/api\/(?:payment(?:\/|$)|webhooks(?:\/|$))/
@@ -50,12 +52,20 @@ export async function gotoHydrated(page: Page, path = '/'): Promise<void> {
 }
 
 export async function startJourney(page: Page, journey: JourneyId): Promise<void> {
-  await gotoHydrated(page)
-  await journeyRadio(page, journey).click()
-  await expect(journeyRadio(page, journey)).toBeChecked()
-  await page.getByRole('button', { name: /start simulated checkout/i }).click()
+  const session = createSession(journey)
+  if (new URL(page.url()).origin !== BASE_URL) {
+    await page.goto(BASE_URL, { waitUntil: 'domcontentloaded' })
+  }
+  // Simulation is a test fixture, not a public Hub action. Seed the same serialized
+  // session that the runtime restores, without adding a hidden production switch.
+  await page.evaluate(({ key, value }) => sessionStorage.setItem(key, value), {
+    key: DEMO_STORAGE_KEY,
+    value: serializeSession(session),
+  })
+  await gotoHydrated(page, `/halden/checkout/${session.order.id}`)
   await expect(page).toHaveURL(/\/halden\/checkout\//)
-  await expect(page.locator('[role="status"][aria-live="polite"][data-stage="ready"]')).toBeVisible()
+  const readyStage = journey === 'form-load-recovery' ? 'not_completed' : 'ready'
+  await expect(page.locator(`[role="status"][aria-live="polite"][data-stage="${readyStage}"]`)).toBeVisible()
 }
 
 export async function submitSimulation(page: Page): Promise<void> {

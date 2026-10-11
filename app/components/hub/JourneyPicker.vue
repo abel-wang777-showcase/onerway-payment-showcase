@@ -30,7 +30,7 @@ const value = computed({
         {{ hosted ? 'Choose your hosted payment.' : 'What would you like to demonstrate?' }}
       </h2>
       <p class="text-sm leading-relaxed text-toned">
-        {{ hosted ? 'Choose a journey, then pay on Onerway. Halden checks the result when you return.' : 'Try a successful payment, a 3DS challenge, or show how a customer recovers when payment is interrupted. Simulations do not charge a card.' }}
+        {{ hosted ? 'Choose a journey, then pay on Onerway. Halden checks the result when you return.' : 'Choose a standard Sandbox payment or a 3DS challenge with the Web JS SDK. Halden verifies the payment result.' }}
       </p>
     </div>
 

@@ -727,6 +727,7 @@ describe('payment restoration pages', () => {
     const pending = wrapper.findAll('button').find(button => button.text().includes('Checking for an existing Sandbox checkout'))!
     expect(pending?.exists()).toBe(true)
     expect(pending.attributes('disabled')).toBeDefined()
+    expect(wrapper.text()).not.toContain('Start simulated checkout')
     pending.element.click()
     expect(start).not.toHaveBeenCalled()
     expect(restore).not.toHaveBeenCalled()
@@ -831,6 +832,7 @@ describe('payment restoration pages', () => {
     await flushPromises()
 
     expect(probeRecovery).not.toHaveBeenCalled()
+    expect(wrapper.text()).not.toContain('Start simulated checkout')
     wrapper.unmount()
   })
 

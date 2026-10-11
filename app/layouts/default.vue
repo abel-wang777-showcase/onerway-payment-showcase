@@ -46,7 +46,7 @@ const isHome = computed(() => route.path === '/')
     <footer class="border-t border-default">
       <UContainer class="py-6">
         <p class="text-sm text-toned">
-          Customer-facing payment journeys. Simulations are labeled and production transactions stay locked.
+          Customer-facing Sandbox payment journeys. Production transactions stay locked.
         </p>
       </UContainer>
     </footer>

@@ -5,6 +5,7 @@ import { defineComponent, nextTick, reactive } from 'vue'
 import type { LocationQuery } from 'vue-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useHubSelection } from '../../app/composables/useHubSelection'
+import { getJourney, isJourneyId } from '../../shared/payment/journey'
 
 const navigation = vi.hoisted(() => ({
   route: null as unknown as { path: string, query: LocationQuery, hash: string },
@@ -54,6 +55,30 @@ afterEach(() => {
 })
 
 describe('Demo Hub selection', () => {
+  it.each([
+    'processing-recovery', 'cancelled-retry', 'deterministic-failure', 'form-load-recovery',
+  ] as const)('normalizes the retired %s Hub URL to the standard Sandbox journey', async (legacyJourney) => {
+    await mount({ journey: legacyJourney, method: 'card', mode: 'payment' })
+    await settle()
+    expect(hub.journeyId.value).toBe('standard-success')
+    expect(navigation.route.query).toEqual({ journey: 'standard-success', method: 'card', mode: 'payment' })
+    expect(hub.journeyItems.value.every(item => typeof item === 'object'
+      && isJourneyId(item.value) && getJourney(item.value).modes.includes('sandbox'))).toBe(true)
+
+    // A stale UI write cannot reintroduce a test-only journey into the public selection.
+    hub.journeyId.value = legacyJourney
+    expect(hub.journeyId.value).toBe('standard-success')
+  })
+
+  it.each([
+    'standard-success', 'three-ds-success', 'hosted-checkout', 'hosted-checkout-three-ds',
+    'hosted-authorization', 'apple-pay-direct', 'google-pay-direct',
+  ] as const)('preserves the public %s Sandbox journey', async (journeyId) => {
+    await mount({ journey: journeyId })
+    expect(hub.journeyId.value).toBe(journeyId)
+    expect(hub.journeyItems.value).toContainEqual(expect.objectContaining({ value: journeyId, disabled: false }))
+  })
+
   it.each(['google-pay', 'apple-pay'] as const)('keeps %s when switching between supported integrations', async (method) => {
     await mount({ journey: 'standard-success', method })
     hub.selection.value = { ...hub.selection.value, integration: 'direct-api' }

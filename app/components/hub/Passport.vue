@@ -10,8 +10,6 @@ defineProps<{
   amount: string
   facts: readonly Fact[]
   profile: string
-  sandbox: boolean
-  simulation?: boolean
 }>()
 </script>
 
@@ -27,7 +25,7 @@ defineProps<{
         Your demo
       </p>
       <UBadge
-        :label="sandbox ? (simulation === false ? 'Sandbox' : 'Simulation + Sandbox') : 'Simulation'"
+        label="Sandbox"
         color="info"
         variant="soft"
       />
@@ -71,7 +69,7 @@ defineProps<{
         aria-hidden="true"
       />
       <p class="text-xs leading-relaxed text-toned">
-        {{ profile }}. Simulation uses no payment data. Sandbox tests a payment integration. No production payments.
+        {{ profile }}. Sandbox tests a payment integration. No production payments.
       </p>
     </div>
 

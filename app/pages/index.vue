@@ -6,12 +6,11 @@ import { getCapability } from '#shared/payment/capability'
 
 useSeoMeta({
   title: 'Demo Hub · Onerway Payment Showcase',
-  description: 'Choose a customer-facing payment simulation or confirmed Sandbox journey and explore its capability, order and payment states.',
+  description: 'Choose a customer-facing Sandbox payment journey and explore its capability, order and payment states.',
 })
 
 const { data: profile } = await useFetch<PublicProfile>('/api/profile')
 const route = useRoute()
-const { start } = useDemo()
 const {
   error: sdkError,
   session: sdkSession,
@@ -80,11 +79,6 @@ const selectedWalletLabel = computed(() => {
     ? methodLabels[method]
     : null
 })
-const canStartSimulation = computed(() =>
-  billingMode.value === 'payment'
-  && selection.value.method === journey.value.method
-  && journey.value.modes.includes('simulation'),
-)
 const canStartSdk = computed(() =>
   !checkingRecovery.value
   && profile.value?.profile === 'sandbox'
@@ -131,10 +125,6 @@ const sdkLabel = computed(() => {
       : 'Restore existing Sandbox checkout'
   }
 
-  if (!journey.value.modes.includes('sandbox')) {
-    return 'Real Sandbox unavailable for this fixture'
-  }
-
   if (journey.value.id === 'hosted-authorization') return 'Start a Sandbox card authorization'
 
   if (journey.value.integration === 'checkout') return 'Start a new Sandbox Hosted Checkout'
@@ -147,12 +137,6 @@ const sdkLabel = computed(() => {
     ? 'Start a new real Sandbox 3DS'
     : 'Start a new real Sandbox checkout'
 })
-
-async function startDemo(): Promise<void> {
-  if (canStartSimulation.value && !launching.value) {
-    await start(journeyId.value)
-  }
-}
 
 async function startSandbox(): Promise<void> {
   if (canStartSdk.value && !launching.value && !sdkRestoring.value) {
@@ -229,7 +213,7 @@ onMounted(async () => {
       <div class="max-w-3xl">
         <div class="mb-4 flex flex-wrap items-center gap-2">
           <UBadge
-            label="Payment demo"
+            label="Sandbox payment demo"
             color="primary"
             variant="soft"
           />
@@ -244,7 +228,7 @@ onMounted(async () => {
           From checkout to confirmation.
         </h1>
         <p class="mt-4 max-w-2xl text-pretty text-base leading-relaxed text-toned">
-          Experience a Halden purchase as your customer would. Start with a simulation, or choose an integration to try in Sandbox.
+          Experience a Halden purchase as your customer would. Choose an integration and try a payment in Sandbox.
         </p>
         <nav aria-label="Demo sections" class="mt-5 flex flex-wrap gap-3">
           <UButton :to="{ query: route.query, hash: '#demo-selection' }" label="Customize your demo" color="neutral" variant="outline" class="min-h-11" />
@@ -271,7 +255,7 @@ onMounted(async () => {
           </HubMatrix>
 
           <HubJourneyPicker
-            v-if="billingMode === 'payment' && (canStartSimulation || journey.integration === 'checkout')"
+            v-if="billingMode === 'payment' && ((journey.integration === 'web-js-sdk' && selection.method === 'card') || journey.integration === 'checkout')"
             v-model="journeyId"
             :items="journeyItems"
             :hosted="journey.integration === 'checkout'"
@@ -288,29 +272,15 @@ onMounted(async () => {
           :amount="amount"
           :facts="passportFacts"
           :profile="profileLabel"
-          :sandbox="billingMode === 'subscription' || journey.modes.includes('sandbox')"
-          :simulation="canStartSimulation"
         >
-          <UButton
-            v-if="canStartSimulation"
-            label="Start simulated checkout"
-            trailing-icon="i-lucide-arrow-right"
-            size="xl"
-            block
-            class="mt-5 min-h-11"
-            :disabled="launching"
-            @click="startDemo"
-          />
           <UButton
             v-if="billingMode === 'payment' && restoringSdk && !canonicalSandboxHref"
             key="sandbox-restoration"
             :label="sdkLabel"
             trailing-icon="i-lucide-circle-check"
-            color="neutral"
-            variant="outline"
             size="xl"
             block
-            class="mt-3 min-h-11"
+            class="mt-5 min-h-11"
             :disabled="!canStartSdk || launching || sdkRestoring"
             :loading="checkingRecovery || launching || sdkRestoring"
             @click="restoreSandbox"
@@ -320,11 +290,9 @@ onMounted(async () => {
             key="sandbox-start"
             :label="sdkLabel"
             trailing-icon="i-lucide-circle-check"
-            color="neutral"
-            variant="outline"
             size="xl"
             block
-            class="mt-3 min-h-11"
+            class="mt-5 min-h-11"
             :disabled="!canStartSdk || launching || sdkRestoring"
             :loading="checkingRecovery || launching || sdkRestoring"
             @click="startSandbox"

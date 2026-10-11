@@ -93,9 +93,14 @@ function defaultMethod(integration: IntegrationId): PaymentMethodId {
   return integration === 'direct-api' ? 'apple-pay' : integration === 'checkout' ? 'all' : 'card'
 }
 
+function isSandboxJourney(value: unknown): value is JourneyId {
+  return isJourneyId(value) && getJourney(value).modes.includes('sandbox')
+}
+
 function matchesJourney(id: JourneyId, selection: Selection): boolean {
   const journey = getJourney(id)
-  return journey.scene === selection.scene && journey.integration === selection.integration
+  return journey.modes.includes('sandbox')
+    && journey.scene === selection.scene && journey.integration === selection.integration
     && (journey.method === selection.method || supportsSandboxMethod(journey, selection.method))
 }
 
@@ -106,7 +111,7 @@ function matchingJourney(selection: Selection, preferred: JourneyId): JourneyId 
 }
 
 function readQuery(query: LocationQuery): HubState {
-  const requested = isJourneyId(query.journey) ? query.journey : 'standard-success'
+  const requested = isSandboxJourney(query.journey) ? query.journey : 'standard-success'
   const journey = getJourney(requested)
   const method = typeof query.method === 'string'
     && PAYMENT_METHODS.includes(query.method as PaymentMethodId)
@@ -191,9 +196,16 @@ export function useHubSelection() {
     })
   }, { flush: 'post' })
 
+  onMounted(() => {
+    // Retire bookmarked simulation-only Hub choices without changing the retained test fixtures.
+    if (route.value.path === '/' && isJourneyId(route.value.query.journey) && !isSandboxJourney(route.value.query.journey)) {
+      state.value = readQuery(route.value.query)
+    }
+  })
+
   const subscriptionPlan = computed(() => getSubscriptionPlan(subscriptionPlanId.value))
   const billingItems = computed<RadioGroupItem[]>(() => [
-    { value: 'payment', label: 'One-time payment', description: 'Run a payment simulation or a real Sandbox journey.' },
+    { value: 'payment', label: 'One-time payment', description: 'Try a one-time payment in Sandbox.' },
     { value: 'subscription', label: 'Subscription', description: 'Create one merchant-managed daily Sandbox subscription with the selected integration.', disabled: selection.value.integration === 'direct-api' },
   ])
   const scenes = computed<RadioGroupItem[]>(() => SCENES.map((scene) => {
@@ -215,7 +227,7 @@ export function useHubSelection() {
   }))
 
   const journeyItems = computed<RadioGroupItem[]>(() => JOURNEY_IDS
-    .filter(id => JOURNEYS[id].integration === selection.value.integration)
+    .filter(id => isSandboxJourney(id) && JOURNEYS[id].integration === selection.value.integration)
     .map(id => ({
     value: id,
     label: JOURNEYS[id].label,

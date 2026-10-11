@@ -58,7 +58,7 @@ describe('application routes', () => {
     }
   })
 
-  it('renders the home shell with Sandbox creation disabled before recovery', async () => {
+  it('renders the public Sandbox-only home with creation disabled before recovery', async () => {
     const response = await fetch('/', {
       headers: {
         accept: 'text/html',
@@ -68,18 +68,17 @@ describe('application routes', () => {
     const mainIds = html.match(/id="main"/g) ?? []
     const buttons = html.match(/<button\b[^>]*>[\s\S]*?<\/button>/g) ?? []
     const sandboxAction = buttons.find(button => button.includes('Checking for an existing Sandbox checkout'))
-    const simulationAction = buttons.find(button => button.includes('Start simulated checkout'))
     const disabled = /^<button\b[^>]*\sdisabled(?:\s|=|>)/
 
     expect(response.status).toBe(200)
     expect(html).toContain('<title>Demo Hub · Onerway Payment Showcase</title>')
     expect(html).toContain('id="demo-launch"')
     expect(html).toContain('id="demo-selection"')
-    expect(html).toContain('Start simulated checkout')
+    expect(html).not.toContain('Start simulated checkout')
     expect(sandboxAction).toBeDefined()
     expect(sandboxAction).toMatch(disabled)
-    expect(simulationAction).toBeDefined()
-    expect(simulationAction).not.toMatch(disabled)
+    expect(html).not.toContain('Simulation + Sandbox')
+    expect(html).not.toMatch(/USD 5\.00 · (Processing recovery|Cancelled retry|Deterministic failure|Form load recovery)/)
     expect(html).not.toContain('Start a new real Sandbox checkout')
     expect(html).not.toContain('Start a Separate Sandbox Order')
     expect(html).not.toContain('Restore existing Sandbox checkout')

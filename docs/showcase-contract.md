@@ -30,7 +30,7 @@ Demo Hub 是公开演示入口，不是第二套后台。它负责：
 
 - 选择 `Scene × Integration × Payment Method`。
 - 明确展示能力为 Available、Conditional、Planned 或 Unavailable。
-- 为确定性的 Sandbox 演示选择测试旅程，例如普通成功或 3DS Challenge。
+- 为真实 Sandbox 演示选择测试旅程，例如普通支付或 3DS Challenge。公开 Demo Hub 不提供本地模拟付款入口；模拟状态机与对应的模拟 checkout 路由仅保留供自动化测试 fixture 使用。
 - 进入对应的参考商户体验。
 
 商户体验负责商品、订单、支付和结果。M0 使用虚构户外电商品牌 **Halden**；未来场景可有不同外观，但支付领域模型、状态真值和安全边界保持一致。
@@ -56,8 +56,8 @@ Demo Hub 是公开演示入口，不是第二套后台。它负责：
 
 当前 Demo Hub 的数据化矩阵包含全部 60 个组合，状态边界为：
 
-- `E-commerce × Web JS SDK × Card` 为 Available。`USD 5.00 · Standard success` 同时开放确定性 simulation 与真实 Sandbox SDK；`USD 50.00 · 3DS Challenge` 同时开放 simulation 与仅 Sandbox profile 可见的真实验收入口。两条真实 Sandbox Card 黄金路径均已在 canonical Production 域名完成服务端核验，其中 USD 50.00 覆盖 `R → 3DS Challenge → configured returnUrl → same-payment fresh query`。同一能力下另有独立、仅 Sandbox 的 `Halden Daily Essentials` 初始订阅旅程；它没有伪 simulation，也不把订阅计划建模为新的 Integration。
-- Card simulation 额外开放 processing recovery、cancelled retry、deterministic failure 与 form load recovery 四条异常旅程；它们不含 Sandbox mode、不产生 provider 标识，也不扩张真实 create allowlist。deterministic failure 只形成 `source=simulation / status=failed` 的本地事实，不能作为 Payment-level `failed` 原始状态证据。
+- `E-commerce × Web JS SDK × Card` 为 Available。`USD 5.00 · Standard success` 与 `USD 50.00 · 3DS Challenge` 在公开 Demo Hub 仅提供真实 Sandbox SDK 入口；按钮只在具备所需 SDK 的 Sandbox profile 启用，锁定预览明确说明尚未启用 Sandbox 支付。两条真实 Sandbox Card 黄金路径均已在 canonical Production 域名完成服务端核验，其中 USD 50.00 覆盖 `R → 3DS Challenge → configured returnUrl → same-payment fresh query`。同一能力下另有独立、仅 Sandbox 的 `Halden Daily Essentials` 初始订阅旅程；它没有伪 simulation，也不把订阅计划建模为新的 Integration。
+- processing recovery、cancelled retry、deterministic failure 与 form load recovery 四条 Card 异常模拟旅程仅保留为自动化测试 fixture，不在公开 Demo Hub 展示；旧 Hub URL 指向这些旅程时归一化为 `standard-success`。它们不含 Sandbox mode、不产生 provider 标识，也不扩张真实 create allowlist。deterministic failure 只形成 `source=simulation / status=failed` 的本地事实，不能作为 Payment-level `failed` 原始状态证据。
 - `E-commerce × Web JS SDK × Google Pay` 与 `E-commerce × Web JS SDK × Apple Pay` 均保持 Conditional，并复用 USD 5.00 `standard-success` 的真实 Sandbox 入口；Showcase 只记录用户选择的预期方式，是否渲染对应钱包按钮及其资格由同一个 Onerway SDK Element 决定。两者都不渲染伪钱包按钮，也没有钱包专属 simulation。Apple Pay 的最终真实设备 / Safari / Wallet canary 仍需单独授权与用户设备配合，不能由桌面浏览器或历史支付替代。
 - `E-commerce × Checkout × All` 为 Conditional，并提供 USD 5.00 普通支付与 USD 50.00 3DS 的 Sandbox 一次性支付入口。`All` 是支付方式选择策略，不代表最终使用某张卡或钱包；具体可选项由商户启用、国家、币种和设备条件决定。USD 50.00 真实 3DS 已获用户人工验收确认，返回恢复、超时取消与通知链路已有独立 Sandbox 证据，执行范围见 Issue #8；这些证据不代表所有设备或具体支付方式均已验证，不宣称任一具体收银台支付方式为 Available。同一入口另有 Card 初始订阅选项，沿用固定 USD 5.00 计划且保持 Conditional，范围及证据边界见 Issue #10 章节。
 - `E-commerce × Checkout × Card` 提供 USD 5.00 预授权旅程及全额请款或撤销操作，保持 Conditional；当前实现、查询补偿与真实 Sandbox 验收边界见 Issue #11 章节。
@@ -139,7 +139,7 @@ Web JS SDK 集成内的 Google Pay / Apple Pay 不新增 create adapter、钱包
 
 真实 Sandbox create 只接受服务端 allowlist 中的固定旅程，并从已持久化 Order 生成金额与商品：普通成功为 USD 5.00 / `HL-SAMPLE-005`，3DS Challenge 为 USD 50.00 / `HL-SAMPLE-050`。两者都固定使用 `paymentMode=WEB`、`productType=ALL`、`subProductType=DIRECT`、`txnType=SALE`、`risk3dsStrategy=DEFAULT` 与 `orderCurrency=USD`，并附带当前 Order 私有绑定的 `merchantCustId`；USD 50.00 是当前 Sandbox 受控资料确认的高金额 3DS 触发条件，不把 `INNER` 或客户端可选金额作为触发补丁。同步 create 的 `respCode=20000` 仅表示创建请求成功，返回 `status=U`、`transactionId` 和 `paymentId` 后才初始化 SDK。客户端只提交 allowlist journey id；普通入口遇到已有非终态恢复能力时始终返回原 Order / Attempt，不因页面后来选择另一旅程而创建平行支付。只有下一段定义的用户显式 Sandbox 新订单入口可以更换恢复绑定。
 
-Demo Hub 继续提供两条同结果、可重复的本地模拟旅程。模拟会话使用版本化 `sessionStorage` 在单个浏览器标签页内保存 Order、PaymentAttempt 和 PaymentEvent，刷新时恢复同一 attempt；Retry 追加新 attempt 并保留旧历史。该存储不包含凭据、PAN / CVV 或原始 provider payload，也不替代第 6 节要求的服务端持久化。真实 Sandbox 会话不写入该 simulation 存储。为避免 Provider-created 非终态阻塞后续受控测试，Demo Hub 的真实 Sandbox 按钮与支付页的 clean-run 按钮都显式启动一个新的独立 Sandbox Order；这不是旧 Order 的 PaymentAttempt Retry，不取消、不覆盖旧 Attempt，也不改变其支付真值，旧 Attempt 仍由 query / Webhook 收敛。该测试入口只在 Sandbox profile 开放，普通恢复入口仍复用同一非终态 Attempt，不能据此推导 Production 的放弃或重试语义。
+公开 Demo Hub 仅展示真实 Sandbox 旅程，不再提供模拟启动按钮或仅模拟异常旅程。底层确定性模拟状态机、模拟 checkout 路由及普通成功、3DS、异常旅程继续作为自动化测试 fixture 保留，由测试显式初始化，不作为客户入口或真实支付证据。测试模拟会话使用版本化 `sessionStorage` 在单个浏览器标签页内保存 Order、PaymentAttempt 和 PaymentEvent，刷新时恢复同一 attempt；Retry 追加新 attempt 并保留旧历史。该存储不包含凭据、PAN / CVV 或原始 provider payload，也不替代第 6 节要求的服务端持久化。真实 Sandbox 会话不写入该 simulation 存储。为避免 Provider-created 非终态阻塞后续受控测试，Demo Hub 的真实 Sandbox 按钮与支付页的 clean-run 按钮都显式启动一个新的独立 Sandbox Order；这不是旧 Order 的 PaymentAttempt Retry，不取消、不覆盖旧 Attempt，也不改变其支付真值，旧 Attempt 仍由 query / Webhook 收敛。该测试入口只在 Sandbox profile 开放，普通恢复入口仍复用同一非终态 Attempt，不能据此推导 Production 的放弃或重试语义。
 
 ### Direct 钱包付款反馈
 
@@ -403,7 +403,7 @@ Sandbox profile 由 `ONERWAY_SHOWCASE_ORIGIN` 固定公开 canonical origin；�
 - 保存和展示请求、响应、Webhook、Technical details 前统一脱敏；仅第 5 节明确授权的 Sandbox 当前访问 token 调试区允许用户主动展示/复制完整标准 Apple token 或 Google gateway token，仍禁止持久化。
 - Onerway `production` profile 默认锁定。基础域名已确认不代表允许交易；启用实际交易仍需单独确认凭据、回调验签、审计、错误处理和显式开关。
 - 所有 Vercel scope 都不得配置或开放 Onerway Production 实际交易；Vercel Production target 也必须继续服从该锁定。
-- Onerway `production` profile 锁定时仍可运行明确标记为 Simulation 的纯本地旅程，因为它不产生上游请求或交易；页面必须同时保留 Simulation 与 Transactions locked 提示。
+- Onerway `production` profile 锁定时，公开 Demo Hub 的付款入口保持禁用，并明确说明当前预览尚未启用 Sandbox 支付；不自动降级为模拟付款。自动化测试仍可显式初始化纯本地模拟 fixture，保留 Simulation 标识且不产生上游请求或交易。
 
 Sandbox 基础域名为 `https://sandbox-acq.onerway.com`，create 与 query 请求来源必须已加入 Sandbox IP allowlist。Production 基础域名为 `https://acq.onerway.com`；启用条件尚未确认。
 
@@ -423,10 +423,10 @@ Sandbox 基础域名为 `https://sandbox-acq.onerway.com`，create 与 query 请
 - `Change`、`Back to cart` 等控件在演示中必须有真实行为，否则删除。
 - 不承诺未实现的邮件发送；卡数据文案只陈述经 SDK / 合规确认的边界。
 - SDK 托管输入区的键盘、验证、错误和 iframe 可访问性必须基于真实 SDK 验证。
-- Issue #3 的 Payment Element 只是明确标记的非交互 simulation 区域，不渲染 PAN / CVV、伪钱包按钮或伪 SDK 输入。
-- 模拟结果的 Technical details 只展示白名单化的 mode、journey、order / attempt 标识、minor amount / currency、标准状态、3DS 模拟标记和 attempt 数量；不得伪造 Onerway transaction id、响应码或 provider payload。
+- 仅供自动化测试保留的模拟 Payment Element 是明确标记的非交互 simulation 区域，不渲染 PAN / CVV、伪钱包按钮或伪 SDK 输入；公开 Demo Hub 不提供该入口。
+- 自动化模拟 fixture 结果的 Technical details 只展示白名单化的 mode、journey、order / attempt 标识、minor amount / currency、标准状态、3DS 模拟标记和 attempt 数量；不得伪造 Onerway transaction id、响应码或 provider payload。
 - 真实 Sandbox checkout 在终态形成前必须直接展示可跨系统排查的白名单引用：`merchantTxnId`、Onerway `transactionId`、`paymentId`、Showcase `orderId` 与 `attemptId`；缺失的 provider 标识不伪造。Technical details 可展示 mode、integration、当前 SDK release 标签、受控 journey / 3DS journey 标记、是否观察到 return、上述 order / attempt / merchant transaction / transaction / payment 标识、minor amount / currency、标准状态、query 原始状态、核验 source、预期方式、transaction query 核验的实际钱包和底层网络；SDK callback method 必须另标为非持久的交互事实。当前交互提示还可展示上一段定义的受约束 reason type、reason code 与清洗后的 reason message。不得展示 provider 附加的 return query、query capability、完整 `reason`、未清洗的 `reason.message`、`rawResult` 或其他 provider payload。
-- 模拟旅程不得请求 Onerway API、SDK CDN 或银行页面，也不得把结果写成真实 Sandbox 付款完成。
+- 自动化模拟 fixture 不得请求 Onerway API、SDK CDN 或银行页面，也不得把结果写成真实 Sandbox 付款完成；公开 Sandbox 旅程必须使用真实 adapter，不能由模拟替代。
 - 异常动作必须明确区分 Reload secure form、Verify existing payment、Retry payment 与 Start a separate Sandbox order；页面只显示当前状态允许且真实可执行的动作，服务端仍在执行时重新核验权限。
 - Attempt history 使用语义化列表展示 active Attempt 与 `retryOf` 链；长 identifier 在 320px 仍须换行且不得造成水平滚动。
 
@@ -444,7 +444,7 @@ Sandbox 基础域名为 `https://sandbox-acq.onerway.com`，create 与 query 请
 - Checkout、Web JS SDK、Direct API 共用统一支付模型。
 - 客户可以从 Demo Hub 自助选择已开放场景，不依赖内部 Console。
 - 项目由单人维护，以固定场景和能力模型控制范围，不接受一次性演示分支。
-- Demo Hub 的确定性模拟与真实支付 adapter 共用领域模型，但 simulation 事件显式使用独立 source；浏览器会话恢复不是支付真值或正式持久层。
+- 公开 Demo Hub 只提供真实 Sandbox 旅程；确定性模拟仅保留为自动化测试 fixture，与真实支付 adapter 共用领域模型，但 simulation 事件显式使用独立 source，浏览器模拟会话恢复不是支付真值或正式持久层。
 - Web JS SDK v4 当前使用 `paymentId` 初始化且不需要 `redirectUrl`；客户端结果始终经 `/v1/txn/queryPayments` 按 `paymentId` 服务端核验后才形成最终事件。
 - 当前 Web SDK 使用 `productType=ALL + subProductType=DIRECT + merchantCustId` 提供用户主动选择的保存卡能力；不使用旧 SDK 保存卡逻辑的 `subProductType=TOKEN`，且不回退到 `productType=CARD`；不新增绑卡 journey、卡列表或 CardBinding 状态。
 - Web JS SDK 内的 Google Pay / Apple Pay 复用 `standard-success` 与聚合 SDK Element；Showcase 不新增钱包 create 分支、钱包专属 fixture、自绘按钮、Apple merchant-validation / certificate 处理或 token 处理。`PaymentAttempt.method` 是预期方式，实际钱包 / 底层网络只由 `queryPayments.lastTransactionId → /v1/txn/list` 的严格服务端关联记录补齐；钱包归因需要钱包类型与底层网络两项事实齐全。
