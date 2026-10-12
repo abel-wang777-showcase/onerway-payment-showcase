@@ -64,6 +64,7 @@ const canonicalSandboxHref = computed(() => {
     url.searchParams.set('journey', journeyId.value)
     url.searchParams.set('method', selection.value.method)
   }
+  url.hash = 'demo-launch'
   return url.toString()
 })
 const retryingRestoration = computed(() => sdkFailure.value?.action === 'retry_restoration')
@@ -110,7 +111,7 @@ const sdkLabel = computed(() => {
   }
 
   if (canonicalSandboxHref.value) {
-    return 'Continue to Sandbox demo'
+    return 'Open Sandbox site'
   }
 
   if (launching.value) {
@@ -208,7 +209,7 @@ onMounted(async () => {
 </script>
 
 <template>
-  <UContainer class="pb-24 lg:pb-0">
+  <UContainer class="flex flex-1 flex-col pb-24 lg:max-w-7xl lg:justify-center lg:pb-0">
     <section class="py-4 sm:py-6">
       <div class="flex flex-wrap items-start justify-between gap-3">
         <div class="min-w-0">
@@ -229,93 +230,90 @@ onMounted(async () => {
 
       </div>
 
-      <div class="mt-4 grid min-w-0 overflow-hidden rounded-lg border border-default bg-default lg:mt-6 lg:grid-cols-3 lg:items-stretch">
-        <div class="min-w-0 p-4 sm:p-6 lg:col-span-2">
-          <HubMatrix
-            v-model="selection"
-            :scenes="scenes"
-            :integrations="integrations"
-            :methods="methods"
-            :subscription="billingMode === 'subscription'"
-          >
-            <UFormField label="Billing experience" name="billing-mode">
-              <USelect
-                v-model="billingMode"
-                aria-label="Billing experience"
-                :items="billingItems"
-                size="lg"
-                class="min-h-11 w-full"
-                :ui="{ value: 'whitespace-normal text-start', item: 'min-h-11', itemLabel: 'whitespace-normal' }"
-              />
-            </UFormField>
-            <template #journey>
-              <HubJourneyPicker
-                v-if="billingMode === 'payment' && ((journey.integration === 'web-js-sdk' && selection.method === 'card') || journey.integration === 'checkout')"
-                v-model="journeyId"
-                :items="journeyItems"
-              />
-            </template>
-          </HubMatrix>
-
-        </div>
-
-        <HubPassport
-          class="border-t border-default lg:col-start-3 lg:border-t-0 lg:border-l"
-          :title="billingMode === 'subscription' ? subscriptionPlan.productName : journey.label"
-          :description="billingMode === 'subscription'
-            ? 'Pay USD 5.00 today, authorize daily merchant-managed billing, and complete the required first-payment 3DS in Sandbox.'
-            : journey.description"
-          :amount="amount"
-          :facts="passportFacts"
+      <HubWorkspace class="mt-4 lg:mt-6">
+        <HubMatrix
+          v-model="selection"
+          :scenes="scenes"
+          :integrations="integrations"
+          :methods="methods"
+          :subscription="billingMode === 'subscription'"
         >
-          <UButton
-            v-if="billingMode === 'payment' && restoringSdk && !canonicalSandboxHref"
-            key="sandbox-restoration"
-            :label="sdkLabel"
-            trailing-icon="i-lucide-arrow-right"
-            size="xl"
-            block
-            class="mt-3 min-h-11 lg:mt-5"
-            :disabled="!canStartSdk || launching || sdkRestoring"
-            :loading="checkingRecovery || launching || sdkRestoring"
-            @click="restoreSandbox"
-          />
-          <UButton
-            v-else-if="billingMode === 'payment'"
-            key="sandbox-start"
-            :label="sdkLabel"
-            trailing-icon="i-lucide-arrow-right"
-            size="xl"
-            block
-            class="mt-3 min-h-11 lg:mt-5"
-            :disabled="!canStartSdk || launching || sdkRestoring"
-            :loading="checkingRecovery || launching || sdkRestoring"
-            @click="startSandbox"
-          />
-          <UButton
-            v-if="canStartSeparateSandboxOrder"
-            label="Start a Separate Sandbox Order"
-            trailing-icon="i-lucide-arrow-right"
-            color="neutral"
-            variant="ghost"
-            size="lg"
-            block
-            class="mt-2 min-h-11"
-            :disabled="separateSandboxOrderPending"
-            @click="startSeparateSandboxOrder"
-          />
-          <p
-            v-if="canStartSeparateSandboxOrder"
-            class="mt-2 text-xs leading-relaxed text-toned"
+          <UFormField label="Billing experience" name="billing-mode">
+            <USelect
+              v-model="billingMode"
+              aria-label="Billing experience"
+              :items="billingItems"
+              size="lg"
+              class="min-h-11 w-full"
+              :ui="{ value: 'whitespace-normal text-start', item: 'min-h-11', itemLabel: 'whitespace-normal' }"
+            />
+          </UFormField>
+          <template #journey>
+            <HubJourneyPicker
+              v-if="billingMode === 'payment' && ((journey.integration === 'web-js-sdk' && selection.method === 'card') || journey.integration === 'checkout')"
+              v-model="journeyId"
+              :items="journeyItems"
+            />
+          </template>
+        </HubMatrix>
+
+        <template #summary>
+          <HubPassport
+            :title="billingMode === 'subscription' ? subscriptionPlan.productName : journey.label"
+            :description="billingMode === 'subscription'
+              ? 'Pay USD 5.00 today, authorize daily merchant-managed billing, and complete the required first-payment 3DS in Sandbox.'
+              : journey.description"
+            :amount="amount"
+            :facts="passportFacts"
           >
-            This creates a new Sandbox Order. The existing PaymentAttempt is not cancelled or overwritten and may still settle through Query or Webhook.
-          </p>
-          <p
-            v-if="billingMode === 'payment' && selectedWalletLabel"
-            class="mt-3 text-xs leading-relaxed text-toned"
-          >
-            <template v-if="selection.integration === 'web-js-sdk'">
-              {{ selectedWalletLabel }} remains Conditional until the Onerway SDK renders its own eligible wallet button. Card stays available in the same aggregated checkout; the result records what was actually used.
+            <UButton
+              v-if="billingMode === 'payment' && restoringSdk && !canonicalSandboxHref"
+              key="sandbox-restoration"
+              :label="sdkLabel"
+              trailing-icon="i-lucide-arrow-right"
+              size="xl"
+              block
+              class="mt-3 min-h-11 lg:mt-5"
+              :disabled="!canStartSdk || launching || sdkRestoring"
+              :loading="checkingRecovery || launching || sdkRestoring"
+              @click="restoreSandbox"
+            />
+            <UButton
+              v-else-if="billingMode === 'payment'"
+              key="sandbox-start"
+              :label="sdkLabel"
+              trailing-icon="i-lucide-arrow-right"
+              size="xl"
+              block
+              class="mt-3 min-h-11 lg:mt-5"
+              :disabled="!canStartSdk || launching || sdkRestoring"
+              :loading="checkingRecovery || launching || sdkRestoring"
+              @click="startSandbox"
+            />
+            <UButton
+              v-if="canStartSeparateSandboxOrder"
+              label="Start a Separate Sandbox Order"
+              trailing-icon="i-lucide-arrow-right"
+              color="neutral"
+              variant="ghost"
+              size="lg"
+              block
+              class="mt-2 min-h-11"
+              :disabled="separateSandboxOrderPending"
+              @click="startSeparateSandboxOrder"
+            />
+            <p
+              v-if="canStartSeparateSandboxOrder"
+              class="mt-2 text-xs leading-relaxed text-toned"
+            >
+              This creates a new Sandbox Order. The existing PaymentAttempt is not cancelled or overwritten and may still settle through Query or Webhook.
+            </p>
+            <p
+              v-if="billingMode === 'payment' && selectedWalletLabel"
+              class="mt-3 text-xs leading-relaxed text-toned"
+            >
+              <template v-if="selection.integration === 'web-js-sdk'">
+                {{ selectedWalletLabel }} remains Conditional until the Onerway SDK renders its own eligible wallet button. Card stays available in the same aggregated checkout; the result records what was actually used.
             </template>
             <template v-else>
               {{ selectedWalletLabel }} needs a supported device and test wallet. Authorize in your wallet, then Halden checks the Direct API payment result.
@@ -347,7 +345,7 @@ onMounted(async () => {
             v-if="canonicalSandboxHref"
             class="mt-3 text-xs leading-relaxed text-toned"
           >
-            Continue on the configured demo site to keep payment and return links together. Review your selection there before starting a Sandbox payment.
+            Payments run on the Sandbox site. Your selection carries over; confirm it there to keep checkout and return links on the same domain.
           </p>
           <p
             v-else-if="profile?.transactionPolicy === 'locked'"
@@ -378,7 +376,8 @@ onMounted(async () => {
             class="mt-4"
           />
         </HubPassport>
-      </div>
+        </template>
+      </HubWorkspace>
     </section>
     <nav aria-label="Quick demo navigation" class="demo-mobile-nav fixed inset-x-0 bottom-0 z-30 flex items-center justify-between gap-3 border-t border-default bg-default px-4 py-3 lg:hidden">
       <UButton :to="{ query: route.query, hash: '#demo-selection' }" label="Customize" color="neutral" variant="ghost" class="min-h-11" />

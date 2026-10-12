@@ -215,11 +215,15 @@ async function startCheckout(page: Page, journey: CheckoutJourney = CHECKOUT_JOU
   await start.focus()
   await expect(start).toBeFocused()
   await start.press('Enter')
+  if (!createUnknown) {
+    // The Hub action is the only confirmation before the provider navigation.
+    await expect(page).toHaveURL(HOSTED_URL)
+    return
+  }
   await expect(page).toHaveURL(`${BASE_URL}/halden/hosted/${ORDER_ID}`)
   await expect(page.getByRole('heading', { name: 'Complete your Halden order.', exact: true })).toBeFocused()
   const continueButton = page.getByRole('button', { name: 'Continue to Onerway Checkout', exact: true })
-  if (createUnknown) await expect(continueButton).toBeDisabled()
-  else await expect(continueButton).toBeEnabled()
+  await expect(continueButton).toBeDisabled()
   await expect(page.getByText(`$${(journey.amount / 100).toFixed(2)}`, { exact: true }).first()).toBeVisible()
   await expect(page.locator('iframe')).toHaveCount(0)
   await expect(page.locator('input')).toHaveCount(0)
@@ -230,6 +234,10 @@ async function restoreCheckout(
   mock: Awaited<ReturnType<typeof installCheckoutMock>>,
   trigger: 'reload' | 'pageshow',
 ) {
+  if (page.url() === HOSTED_URL) {
+    await page.goto(`/halden/hosted/${ORDER_ID}`)
+    await expect(page.getByRole('button', { name: 'Verify existing payment', exact: true })).toBeEnabled()
+  }
   const recoveryCalls = mock.calls.filter(call => call.path === '/api/payment/recover').length
   const createCalls = mock.calls.filter(call => call.path === '/api/payment/create').length
   // Register before the navigation/event. Module loading and restoration are a
@@ -282,10 +290,6 @@ for (const journey of CHECKOUT_JOURNEYS) {
     test.setTimeout(120_000)
     const mock = await installCheckoutMock(page, { journey })
     await startCheckout(page, journey)
-    await expectNoPersistedRedirect(page)
-    const continueButton = page.getByRole('button', { name: 'Continue to Onerway Checkout', exact: true })
-    await continueButton.focus()
-    await continueButton.press('Enter')
     await expect(page).toHaveURL(HOSTED_URL)
     await expect(page.getByRole('heading', { name: 'Mock Onerway Checkout' })).toBeVisible()
     await expect(page.locator('input, iframe, form')).toHaveCount(0)
@@ -322,7 +326,7 @@ test('refresh preserves the existing USD 50 Hosted attempt and clears the one-us
   await expect(verify).toBeEnabled()
   await expectNoPersistedRedirect(page)
   expect(mock.calls.filter(call => call.path === '/api/payment/create')).toHaveLength(1)
-  expect(mock.externalRequests).toEqual([])
+  expect(mock.externalRequests).toEqual([HOSTED_URL])
   await verify.focus()
   await verify.press('Enter')
   await expect(page).toHaveURL(`${BASE_URL}/halden/result/${ORDER_ID}`)
@@ -339,7 +343,7 @@ test('a persisted pageshow event restores the same attempt without replaying its
   await expect(page.getByRole('button', { name: 'Continue to Onerway Checkout', exact: true })).toBeDisabled()
   await expect(page.getByRole('button', { name: 'Verify existing payment', exact: true })).toBeEnabled()
   expect(mock.calls.filter(call => call.path === '/api/payment/create')).toHaveLength(1)
-  expect(mock.externalRequests).toEqual([])
+  expect(mock.externalRequests).toEqual([HOSTED_URL])
   await expectNoPersistedRedirect(page)
   mock.assertClean()
 })
@@ -355,7 +359,6 @@ for (const queryOutcome of [
     test.setTimeout(120_000)
     const mock = await installCheckoutMock(page, { journey: THREE_DS, queryOutcome })
     await startCheckout(page, THREE_DS)
-    await page.getByRole('button', { name: 'Continue to Onerway Checkout', exact: true }).click()
     await expect(page.getByText('Mock interaction: success.', { exact: false })).toBeVisible()
     await page.getByRole('link', { name: 'Return to Halden', exact: true }).click()
     await expect(page).toHaveURL(`${BASE_URL}${RETURN_PATH}`)
@@ -385,7 +388,6 @@ test('USD 50 cancelled interaction requires query cancellation before enabling R
     queryOutcome: { status: 'requires_action', transactionStatus: 'R' },
   })
   await startCheckout(page, THREE_DS)
-  await page.getByRole('button', { name: 'Continue to Onerway Checkout', exact: true }).click()
   await expect(page.getByText('Mock interaction: cancelled.', { exact: false })).toBeVisible()
   await page.getByRole('link', { name: 'Return to Halden', exact: true }).click()
   const verify = page.getByRole('button', { name: 'Verify existing payment', exact: true })
@@ -408,7 +410,6 @@ test('USD 50 cancelled interaction requires query cancellation before enabling R
 test('closing the USD 50 hosted tab resumes the same attempt without another create', async ({ page, context }) => {
   const mock = await installCheckoutMock(page, { journey: THREE_DS })
   await startCheckout(page, THREE_DS)
-  await page.getByRole('button', { name: 'Continue to Onerway Checkout', exact: true }).click()
   await expect(page).toHaveURL(HOSTED_URL)
   await page.close()
   // Preserve the browser context; the recover endpoint models its signed
@@ -480,10 +481,10 @@ for (const colorScheme of ['light', 'dark'] as const) {
       await page.setViewportSize({ width, height: 900 })
       await page.emulateMedia({ colorScheme })
       await startCheckout(page, journey)
+      await restoreCheckout(page, mock, 'reload')
       await expect(page.locator('html')).toHaveClass(new RegExp(`(?:^|\\s)${colorScheme}(?:\\s|$)`))
       await expectNoHorizontalOverflow(page)
       await page.screenshot({ path: `/tmp/onerway-hosted-${width}-${colorScheme}.png`, fullPage: true })
-      await restoreCheckout(page, mock, 'reload')
       await expect(page.getByRole('button', { name: 'Verify existing payment', exact: true })).toBeEnabled()
       await expectNoHorizontalOverflow(page)
       await page.getByRole('button', { name: 'Verify existing payment', exact: true }).click()
@@ -501,11 +502,14 @@ async function startCheckoutSubscription(page: Page, createUnknown = false) {
   await selectHubOption(page, 'Billing experience', 'Subscription')
   await expect(page.getByText(/Conditional · Select Card on Checkout/)).toBeVisible()
   await page.getByRole('button', { name: 'Start Sandbox subscription', exact: true }).press('Enter')
+  if (!createUnknown) {
+    await expect(page).toHaveURL(HOSTED_URL)
+    return
+  }
   await expect(page).toHaveURL(`${BASE_URL}/halden/hosted/${ORDER_ID}`)
   await expect(page.getByRole('heading', { name: 'Start your Halden subscription.', exact: true })).toBeFocused()
   const next = page.getByRole('button', { name: 'Continue to Onerway Checkout', exact: true })
-  if (createUnknown) await expect(next).toBeDisabled()
-  else await expect(next).toBeEnabled()
+  await expect(next).toBeDisabled()
   await expect(page.getByText(/Select Card to pay/)).toContainText('Halden Daily Essentials')
   await expect(page.locator('iframe, input')).toHaveCount(0)
   await expectNoHorizontalOverflow(page)
@@ -515,8 +519,6 @@ test('Checkout initial subscription keeps payment success separate from contract
   test.setTimeout(120_000)
   const mock = await installCheckoutMock(page, { subscription: true })
   await startCheckoutSubscription(page)
-  await expectNoPersistedRedirect(page)
-  await page.getByRole('button', { name: 'Continue to Onerway Checkout', exact: true }).press('Enter')
   await expect(page).toHaveURL(HOSTED_URL)
   await page.getByRole('link', { name: 'Return to Halden', exact: true }).press('Enter')
   await expect(page).toHaveURL(`${BASE_URL}/halden/result/${ORDER_ID}`, { timeout: 60_000 })
@@ -539,7 +541,7 @@ test('terminal Checkout subscription recovery offers a normal same-customer star
   })
   await startCheckoutSubscription(page)
   mock.setSubscriptionState('terminal')
-  await page.reload()
+  await page.goto(`/halden/hosted/${ORDER_ID}`)
   const verify = page.getByRole('button', { name: 'Verify existing payment', exact: true })
   await expect(verify).toBeEnabled()
   await verify.click()
@@ -568,7 +570,7 @@ test('terminal Checkout subscription recovery offers a normal same-customer star
     planId: 'halden-daily-essentials-v1', integration: 'checkout',
   })
   expect(mock.calls.filter(call => call.path === '/api/payment/subscription/create')).toHaveLength(1)
-  expect(mock.externalRequests).toEqual([])
+  expect(mock.externalRequests).toEqual([HOSTED_URL])
   mock.assertClean()
 })
 
@@ -576,7 +578,7 @@ for (const loseCreateResponse of [false, true]) {
   test(`Checkout subscription restores the same attempt with create response ${loseCreateResponse ? 'lost' : 'received'}`, async ({ page }) => {
     const mock = await installCheckoutMock(page, { subscription: true, loseCreateResponse })
     await startCheckoutSubscription(page, loseCreateResponse)
-    await page.reload()
+    await page.goto(`/halden/hosted/${ORDER_ID}`)
     await expect(page.getByRole('heading', { name: 'Start your Halden subscription.', exact: true })).toBeVisible()
     await expect(page.getByRole('button', { name: 'Continue to Onerway Checkout', exact: true })).toBeDisabled()
     await expect(page.getByRole('button', { name: 'Start a separate Sandbox order', exact: true })).toHaveCount(0)
@@ -585,7 +587,7 @@ for (const loseCreateResponse of [false, true]) {
     await verify.click()
     await expect(page.getByRole('heading', { name: 'Payment verified · Subscription pending.', exact: true })).toBeVisible()
     expect(mock.calls.filter(call => call.path === '/api/payment/subscription/create')).toHaveLength(1)
-    expect(mock.externalRequests).toEqual([])
+    expect(mock.externalRequests).toEqual(loseCreateResponse ? [] : [HOSTED_URL])
     mock.assertClean()
   })
 }
@@ -596,6 +598,7 @@ for (const [width, colorScheme] of [[1440, 'light'], [390, 'dark']] as const) {
     await page.setViewportSize({ width, height: 900 })
     await page.emulateMedia({ colorScheme })
     await startCheckoutSubscription(page)
+    await page.goto(`/halden/hosted/${ORDER_ID}`)
     await expect(page.locator('html')).toHaveClass(new RegExp(`(?:^|\\s)${colorScheme}(?:\\s|$)`))
     await page.screenshot({ path: `/tmp/onerway-issue10-hosted-${width}-${colorScheme}.png`, fullPage: true })
     await page.reload()

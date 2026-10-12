@@ -68,6 +68,9 @@ onMounted(async () => {
     await navigateTo(paymentPath(current.value.attempt), { replace: true })
     return
   }
+  // A fresh create carries a one-use in-memory URL. The Hub already collected
+  // the customer's choice; recovery never restores this navigation capability.
+  if (canOpenCheckout.value) await openCheckout()
   await nextTick()
   title.value?.focus()
 })

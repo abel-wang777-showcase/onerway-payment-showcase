@@ -116,7 +116,7 @@ for (const colorScheme of ['light', 'dark'] as const) {
     await page.locator('#demo-launch summary').click()
     const integration = page.getByRole('group', { name: 'Integration', exact: true })
     await integration.getByRole('tab', { name: 'Web JS SDK', exact: true }).focus()
-    await page.keyboard.press('ArrowRight')
+    await page.keyboard.press('ArrowLeft')
     await expect(integration.getByRole('tab', { name: 'Checkout', exact: true })).toHaveAttribute('aria-selected', 'true')
     await expect(integration.getByRole('tab', { name: 'Checkout', exact: true })).toBeFocused()
     await selectHubOption(page, 'Payment journey', getJourney('hosted-checkout-three-ds').label)
@@ -139,6 +139,42 @@ test('centers the theme icon inside its touch target in both themes', async ({ p
   }
   await expect(page.getByText('Sandbox payments are disabled in this preview.', { exact: false })).toBeVisible()
 })
+
+for (const width of [985, 1920]) {
+  test(`resizes desktop columns without losing choices at ${width}px`, async ({ page }) => {
+    const gate = await installSimulationGate(page)
+    await page.setViewportSize({ width, height: 1080 })
+    await gotoHydrated(page)
+    await expect(page.getByRole('group', { name: 'Integration', exact: true }).getByRole('tab'))
+      .toHaveText(['Checkout', 'Web JS SDK', 'Direct API'])
+    const configuration = page.locator('#demo-configuration-panel')
+    const handle = page.getByRole('separator', { name: 'Resize configuration and summary' })
+    await expect(handle).toHaveAttribute('aria-orientation', 'vertical')
+    const initial = (await configuration.boundingBox())!.width
+    await handle.focus()
+    await handle.press('ArrowLeft')
+    await expect.poll(async () => (await configuration.boundingBox())!.width).toBeLessThan(initial)
+    const bounds = (await handle.boundingBox())!
+    await page.mouse.move(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2)
+    await page.mouse.down()
+    await page.mouse.move(bounds.x + width / 4, bounds.y + bounds.height / 2, { steps: 10 })
+    await page.mouse.up()
+    await expect.poll(async () => (await configuration.boundingBox())!.width).toBeGreaterThan(initial)
+    await expectNoHorizontalOverflow(page)
+    await expect(page.getByRole('combobox', { name: 'Payment journey' })).toBeInViewport({ ratio: 1 })
+    await expect(page.locator('#demo-launch button').first()).toBeInViewport({ ratio: 1 })
+    await handle.dblclick()
+    await expect.poll(async () => Math.abs((await configuration.boundingBox())!.width - initial)).toBeLessThan(2)
+    if (width === 1920) {
+      const footer = (await page.getByRole('contentinfo').boundingBox())!
+      expect(Math.abs(footer.y + footer.height - 1080)).toBeLessThan(2)
+    }
+    await page.setViewportSize({ width: 390, height: 844 })
+    await expect(handle).not.toBeVisible()
+    await expectNoHorizontalOverflow(page)
+    gate.assertClean()
+  })
+}
 
 test('offers only Sandbox journeys and normalizes old simulation links', async ({ page }) => {
   const gate = await installSimulationGate(page)

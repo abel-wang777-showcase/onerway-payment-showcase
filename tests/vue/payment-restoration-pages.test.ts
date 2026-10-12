@@ -802,14 +802,14 @@ describe('payment restoration pages', () => {
     const wrapper = await mountSuspended(HubPage)
     await flushPromises()
     const action = wrapper.findAll('button')
-      .find(button => button.text().includes('Continue to Sandbox demo'))
+      .find(button => button.text().includes('Open Sandbox site'))
 
     expect(action?.exists()).toBe(true)
     action?.element.click()
     await flushPromises()
 
     expect(nuxt.navigateTo).toHaveBeenCalledWith(
-      'https://showcase.example/?journey=three-ds-success&method=card',
+      'https://showcase.example/?journey=three-ds-success&method=card#demo-launch',
       { external: true },
     )
     expect(start).not.toHaveBeenCalled()

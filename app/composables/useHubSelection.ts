@@ -14,7 +14,6 @@ import {
 } from '#shared/payment/journey'
 import {
   getCapability,
-  INTEGRATIONS,
   PAYMENT_METHODS,
   SCENES,
   type CapabilityStatus,
@@ -34,6 +33,7 @@ const integrationLabels: Record<IntegrationId, string> = {
   'checkout': 'Checkout',
   'direct-api': 'Direct API',
 }
+const integrationOrder: IntegrationId[] = ['checkout', 'web-js-sdk', 'direct-api']
 const integrationDescriptions: Record<IntegrationId, string> = {
   'web-js-sdk': 'Pay with an embedded payment form on the merchant page.',
   'checkout': 'Continue to Onerway Checkout, then return to the merchant.',
@@ -223,7 +223,7 @@ export function useHubSelection() {
     return option(scene, sceneLabels[scene], capability.status, capability.runnable, capability.condition)
   }))
 
-  const integrations = computed<HubOption[]>(() => INTEGRATIONS.map((integration) => {
+  const integrations = computed<HubOption[]>(() => integrationOrder.map((integration) => {
     const method = (selection.value.method === 'apple-pay' || selection.value.method === 'google-pay')
       && getCapability(selection.value.scene, integration, selection.value.method).runnable
       ? selection.value.method : defaultMethod(integration)

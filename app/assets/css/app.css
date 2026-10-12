@@ -6,6 +6,7 @@
 @import "@fontsource/geist-mono/latin-500.css";
 @import "@fontsource/geist-mono/latin-600.css";
 @import "@fontsource/geist-mono/latin-700.css";
+@reference "./main.css";
 
 /*
  * Consumer-owned styles belong here.
@@ -21,6 +22,20 @@
 
 .demo-mobile-nav {
   padding-bottom: calc(0.75rem + env(safe-area-inset-bottom));
+}
+
+.demo-workspace {
+  display: block !important;
+  height: auto !important;
+  overflow: visible !important;
+
+  @variant lg {
+    display: flex !important;
+  }
+}
+
+.demo-workspace > [data-panel] {
+  overflow: visible !important;
 }
 
 html {

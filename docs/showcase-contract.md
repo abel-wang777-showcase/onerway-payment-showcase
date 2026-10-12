@@ -33,7 +33,9 @@ Demo Hub 是公开演示入口，不是第二套后台。它负责：
 - 为真实 Sandbox 演示选择测试旅程，例如普通支付或 3DS Challenge。公开 Demo Hub 不提供本地模拟付款入口；模拟状态机与对应的模拟 checkout 路由仅保留供自动化测试 fixture 使用。
 - 进入对应的参考商户体验。
 
-首页以接入方式页签组织 SDK、Checkout 与 Direct API，计费方式、支付方式和测试旅程使用有明确标签的紧凑下拉选择，启动摘要随选择同步。常见桌面尺寸下，配置、金额与启动操作应在一屏内；窄屏按配置到摘要的顺序自然排列，保留至少 44px 的操作区域和直达启动区的导航，不以缩小文字、裁切必要条件或固定高度隐藏内容换取一屏。未开放选项集中在可展开的说明中，不伪装成可启动的入口。
+首页接入页签按 Checkout、Web JS SDK、Direct API 排列；计费方式、支付方式和测试旅程使用有明确标签的紧凑下拉选择，启动摘要随选择同步。桌面配置与摘要可通过拖拽或键盘调整宽度，两侧保留可读下限；大屏限制阅读宽度并在剩余视口内平衡布局，页脚置于底部。常见桌面尺寸下，配置、金额与启动操作应在一屏内；窄屏按配置到摘要的顺序自然排列，保留至少 44px 的操作区域和直达启动区的导航，不以缩小文字、裁切必要条件或固定高度隐藏内容换取一屏。未开放选项集中在可展开的说明中，不伪装成可启动的入口。
+
+Preview 的支付入口保留跳转到已配置 canonical Sandbox origin 的边界；只携带公开选择并定位到启动摘要，不从 URL 自动创建订单。canonical 首页的一次 Hosted 启动操作创建订单后直接继续 Onerway 收银台，详情页承担过渡与恢复，不再要求重复确认。
 
 商户体验负责商品、订单、支付和结果。M0 使用虚构户外电商品牌 **Halden**；未来场景可有不同外观，但支付领域模型、状态真值和安全边界保持一致。
 
@@ -207,7 +209,7 @@ Apple Pay 与 Google Pay 的主付款区域均先展示商品、订单号和金�
 
 - 固定真实旅程为 `hosted-checkout`（USD 5.00、`HL-CHECKOUT-005`）与 `hosted-checkout-three-ds`（USD 50.00、`HL-CHECKOUT-050`），均为 `integration=checkout`、`method=all`，不提供伪造收银台或结果保证的本地 simulation。USD 50.00 触发条件由用户在 Issue #8 确认；验收时在托管页选择 Card，由 Provider 承接 Challenge，不新增商户 3DS、risk strategy 补丁或客户端金额输入。选择其他支付方式不构成 Card 3DS 验收。`all` 通过 `0007_checkout` 迁移加入已有 method 约束；新增旅程复用现有 Order / Attempt / Event，无新增数据库字段。
 - Hosted 页与结果页从持久化 Order 的固定商品和金额识别旅程，`threeDSJourney=challenge` 仅表示本次选择的测试旅程，不证明实际发生或通过 Challenge；USD 5.00 使用 `not-selected`，不承诺 Provider 不会要求认证。Hosted 页显式启动独立 Sandbox Order 时保留当前固定旅程，不静默降回 USD 5.00；恢复和 Retry 继续保留原订单关联。
-- 创建继续分为先持久化 intent 并签发 cookie、再认领 Provider create 两步。adapter 由持久化 Attempt 的 integration 决定；Hosted create 只接受空对象，不调用客户端 browser data 采集。页面位于 `/halden/hosted/:order`，展示订单和白名单引用，再由客户点击进入托管收银台；不挂载 SDK、不调用 confirm 或 SDK submission latch。
+- 创建继续分为先持久化 intent 并签发 cookie、再认领 Provider create 两步。adapter 由持久化 Attempt 的 integration 决定；Hosted create 只接受空对象，不调用客户端 browser data 采集。客户在 Demo Hub 确认当前选择并启动后，`/halden/hosted/:order` 自动消费本次 create 返回且与当前 Attempt 匹配的一次性内存链接，直接进入托管收银台，不再要求第二次确认。该页面仍承载导航失败、刷新和返回后的订单恢复与白名单引用；不存在新鲜链接时只查询原订单，不自动重建或重放。普通支付、预授权与首次订阅共用该导航规则；不挂载 SDK、不调用 confirm 或 SDK submission latch。
 - 跳转 URL 仅保留在当前浏览器内存的独立导航引用中，外跳时消费；不进入 Payment session/Event、持久层或 Technical details。刷新、恢复与结果未知时不重放 create、不拼造收银台 URL，只恢复和查询已有交易。
 - `Return to Merchant Page` 的显示由商户开关控制。2026-09-16 用户确认该入口只返回商户页，不立即关闭交易或发送取消通知；交易置为 `N` 及取消通知须等待 Provider 超时关单。点击入口后仍为 `U` 时继续保持 `processing`，不得把返回、关闭页面或点击行为映射为 `cancelled`。验收分别记录同订单返回恢复与超时关单后的 query / Webhook 收敛，不以返回成功替代 `N` 终态证据，也不假设未确认的关单时长。
 - Checkout 查询调用 `POST /v1/txn/list`，按保存的 `merchantTxnId` 唯一匹配，并核对金额、币种及已有 provider IDs；`S → succeeded`、`N → cancelled`、`R → requires_action`、`I/U/P → processing`。交易 `F` 可能对应仍开放的 Payment，因此保守保持 `processing`，不开放新扣款 Retry；存在 Payment 轴时结合 `S/O/N`，未知值拒绝。

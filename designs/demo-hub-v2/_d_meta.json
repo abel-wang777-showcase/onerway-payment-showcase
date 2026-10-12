@@ -9,7 +9,7 @@
           "path": "demo-hub.html",
           "createdAt": "2026-10-12T06:02:03.871Z",
           "status": "needs-review",
-          "subtitle": "接入页签、双列下拉与手机折叠摘要；复用现有 Geist 视觉",
+          "subtitle": "Checkout / SDK / Direct API；可调60/40分栏、居中主体与底部页脚",
           "viewport": {
             "width": 1366,
             "height": 768
@@ -19,7 +19,7 @@
     }
   },
   "createdAt": "2026-10-12T06:02:03.890Z",
-  "updatedAt": "2026-10-12T06:15:33.944Z",
+  "updatedAt": "2026-10-12T07:19:41.621Z",
   "title": "Demo Hub 紧凑配置",
   "prompt": "单一 HTML 可交互设计稿：接入方式页签 + 紧凑下拉配置 + 启动摘要。桌面 1366x768 一屏，手机配置在前，复用现有 Geist/Nuxt UI 视觉，不执行支付。",
   "sourceReferences": [

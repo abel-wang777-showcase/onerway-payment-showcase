@@ -22,7 +22,7 @@ const summaryTitle = computed(() => props.title.replace(/^USD \d+\.\d{2} · /, '
     id="demo-launch"
     aria-labelledby="passport-title"
     tabindex="-1"
-    class="demo-passport min-w-0 scroll-mt-6 bg-muted p-4 focus-visible:outline-2 focus-visible:outline-primary sm:p-6"
+    class="demo-passport min-w-0 scroll-mt-6 p-4 focus-visible:outline-2 focus-visible:outline-primary sm:p-6"
   >
     <div class="flex flex-wrap items-start justify-between gap-3">
       <p class="text-sm font-medium text-toned">
