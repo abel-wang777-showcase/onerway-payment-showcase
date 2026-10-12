@@ -214,10 +214,10 @@ onMounted(async () => {
       <div class="flex flex-wrap items-start justify-between gap-3">
         <div class="min-w-0">
           <h1 class="text-balance text-2xl font-semibold tracking-tight text-highlighted sm:text-3xl">
-            From checkout to confirmation.
+            Explore payment experiences.
           </h1>
           <p class="mt-2 max-w-2xl text-pretty text-sm text-toned">
-            Explore the complete Halden purchase in Sandbox.
+            Try Onerway payments in Sandbox.
           </p>
         </div>
         <div class="flex flex-wrap items-center gap-2">
@@ -259,7 +259,7 @@ onMounted(async () => {
 
         <template #summary>
           <HubPassport
-            :title="billingMode === 'subscription' ? subscriptionPlan.productName : journey.label"
+            :title="billingMode === 'subscription' ? storeProductName(subscriptionPlan.productName) : journey.label"
             :description="billingMode === 'subscription'
               ? 'Pay USD 5.00 today, authorize daily merchant-managed billing, and complete the required first-payment 3DS in Sandbox.'
               : journey.description"
@@ -316,7 +316,7 @@ onMounted(async () => {
                 {{ selectedWalletLabel }} remains Conditional until the Onerway SDK renders its own eligible wallet button. Card stays available in the same aggregated checkout; the result records what was actually used.
             </template>
             <template v-else>
-              {{ selectedWalletLabel }} needs a supported device and test wallet. Authorize in your wallet, then Halden checks the Direct API payment result.
+              {{ selectedWalletLabel }} needs a supported device and test wallet. Authorize in your wallet, then Onerway Store checks the Direct API payment result.
             </template>
           </p>
           <SubscriptionLaunchActions

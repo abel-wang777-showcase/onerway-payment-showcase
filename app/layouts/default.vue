@@ -18,7 +18,7 @@ const isHome = computed(() => route.path === '/')
           to="/"
           class="inline-flex min-h-11 items-center rounded-sm text-sm font-semibold tracking-tight text-highlighted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
         >
-          <span>Onerway<span class="hidden sm:inline"> Payment Showcase</span></span>
+          <BrandWordmark />
         </NuxtLink>
 
         <nav aria-label="Primary navigation" class="flex shrink-0 items-center gap-1">

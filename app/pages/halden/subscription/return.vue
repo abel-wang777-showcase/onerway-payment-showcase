@@ -2,7 +2,7 @@
 definePageMeta({ layout: 'halden' })
 
 useSeoMeta({
-  title: 'Restoring subscription · Halden',
+  title: 'Restoring subscription · Onerway Store',
   description: 'Restore the original Sandbox subscription payment and verify its server-side status.',
 })
 

@@ -60,7 +60,7 @@ const methodCondition = computed(() => {
         Configure your demo
       </h2>
       <span v-if="availableScenes.length === 1" class="text-xs font-medium text-toned">
-        {{ availableScenes[0]?.title ?? availableScenes[0]?.label }} · Halden
+        {{ availableScenes[0]?.title ?? availableScenes[0]?.label }}
       </span>
     </div>
 

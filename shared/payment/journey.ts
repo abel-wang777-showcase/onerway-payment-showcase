@@ -94,7 +94,7 @@ export const JOURNEYS = Object.freeze({
   'hosted-checkout': Object.freeze({
     id: 'hosted-checkout',
     label: 'USD 5.00 · Hosted Checkout',
-    description: 'Choose from the payment methods available on Onerway Checkout, then return to Halden for server verification.',
+    description: 'Choose from the payment methods available on Onerway Checkout, then return to Onerway Store for server verification.',
     scene: 'ecommerce',
     integration: 'checkout',
     method: 'all',
@@ -112,7 +112,7 @@ export const JOURNEYS = Object.freeze({
   'hosted-checkout-three-ds': Object.freeze({
     id: 'hosted-checkout-three-ds',
     label: 'USD 50.00 · Hosted Checkout 3DS',
-    description: 'Select Card on Onerway Checkout to exercise the Sandbox 3DS challenge, then return to Halden for server verification. Other methods depend on eligibility.',
+    description: 'Select Card on Onerway Checkout to exercise the Sandbox 3DS challenge, then return to Onerway Store for server verification. Other methods depend on eligibility.',
     scene: 'ecommerce',
     integration: 'checkout',
     method: 'all',

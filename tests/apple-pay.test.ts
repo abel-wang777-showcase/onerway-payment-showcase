@@ -180,7 +180,7 @@ describe('Apple mTLS transport', () => {
     const req = transport(200, [JSON.stringify(session)])
     expect(await validateApplePayMerchant(profile, url)).toEqual(session)
     expect(httpsRequest.mock.lastCall?.[1]).toMatchObject({ cert: profile.applePay!.certificatePem, key: profile.applePay!.privateKeyPem, rejectUnauthorized: true, minVersion: 'TLSv1.2', signal: expect.any(AbortSignal) })
-    expect(JSON.parse(req.end.mock.calls[0]![0])).toEqual({ merchantIdentifier: 'merchant.example', displayName: 'Halden', initiative: 'web', initiativeContext: 'showcase.example' })
+    expect(JSON.parse(req.end.mock.calls[0]![0])).toEqual({ merchantIdentifier: 'merchant.example', displayName: 'Onerway Store', initiative: 'web', initiativeContext: 'showcase.example' })
   })
   it.each([301, 302, 307, 308, 500])('rejects HTTP %s without redirecting', async (status) => {
     transport(status, [])

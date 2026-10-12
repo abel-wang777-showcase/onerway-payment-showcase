@@ -80,7 +80,7 @@ export async function validateApplePayMerchant(profile: SandboxProfile, validati
     validationDiagnostic('not-configured')
     fail('APPLE_PAY_NOT_CONFIGURED')
   }
-  const body = JSON.stringify({ merchantIdentifier: profile.applePay.merchantIdentifier, displayName: 'Halden', initiative: 'web', initiativeContext: new URL(profile.showcaseOrigin).hostname })
+  const body = JSON.stringify({ merchantIdentifier: profile.applePay.merchantIdentifier, displayName: 'Onerway Store', initiative: 'web', initiativeContext: new URL(profile.showcaseOrigin).hostname })
   try {
     return await new Promise((resolve, reject) => {
       const req = request(url, {

@@ -50,7 +50,7 @@ onMounted(initialize)
         <header>
           <UBadge label="Sandbox · Direct API · Google Pay" variant="soft" />
           <h1 class="mt-3 text-2xl font-semibold tracking-tight text-highlighted sm:text-3xl">Pay with Google Pay.</h1>
-          <p class="mt-4 text-sm text-toned">Authorize your Halden purchase, then explore how Google Pay and Onerway process it.</p>
+          <p class="mt-4 text-sm text-toned">Authorize your Onerway Store purchase, then explore how Google Pay and Onerway process it.</p>
         </header>
         <section id="wallet-payment" tabindex="-1" class="scroll-mt-24 space-y-4 rounded-lg border border-default p-5 focus-visible:outline-2 focus-visible:outline-primary sm:p-6" aria-labelledby="google-pay-order-title">
           <PaymentWalletReceipt

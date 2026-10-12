@@ -57,7 +57,7 @@ const view = computed(() => {
   }
   return {
     title: 'Authorization awaiting confirmation.',
-    description: 'Halden has not confirmed that funds were authorized. Refresh status to check the existing authorization.',
+    description: 'Onerway Store has not confirmed that funds were authorized. Refresh status to check the existing authorization.',
     color: 'warning' as const,
     icon: 'i-lucide-clock-3',
   }

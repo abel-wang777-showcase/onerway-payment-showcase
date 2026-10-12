@@ -11,7 +11,7 @@ definePageMeta({
 })
 
 useSeoMeta({
-  title: 'Simulated checkout · Halden',
+  title: 'Simulated checkout · Onerway Store',
   description: 'Run a deterministic merchant checkout simulation without collecting payment data.',
 })
 
@@ -92,7 +92,7 @@ const summaryLines = computed(() => {
   }
 
   return [
-    { label: current.value.order.item.name, value: current.value.order.item.variant },
+    { label: storeProductName(current.value.order.item.name), value: current.value.order.item.variant },
     { label: 'Quantity', value: String(current.value.order.item.quantity) },
     { label: 'Delivery', value: 'Included' },
   ]
@@ -192,7 +192,7 @@ onMounted(async () => {
                 Demo delivery
               </h2>
               <p class="mt-1 text-sm leading-relaxed text-toned">
-                A fictional Halden order reserved for this browser session. No fulfillment request is created.
+                A fictional Onerway Store order reserved for this browser session. No fulfillment request is created.
               </p>
             </div>
           </div>

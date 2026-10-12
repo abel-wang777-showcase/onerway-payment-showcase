@@ -29,7 +29,7 @@ definePageMeta({
 })
 
 useSeoMeta({
-  title: 'Sandbox checkout · Halden',
+  title: 'Sandbox checkout · Onerway Store',
   description: 'Complete a controlled payment in the Onerway v4 Sandbox hosted payment form.',
 })
 
@@ -184,7 +184,7 @@ const payLabel = computed(() => restoring.value && stage.value === 'creating'
     })[stage.value])
 const summaryLines = computed(() => current.value
   ? [
-      { label: current.value.order.item.name, value: current.value.order.item.variant },
+      { label: storeProductName(current.value.order.item.name), value: current.value.order.item.variant },
       { label: 'Quantity', value: String(current.value.order.item.quantity) },
       { label: 'Delivery', value: 'Included' },
       ...(currentSubscription.value

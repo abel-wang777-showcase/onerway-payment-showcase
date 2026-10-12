@@ -28,6 +28,12 @@ const sceneLabels: Record<SceneId, string> = {
   live: 'Live',
   ai: 'AI',
 }
+const sceneBrands: Record<SceneId, string> = {
+  ecommerce: 'Onerway Store',
+  game: 'Onerway Gaming',
+  live: 'Onerway Live',
+  ai: 'Onerway AI',
+}
 const integrationLabels: Record<IntegrationId, string> = {
   'web-js-sdk': 'Web JS SDK',
   'checkout': 'Checkout',
@@ -220,7 +226,7 @@ export function useHubSelection() {
   ])
   const scenes = computed<HubOption[]>(() => SCENES.map((scene) => {
     const capability = getCapability(scene, selection.value.integration, selection.value.method)
-    return option(scene, sceneLabels[scene], capability.status, capability.runnable, capability.condition)
+    return option(scene, `${sceneLabels[scene]} · ${sceneBrands[scene]}`, capability.status, capability.runnable, capability.condition)
   }))
 
   const integrations = computed<HubOption[]>(() => integrationOrder.map((integration) => {

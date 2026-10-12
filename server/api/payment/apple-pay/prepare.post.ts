@@ -21,7 +21,7 @@ export default defineEventHandler(async (event): Promise<PrepareApplePayResponse
         currencyCode: recovery.order.amount.currency,
         supportedNetworks: config.supportedNetworks,
         merchantCapabilities: ['supports3DS'],
-        total: { label: 'Halden', amount: (recovery.order.amount.minor / 100).toFixed(2), type: 'final' as const },
+        total: { label: 'Onerway Store', amount: (recovery.order.amount.minor / 100).toFixed(2), type: 'final' as const },
       },
     }
   }).catch(directFailure)

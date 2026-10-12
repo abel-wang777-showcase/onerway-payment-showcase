@@ -64,7 +64,7 @@ onScopeDispose(() => {
         <header>
           <UBadge label="Sandbox · Direct API · Apple Pay" variant="soft" />
           <h1 class="mt-3 text-2xl font-semibold tracking-tight text-highlighted sm:text-3xl">Pay with Apple Pay.</h1>
-          <p class="mt-4 max-w-2xl text-sm leading-relaxed text-toned">Complete your Halden order in Apple Pay, then explore how your browser, Halden, Apple and Onerway work together.</p>
+          <p class="mt-4 max-w-2xl text-sm leading-relaxed text-toned">Complete your Onerway Store order in Apple Pay, then explore how your browser, Onerway Store, Apple and Onerway work together.</p>
         </header>
         <section id="wallet-payment" tabindex="-1" class="scroll-mt-24 space-y-4 rounded-lg border border-default p-5 focus-visible:outline-2 focus-visible:outline-primary sm:p-6" aria-labelledby="apple-pay-order-title">
           <PaymentWalletReceipt

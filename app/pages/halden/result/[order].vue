@@ -22,7 +22,7 @@ definePageMeta({
 })
 
 useSeoMeta({
-  title: 'Payment result · Halden',
+  title: 'Payment result · Onerway Store',
   description: 'Review a normalized payment outcome and its whitelisted technical details.',
 })
 
@@ -574,7 +574,7 @@ onMounted(async () => {
       <section aria-labelledby="result-order-title" class="mt-10 rounded-lg border border-default p-5 sm:p-6">
         <div class="flex flex-wrap items-start justify-between gap-4">
           <div>
-            <p class="text-sm text-muted">Halden order</p>
+            <p class="text-sm text-muted">Onerway Store order</p>
             <h2 id="result-order-title" class="mt-1 font-mono text-base font-semibold text-highlighted">
               {{ order.id }}
             </h2>

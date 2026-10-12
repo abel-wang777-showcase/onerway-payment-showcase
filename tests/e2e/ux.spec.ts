@@ -49,7 +49,7 @@ test('keeps the selected wallet across integrations and gives Direct-specific gu
   const method = page.getByRole('combobox', { name: 'Payment method', exact: true })
   await integration.getByRole('tab', { name: 'Direct API', exact: true }).click()
   await expect(method).toContainText('Google Pay')
-  await expect(page.locator('#demo-launch')).toContainText('Halden checks the Direct API payment result')
+  await expect(page.locator('#demo-launch')).toContainText('Onerway Store checks the Direct API payment result')
   await expect(page.locator('#demo-launch')).not.toContainText('SDK renders')
   await expect(page).toHaveURL(/journey=google-pay-direct/)
   await page.setViewportSize({ width: 834, height: 900 })

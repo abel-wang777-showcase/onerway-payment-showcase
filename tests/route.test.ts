@@ -106,11 +106,11 @@ describe('application routes', () => {
   })
 
   it.each([
-    ['/halden/checkout/HLD-DEMO-500', 'Simulated checkout · Halden', 'Restoring demo session'],
-    ['/halden/hosted/HLD-SANDBOX', 'Hosted Checkout · Halden', 'Restoring hosted checkout'],
-    ['/halden/sdk/HLD-SANDBOX', 'Sandbox checkout · Halden', 'Restoring Sandbox checkout'],
-    ['/halden/return/HLD-SANDBOX?a=discarded', 'Restoring payment · Halden', 'Restoring payment return'],
-    ['/halden/result/HLD-DEMO-500', 'Payment result · Halden', 'Restoring payment result'],
+    ['/halden/checkout/HLD-DEMO-500', 'Simulated checkout · Onerway Store', 'Restoring demo session'],
+    ['/halden/hosted/HLD-SANDBOX', 'Hosted Checkout · Onerway Store', 'Restoring hosted checkout'],
+    ['/halden/sdk/HLD-SANDBOX', 'Sandbox checkout · Onerway Store', 'Restoring Sandbox checkout'],
+    ['/halden/return/HLD-SANDBOX?a=discarded', 'Restoring payment · Onerway Store', 'Restoring payment return'],
+    ['/halden/result/HLD-DEMO-500', 'Payment result · Onerway Store', 'Restoring payment result'],
   ])('renders the client-restored shell for %s', async (path, title, label) => {
     const response = await fetch(path, {
       headers: {

@@ -28,6 +28,6 @@ export function googlePayRequests(config: GooglePayConfiguration) {
   const method = { type: 'CARD', parameters: { allowedAuthMethods: [...config.allowedAuthMethods], allowedCardNetworks: [...config.allowedCardNetworks] } }
   return {
     ready: { apiVersion: 2, apiVersionMinor: 0, allowedPaymentMethods: [method] },
-    payment: { apiVersion: 2, apiVersionMinor: 0, allowedPaymentMethods: [{ ...method, tokenizationSpecification: { type: 'PAYMENT_GATEWAY', parameters: { gateway: config.gateway, gatewayMerchantId: config.gatewayMerchantId } } }], transactionInfo: { countryCode: config.countryCode, currencyCode: config.currencyCode, totalPriceStatus: 'FINAL', totalPrice: config.totalPrice }, merchantInfo: { merchantName: 'Halden' } },
+    payment: { apiVersion: 2, apiVersionMinor: 0, allowedPaymentMethods: [{ ...method, tokenizationSpecification: { type: 'PAYMENT_GATEWAY', parameters: { gateway: config.gateway, gatewayMerchantId: config.gatewayMerchantId } } }], transactionInfo: { countryCode: config.countryCode, currencyCode: config.currencyCode, totalPriceStatus: 'FINAL', totalPrice: config.totalPrice }, merchantInfo: { merchantName: 'Onerway Store' } },
   }
 }

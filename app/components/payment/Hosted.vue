@@ -18,7 +18,7 @@ const authorization = computed(() => current.value?.attempt.authorization)
 const busy = computed(() => restoring.value || ['creating', 'verifying', 'redirecting'].includes(stage.value))
 const amount = computed(() => current.value ? formatMoney(current.value.order.amount) : '')
 const lines = computed(() => current.value ? [
-  { label: current.value.order.item.name, value: current.value.order.item.variant },
+  { label: storeProductName(current.value.order.item.name), value: current.value.order.item.variant },
   ...(contract.value
     ? [{ label: 'Billing', value: 'Merchant-managed · Every day' }, { label: 'Today', value: 'First payment' }]
     : [{ label: 'Quantity', value: String(current.value.order.item.quantity) }, { label: 'Delivery', value: 'Included' }]),
@@ -98,10 +98,10 @@ onMounted(async () => {
         <div>
           <UBadge label="Sandbox · Hosted Checkout" variant="soft" />
           <h1 ref="title" tabindex="-1" class="mt-4 text-3xl font-semibold tracking-tight text-highlighted sm:text-4xl">
-            {{ authorization ? 'Authorize your Halden order.' : contract ? 'Start your Halden subscription.' : 'Complete your Halden order.' }}
+            {{ authorization ? 'Authorize your Onerway Store order.' : contract ? 'Start your Onerway Store subscription.' : 'Complete your Onerway Store order.' }}
           </h1>
           <p class="mt-4 max-w-2xl text-sm leading-relaxed text-toned">
-            {{ authorization ? 'Authorize a card on Onerway’s secure checkout. Funds are frozen first; the merchant demo can then capture the full amount or release the authorization.' : 'Choose your payment method on Onerway’s secure checkout. You will return to Halden to see your verified payment result.' }}
+            {{ authorization ? 'Authorize a card on Onerway’s secure checkout. Funds are frozen first; the merchant demo can then capture the full amount or release the authorization.' : 'Choose your payment method on Onerway’s secure checkout. You will return to Onerway Store to see your verified payment result.' }}
           </p>
         </div>
         <section class="rounded-lg border border-default p-5 sm:p-6" aria-labelledby="hosted-methods-title">
@@ -113,10 +113,10 @@ onMounted(async () => {
             {{ authorization ? 'Enter card details and complete any required authentication on Onerway Checkout. Authorizing this order does not charge your card.' : 'Onerway shows the methods enabled for this merchant and eligible for your country, currency and device. Enter payment details only on that page.' }}
           </p>
           <p v-if="journey?.id === 'hosted-checkout-three-ds'" class="mt-2 text-sm leading-relaxed text-toned">
-            Select Card to test the USD 50.00 Sandbox 3DS challenge. Complete authentication on the hosted page; Halden verifies the payment after your return. Selecting another method does not verify this 3DS journey.
+            Select Card to test the USD 50.00 Sandbox 3DS challenge. Complete authentication on the hosted page; Onerway Store verifies the payment after your return. Selecting another method does not verify this 3DS journey.
           </p>
           <p v-if="contract" class="mt-2 text-sm leading-relaxed text-toned">
-            Select Card to pay {{ amount }} today for {{ contract.productName }} and authorize daily merchant-managed billing. Complete the first-payment 3DS on Checkout. Halden verifies payment and subscription activation separately; this showcase does not schedule later charges. Other methods are outside this subscription demonstration.
+            Select Card to pay {{ amount }} today for {{ storeProductName(contract.productName) }} and authorize daily merchant-managed billing. Complete the first-payment 3DS on Checkout. Onerway Store verifies payment and subscription activation separately; this showcase does not schedule later charges. Other methods are outside this subscription demonstration.
           </p>
         </section>
         <SubscriptionStatusPair v-if="contract" :payment="current.attempt.status" :subscription="contract" />

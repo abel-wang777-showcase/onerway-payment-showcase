@@ -43,8 +43,8 @@ export function validationEvidence(url: string, merchantIdentifier: string, doma
   const time = (value: unknown) => typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 8.64e15 ? value : 'Not returned'
   return { summary: session ? 'Apple returned a merchant session for this payment.' : 'The merchant server is asking Apple to validate this website.', source: 'live',
     fields: [field('Validation URL', approvedUrl), field('Website', domain), field('Merchant ID', merchantIdentifier), ...(typeof time(session?.expiresAt) === 'number' ? [field('Session expires at', new Date(session!.expiresAt as number).toISOString())] : [])],
-    request: json({ method: 'POST', url: approvedUrl, body: { merchantIdentifier, displayName: 'Halden', initiative: 'web', initiativeContext: domain } }),
-    ...(session ? { response: json({ epochTimestamp: time(session.epochTimestamp), expiresAt: time(session.expiresAt), domainName: session.domainName === domain ? domain : 'Not returned or not matched', displayName: session.displayName === 'Halden' ? 'Halden' : 'Not returned', merchantSessionIdentifier: '[session identifier omitted]', merchantIdentifier: '[session identifier omitted]', nonce: '[nonce omitted]', signature: '[signature omitted]' }) } : {}) }
+    request: json({ method: 'POST', url: approvedUrl, body: { merchantIdentifier, displayName: 'Onerway Store', initiative: 'web', initiativeContext: domain } }),
+    ...(session ? { response: json({ epochTimestamp: time(session.epochTimestamp), expiresAt: time(session.expiresAt), domainName: session.domainName === domain ? domain : 'Not returned or not matched', displayName: session.displayName === 'Onerway Store' ? 'Onerway Store' : 'Not returned', merchantSessionIdentifier: '[session identifier omitted]', merchantIdentifier: '[session identifier omitted]', nonce: '[nonce omitted]', signature: '[signature omitted]' }) } : {}) }
 }
 
 export function authorizationEvidence(token: Record<string, unknown>): ApplePayEvidence {
@@ -84,7 +84,7 @@ export const applePayExamples: Record<string, { request?: string, response?: str
       nonce: '[nonce omitted]',
       merchantIdentifier: '[merchant identifier omitted]',
       domainName: 'shop.example',
-      displayName: 'Halden',
+      displayName: 'Onerway Store',
       signature: '[signature omitted]',
     }),
   },
