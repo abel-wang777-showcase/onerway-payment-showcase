@@ -1,7 +1,7 @@
 import { expect, test, type Page } from '@playwright/test'
 import type { AuthorizationOperationType, AuthorizationState } from '../../shared/payment/authorization'
 import { authorizationSession } from '../vue/authorization-fixture'
-import { expectNoHorizontalOverflow, gotoHydrated } from './support'
+import { expectNoHorizontalOverflow, gotoHydrated, selectHubOption } from './support'
 
 const BASE_URL = 'http://127.0.0.1:4173'
 const ORDER_ID = 'order-auth-1'
@@ -132,9 +132,9 @@ test.describe('mock Checkout authorization', () => {
       await page.goto('/halden/checkout/HLD-AUTH-MOCK-ENTRY')
       await page.getByRole('link', { name: 'Return to Demo Hub', exact: true }).click()
       await expect(page.getByText('Sandbox profile · Sandbox only', { exact: true })).toBeVisible()
-      await page.locator('[role="radio"][value="checkout"]').click()
-      await page.getByRole('group', { name: 'Payment method' }).locator('[role="radio"][value="card"]').click()
-      await expect(page.getByRole('group', { name: 'Payment journey' }).locator('[role="radio"][value="hosted-authorization"]')).toBeChecked()
+      await page.getByRole('group', { name: 'Integration', exact: true }).getByRole('tab', { name: 'Checkout', exact: true }).click()
+      await selectHubOption(page, 'Payment method', 'Card · Conditional')
+      await expect(page.getByRole('combobox', { name: 'Payment journey', exact: true })).toContainText('Card pre-authorization')
       await expect(page.getByRole('button', { name: 'Start simulated checkout' })).toHaveCount(0)
       await expect(page.getByText(/Conditional · Card authorization in Sandbox/)).toBeVisible()
       await page.getByRole('button', { name: 'Start a Sandbox card authorization' }).click()

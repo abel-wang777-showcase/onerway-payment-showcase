@@ -1,4 +1,3 @@
-import type { RadioGroupItem } from '@nuxt/ui'
 import type { JourneyId } from '#shared/payment/journey'
 import type { LocationQuery } from 'vue-router'
 import {
@@ -54,13 +53,22 @@ const statusLabels: Record<CapabilityStatus, string> = {
   unavailable: 'Unavailable',
 }
 
+export interface HubOption {
+  value: string
+  label: string
+  title?: string
+  status?: CapabilityStatus
+  description?: string
+  disabled?: boolean
+}
+
 function option(
   value: string,
   label: string,
   status: CapabilityStatus,
   runnable: boolean,
   condition?: string,
-): RadioGroupItem {
+): HubOption {
   const description = condition
     ?? (status === 'available'
       ? 'Available in this showcase.'
@@ -71,6 +79,8 @@ function option(
   return {
     value,
     label: `${label} · ${statusLabels[status]}`,
+    title: label,
+    status,
     description,
     disabled: !runnable,
   }
@@ -204,16 +214,16 @@ export function useHubSelection() {
   })
 
   const subscriptionPlan = computed(() => getSubscriptionPlan(subscriptionPlanId.value))
-  const billingItems = computed<RadioGroupItem[]>(() => [
+  const billingItems = computed<HubOption[]>(() => [
     { value: 'payment', label: 'One-time payment', description: 'Try a one-time payment in Sandbox.' },
     { value: 'subscription', label: 'Subscription', description: 'Create one merchant-managed daily Sandbox subscription with the selected integration.', disabled: selection.value.integration === 'direct-api' },
   ])
-  const scenes = computed<RadioGroupItem[]>(() => SCENES.map((scene) => {
+  const scenes = computed<HubOption[]>(() => SCENES.map((scene) => {
     const capability = getCapability(scene, selection.value.integration, selection.value.method)
     return option(scene, sceneLabels[scene], capability.status, capability.runnable, capability.condition)
   }))
 
-  const integrations = computed<RadioGroupItem[]>(() => INTEGRATIONS.map((integration) => {
+  const integrations = computed<HubOption[]>(() => INTEGRATIONS.map((integration) => {
     const method = (selection.value.method === 'apple-pay' || selection.value.method === 'google-pay')
       && getCapability(selection.value.scene, integration, selection.value.method).runnable
       ? selection.value.method : defaultMethod(integration)
@@ -221,12 +231,12 @@ export function useHubSelection() {
     return option(integration, integrationLabels[integration], capability.status, capability.runnable, integrationDescriptions[integration])
   }))
 
-  const methods = computed<RadioGroupItem[]>(() => PAYMENT_METHODS.map((method) => {
+  const methods = computed<HubOption[]>(() => PAYMENT_METHODS.map((method) => {
     const capability = getCapability(selection.value.scene, selection.value.integration, method)
     return option(method, methodLabels[method], capability.status, capability.runnable, capability.condition)
   }))
 
-  const journeyItems = computed<RadioGroupItem[]>(() => JOURNEY_IDS
+  const journeyItems = computed<HubOption[]>(() => JOURNEY_IDS
     .filter(id => isSandboxJourney(id) && JOURNEYS[id].integration === selection.value.integration)
     .map(id => ({
     value: id,

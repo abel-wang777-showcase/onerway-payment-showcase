@@ -82,7 +82,8 @@ describe('application routes', () => {
     expect(html).not.toContain('Start a new real Sandbox checkout')
     expect(html).not.toContain('Start a Separate Sandbox Order')
     expect(html).not.toContain('Restore existing Sandbox checkout')
-    expect(html).toContain('USD 50.00 · 3DS Challenge')
+    expect(html).toContain('role="combobox"')
+    expect(html).toContain('USD 5.00 · Standard success')
     expect(html).toContain('Sandbox profile · Sandbox only')
     expect(mainIds).toHaveLength(1)
 

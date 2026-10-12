@@ -1,10 +1,9 @@
 <script setup lang="ts">
-import type { RadioGroupItem } from '@nuxt/ui'
+import type { HubOption } from '~/composables/useHubSelection'
 
 const props = defineProps<{
   modelValue: string
-  items: RadioGroupItem[]
-  hosted?: boolean
+  items: HubOption[]
 }>()
 
 const emit = defineEmits<{
@@ -18,19 +17,14 @@ const value = computed({
 </script>
 
 <template>
-  <section
-    aria-labelledby="journey-title"
-    class="min-w-0"
-  >
-    <h2 id="journey-title" class="sr-only">{{ hosted ? 'Hosted payment journey' : 'SDK payment journey' }}</h2>
-    <URadioGroup
+  <UFormField label="Payment journey" name="payment-journey" class="col-span-2 min-w-0">
+    <USelect
       v-model="value"
-      legend="Payment journey"
+      aria-label="Payment journey"
       :items="items"
-      variant="card"
-      indicator="end"
-      class="min-w-0"
-      :ui="{ fieldset: hosted ? 'grid gap-2 md:grid-cols-3' : 'grid gap-2 sm:grid-cols-2', description: 'sr-only', item: 'min-h-11 min-w-0 p-3' }"
+      size="lg"
+      class="min-h-11 w-full"
+      :ui="{ value: 'whitespace-normal text-start', item: 'min-h-11', itemLabel: 'whitespace-normal' }"
     />
-  </section>
+  </UFormField>
 </template>

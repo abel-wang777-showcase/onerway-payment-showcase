@@ -2,9 +2,10 @@ import { expect, test, type Page } from '@playwright/test'
 import { createAttempt, setAttemptStatus, type PaymentStatus } from '../../shared/payment/attempt'
 import { createEvent } from '../../shared/payment/event'
 import { createOrder } from '../../shared/payment/order'
+import { getJourney } from '../../shared/payment/journey'
 import { toPaymentAttemptSummary } from '../../shared/payment/sdk'
 import { createSubscriptionPlaceholder, getSubscriptionPlan, toSubscriptionSummary, type SubscriptionState } from '../../shared/payment/subscription'
-import { expectNoHorizontalOverflow } from './support'
+import { expectNoHorizontalOverflow, selectHubOption } from './support'
 
 const BASE_URL = 'http://127.0.0.1:4173'
 const ORDER_ID = 'HLD-CHECKOUT-E2E'
@@ -198,19 +199,16 @@ async function enterHub(page: Page) {
   await page.getByRole('link', { name: 'Return to Demo Hub', exact: true }).click()
   await expect(page).toHaveURL(`${BASE_URL}/`)
   await expect(page.getByText('Sandbox profile · Sandbox only', { exact: true })).toBeVisible()
-  const checkout = page.locator('[role="radio"][value="checkout"]')
+  const checkout = page.getByRole('group', { name: 'Integration', exact: true }).getByRole('tab', { name: 'Checkout', exact: true })
   await checkout.focus()
   await checkout.press('Space')
-  await expect(checkout).toBeChecked()
-  await expect(page.locator('[role="radio"][value="all"]')).toBeChecked()
+  await expect(checkout).toHaveAttribute('aria-selected', 'true')
+  await expect(page.getByRole('combobox', { name: 'Payment method', exact: true })).toContainText('Choose on Checkout')
 }
 
 async function startCheckout(page: Page, journey: CheckoutJourney = CHECKOUT_JOURNEYS[0], createUnknown = false) {
   await enterHub(page)
-  const selectedJourney = page.locator(`[role="radio"][value="${journey.id}"]`)
-  await selectedJourney.focus()
-  await selectedJourney.press('Space')
-  await expect(selectedJourney).toBeChecked()
+  await selectHubOption(page, 'Payment journey', getJourney(journey.id).label)
   await expectNoHorizontalOverflow(page)
   const start = page.getByRole('button', { name: 'Start a new Sandbox Hosted Checkout', exact: true })
   await expect(start).toBeEnabled()
@@ -462,13 +460,13 @@ test('a restored USD 50 Hosted order keeps its journey when requesting a separat
 test('a Checkout subscription deep link keeps the fixed plan independent of the payment journey', async ({ page }) => {
   const mock = await installCheckoutMock(page, { journey: THREE_DS })
   await page.goto(`/?mode=subscription&journey=${THREE_DS.id}`)
-  await expect(page.locator('[role="radio"][value="subscription"]')).toBeChecked()
-  await expect(page.locator('[role="radio"][value="checkout"]')).toBeChecked()
-  await expect(page.getByRole('group', { name: 'Payment method', exact: true })).toHaveCount(0)
+  await expect(page.getByRole('combobox', { name: 'Billing experience', exact: true })).toContainText('Subscription')
+  await expect(page.getByRole('group', { name: 'Integration', exact: true }).getByRole('tab', { name: 'Checkout', exact: true })).toHaveAttribute('aria-selected', 'true')
+  await expect(page.getByRole('combobox', { name: 'Payment method', exact: true })).toHaveCount(0)
   await expect(page.locator('#demo-launch')).toContainText('Choose on Checkout')
   await expect(page.getByRole('heading', { name: 'Halden Daily Essentials', exact: true })).toBeVisible()
   await expect(page.locator('#demo-launch').getByText('$5.00', { exact: true })).toBeVisible()
-  await expect(page.locator(`[role="radio"][value="${THREE_DS.id}"]`)).toHaveCount(0)
+  await expect(page.getByRole('combobox', { name: 'Payment journey', exact: true })).toHaveCount(0)
   expect(mock.calls.filter(call => call.path === '/api/payment/intent')).toHaveLength(0)
   expect(mock.calls.filter(call => call.path === '/api/payment/create')).toHaveLength(0)
   mock.assertClean()
@@ -500,10 +498,7 @@ for (const colorScheme of ['light', 'dark'] as const) {
 
 async function startCheckoutSubscription(page: Page, createUnknown = false) {
   await enterHub(page)
-  const billing = page.locator('[role="radio"][value="subscription"]')
-  await billing.focus()
-  await billing.press('Space')
-  await expect(billing).toBeChecked()
+  await selectHubOption(page, 'Billing experience', 'Subscription')
   await expect(page.getByText(/Conditional · Select Card on Checkout/)).toBeVisible()
   await page.getByRole('button', { name: 'Start Sandbox subscription', exact: true }).press('Enter')
   await expect(page).toHaveURL(`${BASE_URL}/halden/hosted/${ORDER_ID}`)
@@ -551,12 +546,10 @@ test('terminal Checkout subscription recovery offers a normal same-customer star
   await expect(page).toHaveURL(`${BASE_URL}/halden/result/${ORDER_ID}`)
   await page.getByRole('link', { name: 'Return to Demo Hub', exact: true }).click()
 
-  const checkout = page.locator('[role="radio"][value="checkout"]')
+  const checkout = page.getByRole('group', { name: 'Integration', exact: true }).getByRole('tab', { name: 'Checkout', exact: true })
   await checkout.press('Space')
-  await expect(checkout).toBeChecked()
-  const billing = page.locator('[role="radio"][value="subscription"]')
-  await billing.press('Space')
-  await expect(billing).toBeChecked()
+  await expect(checkout).toHaveAttribute('aria-selected', 'true')
+  await selectHubOption(page, 'Billing experience', 'Subscription')
   const start = page.getByRole('button', { name: 'Start Sandbox subscription', exact: true })
   await expect(start).toBeEnabled()
   await expect(page.getByRole('link', { name: 'View existing subscription', exact: true })).toHaveCount(0)

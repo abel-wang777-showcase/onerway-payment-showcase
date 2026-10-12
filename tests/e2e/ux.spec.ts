@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test'
 import { waitForHydration } from '@nuxt/test-utils/e2e'
-import { expectCenteredButtonIcon, expectNoHorizontalOverflow, gotoHydrated, installSimulationGate, methodRadio, startJourney, submitSimulation } from './support'
+import { getJourney } from '../../shared/payment/journey'
+import { expectCenteredButtonIcon, expectNoHorizontalOverflow, gotoHydrated, installSimulationGate, selectHubOption, startJourney, submitSimulation } from './support'
 
 for (const width of [320, 390, 834, 1440]) {
   test(`keeps the demo and next steps reachable at ${width}px`, async ({ page }, testInfo) => {
@@ -8,17 +9,21 @@ for (const width of [320, 390, 834, 1440]) {
     await page.setViewportSize({ width, height: 900 })
     await gotoHydrated(page)
     const launch = page.getByRole('button', { name: 'Start a new real Sandbox checkout' })
-    await expect(launch).toBeInViewport()
     await expect(launch).toBeDisabled()
+    await expect(page.getByRole('radio', { includeHidden: true })).toHaveCount(0)
     await expect(page.getByRole('button', { name: 'Start simulated checkout' })).toHaveCount(0)
     await page.screenshot({ path: testInfo.outputPath(`hub-${width}.png`) })
 
     if (width < 961) {
-      await page.getByRole('link', { name: 'Customize', exact: true }).click()
       await expect(page.locator('#matrix-title')).toBeInViewport()
-      await page.getByRole('navigation', { name: 'Quick demo navigation' }).getByRole('link').click()
-      await expect(launch).toBeInViewport()
+      const choices = await page.locator('#demo-selection').boundingBox()
+      const summary = await page.locator('#demo-launch').boundingBox()
+      expect(choices).not.toBeNull()
+      expect(summary).not.toBeNull()
+      expect(choices!.y + choices!.height).toBeLessThanOrEqual(summary!.y)
+      await page.getByRole('navigation', { name: 'Quick demo navigation' }).getByRole('link', { name: 'Review & start' }).click()
     }
+    await expect(launch).toBeInViewport()
     await expectNoHorizontalOverflow(page)
     await startJourney(page, 'standard-success')
     await expect(page).toHaveURL(/\/halden\/checkout\//)
@@ -39,28 +44,29 @@ for (const width of [320, 390, 834, 1440]) {
 test('keeps the selected wallet across integrations and gives Direct-specific guidance', async ({ page }) => {
   const gate = await installSimulationGate(page)
   await gotoHydrated(page)
-  await methodRadio(page, 'google-pay').click()
+  await selectHubOption(page, 'Payment method', 'Google Pay · Conditional')
   const integration = page.getByRole('group', { name: 'Integration', exact: true })
-  await integration.locator('[role="radio"][value="direct-api"]').click()
-  await expect(methodRadio(page, 'google-pay')).toBeChecked()
+  const method = page.getByRole('combobox', { name: 'Payment method', exact: true })
+  await integration.getByRole('tab', { name: 'Direct API', exact: true }).click()
+  await expect(method).toContainText('Google Pay')
   await expect(page.locator('#demo-launch')).toContainText('Halden checks the Direct API payment result')
   await expect(page.locator('#demo-launch')).not.toContainText('SDK renders')
   await expect(page).toHaveURL(/journey=google-pay-direct/)
   await page.setViewportSize({ width: 834, height: 900 })
-  await page.getByRole('navigation', { name: 'Demo sections' }).getByRole('link', { name: 'Review & start' }).click()
-  await expect(methodRadio(page, 'google-pay')).toBeChecked()
+  await page.getByRole('navigation', { name: 'Quick demo navigation' }).getByRole('link', { name: 'Review & start' }).click()
+  await expect(method).toContainText('Google Pay')
   await expect(page).toHaveURL(/journey=google-pay-direct/)
   await page.reload()
   await waitForHydration(page, new URL(page.url()).pathname, 'hydration')
-  await expect(methodRadio(page, 'google-pay')).toBeChecked()
-  await integration.locator('[role="radio"][value="web-js-sdk"]').click()
-  await expect(integration.locator('[role="radio"][value="web-js-sdk"]')).toBeChecked()
-  await expect(methodRadio(page, 'google-pay')).toBeChecked()
-  await page.getByRole('group', { name: 'Billing experience' }).locator('[role="radio"][value="subscription"]').click()
-  await expect(page.getByRole('group', { name: 'Payment method', exact: true })).toHaveCount(0)
+  await expect(method).toContainText('Google Pay')
+  await integration.getByRole('tab', { name: 'Web JS SDK', exact: true }).click()
+  await expect(integration.getByRole('tab', { name: 'Web JS SDK', exact: true })).toHaveAttribute('aria-selected', 'true')
+  await expect(method).toContainText('Google Pay')
+  await selectHubOption(page, 'Billing experience', 'Subscription')
+  await expect(method).toHaveCount(0)
   await expect(page.locator('#demo-launch')).toContainText('SDK available methods')
-  await page.getByRole('link', { name: 'Customize', exact: true }).click()
-  await expect(page.getByRole('group', { name: 'Billing experience' }).locator('[role="radio"][value="subscription"]')).toBeChecked()
+  await page.getByRole('navigation', { name: 'Quick demo navigation' }).getByRole('link', { name: 'Review & start' }).click()
+  await expect(page.getByRole('combobox', { name: 'Billing experience', exact: true })).toContainText('Subscription')
   gate.assertClean()
 })
 
@@ -76,33 +82,50 @@ for (const width of [1024, 1366, 1440]) {
       await page.setViewportSize({ width, height: 768 })
       await gotoHydrated(page, `/${query}`)
       await page.screenshot({ path: testInfo.outputPath(`compact-${width}-${name}.png`) })
-      const lastChoice = page.locator('#demo-selection [data-slot="item"]:visible').last()
-      const bounds = await lastChoice.boundingBox()
-      expect(bounds).not.toBeNull()
-      expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(768)
+      await expect(page.getByRole('radio', { includeHidden: true })).toHaveCount(0)
+      const choices = page.locator('#demo-selection').getByRole('combobox')
+        .or(page.getByRole('group', { name: 'Integration', exact: true }).getByRole('tab'))
+      expect(await choices.count()).toBeGreaterThan(0)
+      for (const choice of await choices.all()) {
+        await expect(choice).toBeInViewport({ ratio: 1 })
+      }
       await expect(page.locator('#demo-launch button').first()).toBeInViewport({ ratio: 1 })
+      await expect(page.locator('#demo-launch dl')).toBeVisible()
       await expectNoHorizontalOverflow(page)
       gate.assertClean()
     })
   }
 }
 
-test('keeps mobile controls readable in dark mode and with reduced motion', async ({ page }, testInfo) => {
-  await installSimulationGate(page)
-  await page.emulateMedia({ colorScheme: 'dark', reducedMotion: 'reduce' })
-  await page.setViewportSize({ width: 390, height: 844 })
-  await gotoHydrated(page)
-  await expect(page.locator('html')).toHaveClass(/dark/)
-  await expect(page.getByRole('button', { name: 'Start a new real Sandbox checkout' })).toBeInViewport()
-  await expectNoHorizontalOverflow(page)
-  await page.getByRole('link', { name: 'Customize', exact: true }).click()
-  const integration = page.getByRole('group', { name: 'Integration', exact: true })
-  await integration.locator('[role="radio"][value="web-js-sdk"]').focus()
-  await page.keyboard.down('ArrowDown')
-  await expect(integration.locator('[role="radio"][value="checkout"]')).toBeChecked()
-  await page.keyboard.up('ArrowDown')
-  await page.screenshot({ path: testInfo.outputPath('compact-mobile-dark.png') })
-})
+for (const colorScheme of ['light', 'dark'] as const) {
+  test(`keeps mobile tabs and selects operable in ${colorScheme} mode with reduced motion`, async ({ page }, testInfo) => {
+    const gate = await installSimulationGate(page)
+    await page.emulateMedia({ colorScheme, reducedMotion: 'reduce' })
+    await page.setViewportSize({ width: 390, height: 844 })
+    await gotoHydrated(page)
+    await expect(page.locator('html')).toHaveClass(new RegExp(`(?:^|\\s)${colorScheme}(?:\\s|$)`))
+    await expect(page.getByRole('radio', { includeHidden: true })).toHaveCount(0)
+    const launch = await page.locator('#demo-launch button').first().boundingBox()
+    const navigation = await page.getByRole('navigation', { name: 'Quick demo navigation' }).boundingBox()
+    expect(launch).not.toBeNull()
+    expect(navigation).not.toBeNull()
+    expect(launch!.y + launch!.height).toBeLessThanOrEqual(navigation!.y)
+    await expect(page.locator('#demo-launch dl')).not.toBeVisible()
+    await page.locator('#demo-launch summary').click()
+    await expect(page.locator('#demo-launch dl')).toBeVisible()
+    await page.locator('#demo-launch summary').click()
+    const integration = page.getByRole('group', { name: 'Integration', exact: true })
+    await integration.getByRole('tab', { name: 'Web JS SDK', exact: true }).focus()
+    await page.keyboard.press('ArrowRight')
+    await expect(integration.getByRole('tab', { name: 'Checkout', exact: true })).toHaveAttribute('aria-selected', 'true')
+    await expect(integration.getByRole('tab', { name: 'Checkout', exact: true })).toBeFocused()
+    await selectHubOption(page, 'Payment journey', getJourney('hosted-checkout-three-ds').label)
+    await expect(page.locator('#demo-launch')).toContainText('$50.00')
+    await expectNoHorizontalOverflow(page)
+    await page.screenshot({ path: testInfo.outputPath(`compact-mobile-${colorScheme}.png`) })
+    gate.assertClean()
+  })
+}
 
 test('centers the theme icon inside its touch target in both themes', async ({ page }) => {
   await installSimulationGate(page)
@@ -119,10 +142,16 @@ test('centers the theme icon inside its touch target in both themes', async ({ p
 
 test('offers only Sandbox journeys and normalizes old simulation links', async ({ page }) => {
   const gate = await installSimulationGate(page)
-  for (const fixture of ['processing-recovery', 'cancelled-retry', 'deterministic-failure', 'form-load-recovery']) {
+  for (const fixture of ['processing-recovery', 'cancelled-retry', 'deterministic-failure', 'form-load-recovery'] as const) {
     await gotoHydrated(page, `/?journey=${fixture}`)
-    await expect(page.locator('[role="radio"][value="standard-success"]')).toBeChecked()
-    await expect(page.locator(`[role="radio"][value="${fixture}"]`)).toHaveCount(0)
+    const journey = page.getByRole('combobox', { name: 'Payment journey', exact: true })
+    await expect(journey).toContainText('Standard success')
+    await journey.click()
+    await expect(page.getByRole('option', { name: getJourney('standard-success').label, exact: true })).toBeVisible()
+    await expect(page.getByRole('option', { name: getJourney('three-ds-success').label, exact: true })).toBeVisible()
+    await expect(page.getByRole('option', { name: getJourney(fixture).label, exact: true })).toHaveCount(0)
+    await page.keyboard.press('Escape')
+    await expect(page).toHaveURL(/journey=standard-success/)
     await expect(page.getByRole('button', { name: /simulated checkout/i })).toHaveCount(0)
     await expect(page.getByRole('button', { name: 'Start a new real Sandbox checkout' })).toBeDisabled()
   }

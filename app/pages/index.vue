@@ -209,14 +209,14 @@ onMounted(async () => {
 
 <template>
   <UContainer class="pb-24 lg:pb-0">
-    <section class="py-5 sm:py-6">
+    <section class="py-4 sm:py-6">
       <div class="flex flex-wrap items-start justify-between gap-3">
         <div class="min-w-0">
           <h1 class="text-balance text-2xl font-semibold tracking-tight text-highlighted sm:text-3xl">
             From checkout to confirmation.
           </h1>
           <p class="mt-2 max-w-2xl text-pretty text-sm text-toned">
-            Choose how your customers pay. Try the complete Halden purchase in Sandbox.
+            Explore the complete Halden purchase in Sandbox.
           </p>
         </div>
         <div class="flex flex-wrap items-center gap-2">
@@ -229,13 +229,8 @@ onMounted(async () => {
 
       </div>
 
-      <nav aria-label="Demo sections" class="mt-3 flex flex-wrap gap-2 lg:hidden">
-        <UButton :to="{ query: route.query, hash: '#demo-selection' }" label="Customize" color="neutral" variant="outline" class="min-h-11" />
-        <UButton :to="{ query: route.query, hash: '#demo-launch' }" label="Review & start" color="neutral" variant="ghost" class="min-h-11" trailing-icon="i-lucide-arrow-down" />
-      </nav>
-
-      <div class="mt-5 grid min-w-0 gap-6 border-t border-default pt-5 lg:grid-cols-3 lg:items-start">
-        <div class="min-w-0 space-y-4 lg:col-span-2 lg:col-start-1 lg:row-start-1">
+      <div class="mt-4 grid min-w-0 overflow-hidden rounded-lg border border-default bg-default lg:mt-6 lg:grid-cols-3 lg:items-stretch">
+        <div class="min-w-0 p-4 sm:p-6 lg:col-span-2">
           <HubMatrix
             v-model="selection"
             :scenes="scenes"
@@ -243,19 +238,21 @@ onMounted(async () => {
             :methods="methods"
             :subscription="billingMode === 'subscription'"
           >
-            <URadioGroup
-              v-model="billingMode"
-              legend="Billing experience"
-              :items="billingItems"
-              variant="card"
-              :ui="{ fieldset: 'grid grid-cols-2 gap-2', item: 'min-h-11 min-w-0 p-3', description: 'sr-only' }"
-            />
+            <UFormField label="Billing experience" name="billing-mode">
+              <USelect
+                v-model="billingMode"
+                aria-label="Billing experience"
+                :items="billingItems"
+                size="lg"
+                class="min-h-11 w-full"
+                :ui="{ value: 'whitespace-normal text-start', item: 'min-h-11', itemLabel: 'whitespace-normal' }"
+              />
+            </UFormField>
             <template #journey>
               <HubJourneyPicker
                 v-if="billingMode === 'payment' && ((journey.integration === 'web-js-sdk' && selection.method === 'card') || journey.integration === 'checkout')"
                 v-model="journeyId"
                 :items="journeyItems"
-                :hosted="journey.integration === 'checkout'"
               />
             </template>
           </HubMatrix>
@@ -263,23 +260,22 @@ onMounted(async () => {
         </div>
 
         <HubPassport
-          class="row-start-1 lg:col-start-3"
+          class="border-t border-default lg:col-start-3 lg:border-t-0 lg:border-l"
           :title="billingMode === 'subscription' ? subscriptionPlan.productName : journey.label"
           :description="billingMode === 'subscription'
             ? 'Pay USD 5.00 today, authorize daily merchant-managed billing, and complete the required first-payment 3DS in Sandbox.'
             : journey.description"
           :amount="amount"
           :facts="passportFacts"
-          :profile="profileLabel"
         >
           <UButton
             v-if="billingMode === 'payment' && restoringSdk && !canonicalSandboxHref"
             key="sandbox-restoration"
             :label="sdkLabel"
-            trailing-icon="i-lucide-circle-check"
+            trailing-icon="i-lucide-arrow-right"
             size="xl"
             block
-            class="mt-5 min-h-11"
+            class="mt-3 min-h-11 lg:mt-5"
             :disabled="!canStartSdk || launching || sdkRestoring"
             :loading="checkingRecovery || launching || sdkRestoring"
             @click="restoreSandbox"
@@ -288,10 +284,10 @@ onMounted(async () => {
             v-else-if="billingMode === 'payment'"
             key="sandbox-start"
             :label="sdkLabel"
-            trailing-icon="i-lucide-circle-check"
+            trailing-icon="i-lucide-arrow-right"
             size="xl"
             block
-            class="mt-5 min-h-11"
+            class="mt-3 min-h-11 lg:mt-5"
             :disabled="!canStartSdk || launching || sdkRestoring"
             :loading="checkingRecovery || launching || sdkRestoring"
             @click="startSandbox"
@@ -385,6 +381,7 @@ onMounted(async () => {
       </div>
     </section>
     <nav aria-label="Quick demo navigation" class="demo-mobile-nav fixed inset-x-0 bottom-0 z-30 flex items-center justify-between gap-3 border-t border-default bg-default px-4 py-3 lg:hidden">
+      <UButton :to="{ query: route.query, hash: '#demo-selection' }" label="Customize" color="neutral" variant="ghost" class="min-h-11" />
       <span class="min-w-0 text-sm font-medium text-highlighted tabular-nums">{{ amount }}</span>
       <UButton :to="{ query: route.query, hash: '#demo-launch' }" label="Review & start" color="neutral" size="lg" class="min-h-11" icon="i-lucide-arrow-up" />
     </nav>

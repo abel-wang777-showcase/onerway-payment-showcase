@@ -1,7 +1,6 @@
 import { expect, type Locator, type Page } from '@playwright/test'
 import { waitForHydration } from '@nuxt/test-utils/e2e'
 import type { JourneyId } from '../../shared/payment/journey'
-import type { PaymentMethodId } from '../../shared/payment/capability'
 import { createSession, serializeSession } from '../../shared/demo/session'
 import { DEMO_STORAGE_KEY } from '../../shared/demo/runtime'
 
@@ -33,16 +32,15 @@ export async function installSimulationGate(page: Page): Promise<SimulationGate>
   }
 }
 
-export function journeyRadio(page: Page, journey: JourneyId) {
-  return page
-    .getByRole('group', { name: 'Payment journey' })
-    .locator(`[role="radio"][value="${journey}"]`)
-}
-
-export function methodRadio(page: Page, method: PaymentMethodId) {
-  return page
-    .getByRole('group', { name: 'Payment method' })
-    .locator(`[role="radio"][value="${method}"]`)
+export async function selectHubOption(
+  page: Page,
+  field: 'Billing experience' | 'Payment method' | 'Payment journey',
+  option: string,
+): Promise<void> {
+  const select = page.getByRole('combobox', { name: field, exact: true })
+  await select.click()
+  await page.getByRole('option', { name: option, exact: true }).click()
+  await expect(select).toContainText(option)
 }
 
 export async function gotoHydrated(page: Page, path = '/'): Promise<void> {
