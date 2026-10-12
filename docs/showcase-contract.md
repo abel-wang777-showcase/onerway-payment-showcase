@@ -39,7 +39,7 @@ Preview 的支付入口保留跳转到已配置 canonical Sandbox origin 的边�
 
 首页统一使用 **Onerway Payment Showcase**，以通用支付体验入口呈现场景、接入方式和旅程。电商演示命名为 **Onerway Store**；**Onerway Gaming / Onerway Live / Onerway AI** 是规划中的演示场景名称，不代表已开放能力或独立正式产品。只有已开放场景可启动，其余继续标为 Planned。商户体验负责商品、订单、支付和结果；不同场景可有不同外观，但支付领域模型、状态真值和安全边界保持一致。页面明确标识 Demo / Sandbox，避免被误认为真实商城或服务。
 
-品牌改名仅改变展示与新钱包会话的商户显示名称。原 Halden 的 `/halden/**` 回跳路由、订单 ID、SKU、匹配用商品名和 `halden-daily-essentials-v1` 的 version / Provider `productName` 保持不变，以保证历史订单恢复和契约一致性；Showcase 商品摘要使用独立展示名称，不回写订单或篡改技术证据。托管收银台及历史记录可能仍显示原 Provider 商品名称，若要迁移需单独版本化计划。未取得官方图形 Logo 前使用 Onerway 文字标识，不把自创图案或 Geist 标记用作 Onerway Logo。
+品牌改名仅改变展示与新钱包会话的商户显示名称。原 Halden 的 `/halden/**` 回跳路由、订单 ID、SKU、匹配用商品名和 `halden-daily-essentials-v1` 的 version / Provider `productName` 保持不变，以保证历史订单恢复和契约一致性；Showcase 商品摘要使用独立展示名称，不回写订单或篡改技术证据。托管收银台及历史记录可能仍显示原 Provider 商品名称，若要迁移需单独版本化计划。品牌图形使用用户提供的官方彩色 SVG（`public/brand/onerway.svg`），原样保留颜色与比例；同时用于浏览器图标，并与 Onerway 文字共用页头组件，显式限制尺寸并适配深浅背景，不使用自创图案或 Geist 标记。
 
 ## 3. 能力矩阵
 
