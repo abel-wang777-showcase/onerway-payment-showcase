@@ -740,7 +740,7 @@ describe('payment restoration pages', () => {
     expect(create.attributes('disabled')).toBeUndefined()
     create.element.click()
     await flushPromises()
-    expect(start).toHaveBeenCalledExactlyOnceWith('standard-success', true, 'card')
+    expect(start).toHaveBeenCalledExactlyOnceWith('standard-success', true, 'card', 500)
     wrapper.unmount()
   })
 
@@ -775,7 +775,7 @@ describe('payment restoration pages', () => {
     separateOrder?.element.click()
     await flushPromises()
 
-    expect(start).toHaveBeenCalledWith('standard-success', true, 'card')
+    expect(start).toHaveBeenCalledWith('standard-success', true, 'card', 500)
     expect(restore).not.toHaveBeenCalled()
   })
 
@@ -795,7 +795,7 @@ describe('payment restoration pages', () => {
     })
     nuxt.useRoute.mockReturnValue({
       params: {},
-      query: { journey: 'three-ds-success' },
+      query: { journey: 'three-ds-success', amount: '12.34' },
     })
     nuxt.useSdk.mockReturnValue(sdkState({ start, stage: shallowRef('ready') }))
 
@@ -809,7 +809,7 @@ describe('payment restoration pages', () => {
     await flushPromises()
 
     expect(nuxt.navigateTo).toHaveBeenCalledWith(
-      'https://showcase.example/?journey=three-ds-success&method=card#demo-launch',
+      'https://showcase.example/?journey=three-ds-success&method=card&amount=12.34#demo-launch',
       { external: true },
     )
     expect(start).not.toHaveBeenCalled()
@@ -944,7 +944,7 @@ describe('payment restoration pages', () => {
       expect(start?.exists()).toBe(true)
       await start!.trigger('click')
       expect(sdk.start).toHaveBeenCalledExactlyOnceWith(
-        journey, true, integration === 'checkout' ? 'all' : 'card',
+        journey, true, integration === 'checkout' ? 'all' : 'card', 500,
       )
       expect(sdk.startSubscription).not.toHaveBeenCalled()
       wrapper.unmount()

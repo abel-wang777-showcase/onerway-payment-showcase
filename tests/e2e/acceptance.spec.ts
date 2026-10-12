@@ -28,7 +28,7 @@ test('exposes landmarks, keyboard selection and a visible focus indicator', asyn
   await expect(page.getByRole('main')).toBeFocused()
 
   await expect(page.getByRole('radio', { includeHidden: true })).toHaveCount(0)
-  const journey = page.getByRole('combobox', { name: 'Payment journey', exact: true })
+  const journey = page.getByRole('combobox', { name: 'Journey preset', exact: true })
   await expect(journey).toContainText('Standard success')
   await journey.focus()
   await journey.press('Enter')

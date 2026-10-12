@@ -81,6 +81,7 @@ describe('payment retry route', () => {
     { orderId: 'order-1', attemptId: 'attempt_1', paymentId: '9000000000000000001' },
     { orderId: 'order-1', attemptId: 'attempt-1', paymentId: 'payment-1' },
     { orderId: 'order-1', attemptId: 'attempt-1', paymentId: '9000000000000000001', extra: true },
+    { orderId: 'order-1', attemptId: 'attempt-1', paymentId: '9000000000000000001', amountMinor: 1234 },
   ])('rejects invalid input %#', async (body) => {
     vi.stubGlobal('readBody', vi.fn().mockResolvedValue(body))
 

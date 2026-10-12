@@ -53,6 +53,21 @@ function fixtureOrder(amount: 500 | 5_000) {
 }
 
 describe('Onerway gateway boundary', () => {
+  it.each(['standard-success', 'three-ds-success', 'hosted-checkout', 'hosted-checkout-three-ds', 'hosted-authorization'] as const)(
+    'sends the persisted custom amount and matching product price for %s', (journeyId) => {
+      const journey = getJourney(journeyId)
+      const order = createOrder({ id: 'custom-order', scene: 'ecommerce', createdAt: '2026-10-12T00:00:00Z',
+        amount: { minor: 1234, currency: 'USD' },
+        item: { sku: journey.sku, name: journey.item, variant: journey.variant, quantity: 1, unitAmount: { minor: 1234, currency: 'USD' } },
+      })
+      const context = { merchantTxnId: 'custom-txn', merchantCustId: 'customer', order, returnUrl: 'https://showcase.example/return',
+        transactionIp: '203.0.113.1', accept: '*/*', javaEnabled: false, colorDepth: '24', screenHeight: '800', screenWidth: '1200', timeZoneOffset: '0', contentLength: '0', language: 'en', userAgent: 'Test' }
+      const payload = journey.integration === 'checkout' ? buildCheckoutCreatePayload(profile, context) : buildCreatePayload(profile, context)
+      expect(payload).toMatchObject({ orderAmount: '12.34', orderCurrency: 'USD', txnType: journeyId === 'hosted-authorization' ? 'AUTH' : 'SALE',
+        txnOrderMsg: { products: [{ currency: 'USD', name: journey.item, num: '1', price: '12.34' }] } })
+    },
+  )
+
   it('normalizes nested fields inside-out and signs the exact wire values', () => {
     const payload = {
       z: 'last',
@@ -532,12 +547,12 @@ describe('Hosted Checkout gateway boundary', () => {
   })
 
   it.each(['hosted-checkout', 'hosted-checkout-three-ds'] as const)(
-    'rejects amount and product mutations of %s even when totals balance', (journeyId) => {
+    'rejects inconsistent amounts and product mutations of %s', (journeyId) => {
       const order = checkoutFixture(journeyId)
       const otherAmount = order.amount.minor === 500 ? 5_000 : 500
       const context = { merchantTxnId: checkoutContext.merchantTxnId, merchantCustId: 'cust_checkout', returnUrl: 'https://showcase.example' }
       for (const invalid of [
-        { ...order, amount: { minor: otherAmount, currency: 'USD' as const }, item: { ...order.item, unitAmount: { minor: otherAmount, currency: 'USD' as const } } },
+        { ...order, amount: { minor: otherAmount, currency: 'USD' as const } },
         { ...order, item: { ...order.item, sku: 'merchant-defined-product' } },
         { ...order, item: { ...order.item, quantity: 2, unitAmount: { minor: order.amount.minor / 2, currency: 'USD' as const } } },
       ]) {

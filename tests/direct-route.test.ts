@@ -84,6 +84,18 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals())
 
 describe('Direct recovery permissions', () => {
+  it.each(['apple-pay', 'google-pay'] as const)('restores and queries the saved custom %s amount', async (method) => {
+    const recovery = submitted(fixture(method))
+    const order = { ...recovery.order, amount: { ...recovery.order.amount, minor: 1234 }, item: { ...recovery.order.item, unitAmount: { ...recovery.order.item.unitAmount, minor: 1234 } } }
+    const custom = { ...recovery, order }
+    expect(() => assertDirectRecovery(profile, custom)).not.toThrow()
+    mocks.getPaymentRecovery.mockResolvedValue(custom)
+    mocks.queryApplePayPayment.mockRejectedValue(new DirectGatewayError('PAYMENT_QUERY_NOT_FOUND'))
+    mocks.queryGooglePayPayment.mockRejectedValue(new DirectGatewayError('PAYMENT_QUERY_NOT_FOUND'))
+    const result = await refreshDirectRecovery(profile, custom)
+    expect(result.order.amount.minor).toBe(1234)
+    expect(method === 'apple-pay' ? mocks.queryApplePayPayment : mocks.queryGooglePayPayment).toHaveBeenCalledWith(profile, expect.objectContaining({ amountMinor: 1234, currency: 'USD', merchantTxnId: custom.attempt.merchantTxnId }))
+  })
   it('binds the request order and attempt to the recovery cookie before loading payment data', async () => {
     const recovery = await requireDirectRecovery(event, profile, { orderId: 'HLD-DIRECT-TEST', attemptId: 'direct-attempt' }, ['orderId', 'attemptId'])
     expect(recovery.attempt.id).toBe('direct-attempt')

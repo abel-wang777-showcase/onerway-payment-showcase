@@ -20,7 +20,7 @@ async function restart() {
   restartError.value = null
   try {
     if (!navigator.locks) throw new Error('LOCK_UNAVAILABLE')
-    const response = await navigator.locks.request('onerway-payment-intent', { mode: 'exclusive' }, () => disposed ? null : $fetch<{ orderId: string, initial?: DirectRecoveryResponse }>('/api/payment/intent', { method: 'POST', body: { journeyId: 'google-pay-direct', method: 'google-pay', restart: true }, retry: 0 }))
+    const response = await navigator.locks.request('onerway-payment-intent', { mode: 'exclusive' }, () => disposed ? null : $fetch<{ orderId: string, initial?: DirectRecoveryResponse }>('/api/payment/intent', { method: 'POST', body: { journeyId: 'google-pay-direct', method: 'google-pay', restart: true, amountMinor: session.value!.order.amount.minor }, retry: 0 }))
     if (!disposed && response) { clearToken(); await navigateTo(`/halden/direct/${encodeURIComponent(response.orderId)}`) }
   }
   catch { if (!disposed) restartError.value = 'A new order could not be opened. Your original order is preserved.' }

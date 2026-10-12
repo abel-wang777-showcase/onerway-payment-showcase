@@ -81,6 +81,7 @@ async function requestPaymentIntent(
   method: PaymentMethodId,
   restart: boolean,
   ownsState: () => boolean,
+  amountMinor?: number,
 ): Promise<CreatePaymentIntentResponse | null> {
   if (!navigator.locks) {
     throw new TypeError('PAYMENT_INTENT_LOCK_UNAVAILABLE')
@@ -93,7 +94,7 @@ async function requestPaymentIntent(
 
     return $fetch<CreatePaymentIntentResponse>('/api/payment/intent', {
       method: 'POST',
-      body: { journeyId, method, ...(restart ? { restart: true } : {}) },
+      body: { journeyId, method, ...(restart ? { restart: true } : {}), ...(amountMinor !== undefined ? { amountMinor } : {}) },
     })
   })
 }
@@ -443,6 +444,7 @@ export function useSdk() {
     journeyId: JourneyId,
     restart = false,
     method: PaymentMethodId = getJourney(journeyId).method,
+    amountMinor?: number,
   ): Promise<void> {
     if (!ownsState()) {
       return
@@ -461,7 +463,7 @@ export function useSdk() {
     subscription.value = null
     createFlight = (async () => {
       try {
-        const intent = await requestPaymentIntent(journeyId, method, restart, ownsState)
+        const intent = await requestPaymentIntent(journeyId, method, restart, ownsState, amountMinor)
 
         if (!intent) {
           return

@@ -193,6 +193,46 @@ describe('Demo Hub selection', () => {
     expect(navigation.replace).toHaveBeenCalledTimes(2)
   })
 
+  it('preserves custom amount across integrations but keeps subscription pricing fixed', async () => {
+    await mount({ amount: '12.34' })
+    expect(hub.amountMinor.value).toBe(1234)
+    expect(hub.customAmount.value).toBe(true)
+    hub.selection.value = { ...hub.selection.value, integration: 'checkout' }
+    await settle()
+    expect(hub.amount.value).toBe('$12.34')
+    expect(navigation.route.query.amount).toBe('12.34')
+    hub.billingMode.value = 'subscription'
+    await settle()
+    expect(hub.amount.value).toBe('$5.00')
+    expect(navigation.route.query).not.toHaveProperty('amount')
+    hub.billingMode.value = 'payment'
+    await settle()
+    expect(hub.amountMinor.value).toBe(1234)
+    hub.journeyId.value = 'hosted-checkout-three-ds'
+    await settle()
+    expect(hub.amountMinor.value).toBe(5000)
+    expect(hub.customAmount.value).toBe(false)
+  })
+
+  it('keeps invalid input editable without persisting it as a valid amount', async () => {
+    await mount({ amount: '12.34' })
+    hub.amountInput.value = '1.234'
+    await settle()
+    expect(hub.amountInput.value).toBe('1.234')
+    expect(hub.amountMinor.value).toBeNull()
+    expect(hub.amount.value).toBe('—')
+    expect(navigation.route.query).not.toHaveProperty('amount')
+    navigation.route.hash = '#demo-launch'
+    navigation.route.query = { ...navigation.route.query }
+    await settle()
+    expect(hub.amountInput.value).toBe('1.234')
+    expect(hub.amountMinor.value).toBeNull()
+    hub.amountInput.value = '0.01'
+    await settle()
+    expect(hub.amountMinor.value).toBe(1)
+    expect(navigation.route.query.amount).toBe('0.01')
+  })
+
   it('does not overwrite payment-page navigation after leaving the Hub', async () => {
     await mount()
     navigation.route.path = '/halden/sdk/order-1'

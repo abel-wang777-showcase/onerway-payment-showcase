@@ -9,7 +9,7 @@ const props = withDefaults(defineProps<{
 })
 
 const views = {
-  creating: ['Creating Sandbox checkout', 'The server is creating a signed USD 5.00 payment.', 'info', 'i-lucide-loader-circle'],
+  creating: ['Creating Sandbox checkout', 'The server is creating a signed payment for this order’s amount.', 'info', 'i-lucide-loader-circle'],
   loading: ['Loading secure payment form', 'The confirmed v4 Sandbox SDK is mounting its hosted fields.', 'info', 'i-lucide-loader-circle'],
   ready: ['Secure form ready', 'Enter the controlled Sandbox card details, then submit payment.', 'success', 'i-lucide-circle-check'],
   submitting: ['Submitting payment', 'The hosted SDK is processing the card details without sending them to this merchant server.', 'info', 'i-lucide-loader-circle'],

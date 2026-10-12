@@ -77,6 +77,44 @@ beforeEach(() => {
 })
 
 describe('payment intent route', () => {
+  it.each(['standard-success', 'three-ds-success', 'hosted-checkout', 'hosted-checkout-three-ds', 'hosted-authorization', 'apple-pay-direct', 'google-pay-direct'])(
+    'persists a custom amount consistently for %s', async (journeyId) => {
+      mocks.readPaymentRecovery.mockReturnValue(null)
+      vi.stubGlobal('readBody', vi.fn().mockResolvedValue({ journeyId, amountMinor: 1234 }))
+      const { default: handler } = await import('../server/api/payment/intent.post')
+      await (handler as (event: unknown) => Promise<unknown>)({})
+      const [order, attempt] = mocks.createPaymentRecord.mock.calls[0]!
+      expect(order.amount).toEqual({ minor: 1234, currency: 'USD' })
+      expect(order.item.unitAmount).toEqual(order.amount)
+      if (journeyId === 'hosted-authorization') expect(attempt.authorization.amountMinor).toBe(1234)
+    },
+  )
+
+  it.each([1, 1_000_000])('accepts the inclusive amount limit %s', async (amountMinor) => {
+    mocks.readPaymentRecovery.mockReturnValue(null)
+    vi.stubGlobal('readBody', vi.fn().mockResolvedValue({ journeyId: 'standard-success', amountMinor }))
+    const { default: handler } = await import('../server/api/payment/intent.post')
+    await (handler as (event: unknown) => Promise<unknown>)({})
+    expect(mocks.createPaymentRecord.mock.calls[0]![0].amount.minor).toBe(amountMinor)
+  })
+
+  it.each([0, -1, 1.5, 1_000_001, Number.MAX_SAFE_INTEGER, '1234', null, undefined])('rejects an invalid explicit amount %s', async (amountMinor) => {
+    vi.stubGlobal('readBody', vi.fn().mockResolvedValue({ journeyId: 'standard-success', amountMinor }))
+    const { default: handler } = await import('../server/api/payment/intent.post')
+    await expect((handler as (event: unknown) => Promise<unknown>)({})).rejects.toMatchObject({ statusCode: 400, statusMessage: 'PAYMENT_INPUT_INVALID' })
+    expect(mocks.createPaymentRecord).not.toHaveBeenCalled()
+  })
+
+  it.each([false, true])('does not replace a pending Direct order when the requested amount changes (restart %s)', async (restart) => {
+    const previous = recoveryFixture()
+    mocks.getPaymentRecovery.mockResolvedValue({ ...previous, attempt: { ...previous.attempt, integration: 'direct-api', method: 'apple-pay' } })
+    vi.stubGlobal('readBody', vi.fn().mockResolvedValue({ journeyId: 'apple-pay-direct', amountMinor: 1234, ...(restart ? { restart: true } : {}) }))
+    const { default: handler } = await import('../server/api/payment/intent.post')
+    expect(await (handler as (event: unknown) => Promise<unknown>)({})).toEqual({ orderId: 'order-1', create: false })
+    expect(mocks.createPaymentRecord).not.toHaveBeenCalled()
+    expect(mocks.setPaymentRecovery).not.toHaveBeenCalled()
+  })
+
   it('reuses an unsubmitted Direct order for a second Direct launch but permits an explicit integration change', async () => {
     const previous = recoveryFixture()
     mocks.getPaymentRecovery.mockResolvedValue({ ...previous,
@@ -558,7 +596,6 @@ it.each([
 
 it.each([
   { journeyId: 'hosted-checkout', amount: 5_000 },
-  { journeyId: 'hosted-checkout-three-ds', amountMinor: 500 },
   { journeyId: 'hosted-checkout-three-ds', currency: 'EUR' },
   { journeyId: 'hosted-checkout-three-ds', sku: 'HL-SAMPLE-050' },
 ])('rejects browser overrides of Checkout order facts %#', async (input) => {

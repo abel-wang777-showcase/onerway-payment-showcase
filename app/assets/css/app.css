@@ -21,7 +21,7 @@
 }
 
 .demo-mobile-nav {
-  padding-bottom: calc(0.75rem + env(safe-area-inset-bottom));
+  padding-bottom: calc(0.5rem + env(safe-area-inset-bottom));
 }
 
 .demo-workspace {

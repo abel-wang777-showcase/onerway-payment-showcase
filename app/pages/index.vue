@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { paymentAmountText } from '#shared/payment/amount'
 import type { PublicProfile } from '#shared/profile'
 import { supportsSandboxMethod } from '#shared/payment/journey'
 import { isPaymentRestorationAction } from '#shared/payment/failure'
@@ -26,7 +27,7 @@ const {
 } = useSdk()
 
 const {
-  selection, billingMode, subscriptionPlanId, subscriptionPlan, billingItems,
+  selection, billingMode, subscriptionPlanId, subscriptionPlan, billingItems, amountInput, amountMinor, customAmount,
   scenes, integrations, methods, journeyId, journeyItems, journey, amount, passportFacts,
   methodLabels,
 } = useHubSelection()
@@ -63,6 +64,7 @@ const canonicalSandboxHref = computed(() => {
   else {
     url.searchParams.set('journey', journeyId.value)
     url.searchParams.set('method', selection.value.method)
+    if (amountMinor.value !== null) url.searchParams.set('amount', paymentAmountText(amountMinor.value))
   }
   url.hash = 'demo-launch'
   return url.toString()
@@ -88,7 +90,8 @@ const canStartSdk = computed(() =>
     restoringSdk.value
     || billingMode.value === 'subscription'
     || (
-      selectedCapability.value.runnable
+      amountMinor.value !== null
+      && selectedCapability.value.runnable
       && supportsSandboxMethod(journey.value, selection.value.method)
     )
   ),
@@ -100,6 +103,7 @@ const canStartSeparateSandboxOrder = computed(() =>
   && !canonicalSandboxHref.value
   && profile.value?.profile === 'sandbox'
   && (billingMode.value === 'payment' && journey.value.integration !== 'web-js-sdk' || profile.value.sdk?.release === 'v4/latest')
+  && amountMinor.value !== null
   && selectedCapability.value.runnable
   && supportsSandboxMethod(journey.value, selection.value.method),
 )
@@ -134,7 +138,7 @@ const sdkLabel = computed(() => {
     return `Open ${selectedWalletLabel.value} Sandbox`
   }
 
-  return journeyId.value === 'three-ds-success'
+  return !customAmount.value && journeyId.value === 'three-ds-success'
     ? 'Start a new real Sandbox 3DS'
     : 'Start a new real Sandbox checkout'
 })
@@ -147,7 +151,7 @@ async function startSandbox(): Promise<void> {
     }
 
     if (restoringSdk.value) return
-    await startSdk(journeyId.value, true, selection.value.method)
+    await startSdk(journeyId.value, true, selection.value.method, amountMinor.value ?? undefined)
   }
 }
 
@@ -159,7 +163,7 @@ async function restoreSandbox(): Promise<void> {
 
 async function startSeparateSandboxOrder(): Promise<void> {
   if (canStartSeparateSandboxOrder.value && !separateSandboxOrderPending.value) {
-    await startSdk(journeyId.value, true, selection.value.method)
+    await startSdk(journeyId.value, true, selection.value.method, amountMinor.value ?? undefined)
   }
 }
 
@@ -253,16 +257,18 @@ onMounted(async () => {
               v-if="billingMode === 'payment' && ((journey.integration === 'web-js-sdk' && selection.method === 'card') || journey.integration === 'checkout')"
               v-model="journeyId"
               :items="journeyItems"
+              class="col-span-1"
             />
+            <HubAmountField v-if="billingMode === 'payment'" v-model="amountInput" />
           </template>
         </HubMatrix>
 
         <template #summary>
           <HubPassport
-            :title="billingMode === 'subscription' ? storeProductName(subscriptionPlan.productName) : journey.label"
+            :title="billingMode === 'subscription' ? storeProductName(subscriptionPlan.productName) : customAmount ? 'Custom amount' : journey.label"
             :description="billingMode === 'subscription'
               ? 'Pay USD 5.00 today, authorize daily merchant-managed billing, and complete the required first-payment 3DS in Sandbox.'
-              : journey.description"
+              : customAmount ? 'Try a custom Sandbox amount. Payment outcome and authentication depend on the payment provider.' : journey.description"
             :amount="amount"
             :facts="passportFacts"
           >
@@ -333,7 +339,7 @@ onMounted(async () => {
             v-if="billingMode === 'payment' && journey.id === 'hosted-authorization'"
             class="mt-3 text-xs leading-relaxed text-toned"
           >
-            Conditional · Card authorization in Sandbox. Authorize USD 5.00, then choose full capture or void. Missing confirmation keeps funds actions locked while you refresh the saved status.
+            Conditional · Card authorization in Sandbox. Authorize the selected amount, then choose full capture or void. Missing confirmation keeps funds actions locked while you refresh the saved status.
           </p>
           <p
             v-if="billingMode === 'subscription' && selection.integration === 'checkout'"
@@ -379,10 +385,10 @@ onMounted(async () => {
         </template>
       </HubWorkspace>
     </section>
-    <nav aria-label="Quick demo navigation" class="demo-mobile-nav fixed inset-x-0 bottom-0 z-30 flex items-center justify-between gap-3 border-t border-default bg-default px-4 py-3 lg:hidden">
-      <UButton :to="{ query: route.query, hash: '#demo-selection' }" label="Customize" color="neutral" variant="ghost" class="min-h-11" />
-      <span class="min-w-0 text-sm font-medium text-highlighted tabular-nums">{{ amount }}</span>
-      <UButton :to="{ query: route.query, hash: '#demo-launch' }" label="Review & start" color="neutral" size="lg" class="min-h-11" icon="i-lucide-arrow-up" />
+    <nav aria-label="Quick demo navigation" class="demo-mobile-nav fixed inset-x-0 bottom-0 z-30 flex items-center justify-between gap-2 border-t border-default bg-default px-3 py-2 lg:hidden">
+      <UButton :to="{ query: route.query, hash: '#demo-selection' }" label="Edit selection" color="neutral" variant="ghost" size="sm" class="min-h-11 shrink-0 px-2 text-xs sm:text-sm" />
+      <span class="shrink-0 text-xs font-medium text-highlighted tabular-nums sm:text-sm">{{ amount }}</span>
+      <UButton :to="{ query: route.query, hash: '#demo-launch' }" label="View summary" color="neutral" variant="ghost" size="sm" class="min-h-11 shrink-0 px-2 text-xs sm:text-sm" icon="i-lucide-list-checks" />
     </nav>
   </UContainer>
 </template>

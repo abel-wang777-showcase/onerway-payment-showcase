@@ -46,7 +46,7 @@ async function installAuthorizationMock(page: Page, options: { restored?: Partia
       const body: unknown = request.postData() ? request.postDataJSON() : null
       calls.push({ path: url.pathname, body })
       if (url.pathname === '/api/payment/intent') {
-        expect(body).toEqual({ journeyId: 'hosted-authorization', method: 'card', restart: true })
+        expect(body).toEqual({ journeyId: 'hosted-authorization', method: 'card', restart: true, amountMinor: current.order.amount.minor })
         await route.fulfill({ json: { orderId: ORDER_ID, integration: 'checkout', create: true } })
       }
       else if (url.pathname === '/api/payment/create') {
@@ -134,7 +134,7 @@ test.describe('mock Checkout authorization', () => {
       await expect(page.getByText('Sandbox profile · Sandbox only', { exact: true })).toBeVisible()
       await page.getByRole('group', { name: 'Integration', exact: true }).getByRole('tab', { name: 'Checkout', exact: true }).click()
       await selectHubOption(page, 'Payment method', 'Card · Conditional')
-      await expect(page.getByRole('combobox', { name: 'Payment journey', exact: true })).toContainText('Card pre-authorization')
+      await expect(page.getByRole('combobox', { name: 'Journey preset', exact: true })).toContainText('Card pre-authorization')
       await expect(page.getByRole('button', { name: 'Start simulated checkout' })).toHaveCount(0)
       await expect(page.getByText(/Conditional · Card authorization in Sandbox/)).toBeVisible()
       await page.getByRole('button', { name: 'Start a Sandbox card authorization' }).click()

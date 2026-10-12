@@ -116,7 +116,7 @@ async function installCheckoutMock(page: Page, options: {
       if (url.pathname === intentPath && request.method() === 'POST') {
         expect(body).toEqual(options.subscription
           ? { planId: 'halden-daily-essentials-v1', integration: 'checkout' }
-          : { journeyId: journey.id, method: 'all', restart: true })
+          : { journeyId: journey.id, method: 'all', restart: true, amountMinor: journey.amount })
         await route.fulfill({ json: { orderId: ORDER_ID, integration: 'checkout', create: true } })
       }
       else if (url.pathname === createPath && request.method() === 'POST') {
@@ -208,7 +208,7 @@ async function enterHub(page: Page) {
 
 async function startCheckout(page: Page, journey: CheckoutJourney = CHECKOUT_JOURNEYS[0], createUnknown = false) {
   await enterHub(page)
-  await selectHubOption(page, 'Payment journey', getJourney(journey.id).label)
+  await selectHubOption(page, 'Journey preset', getJourney(journey.id).label)
   await expectNoHorizontalOverflow(page)
   const start = page.getByRole('button', { name: 'Start a new Sandbox Hosted Checkout', exact: true })
   await expect(start).toBeEnabled()
@@ -453,7 +453,7 @@ test('a restored USD 50 Hosted order keeps its journey when requesting a separat
     await route.fulfill({ status: 409, json: { statusMessage: 'MOCK_RESTART_NOT_CREATED' } })
   })
   await page.getByRole('button', { name: 'Start a separate Sandbox order', exact: true }).click()
-  await expect.poll(() => restartBody).toEqual({ journeyId: THREE_DS.id, method: 'all', restart: true })
+  await expect.poll(() => restartBody).toEqual({ journeyId: THREE_DS.id, method: 'all', restart: true, amountMinor: THREE_DS.amount })
   expect(mock.calls.filter(call => call.path === '/api/payment/create')).toHaveLength(1)
   mock.assertClean()
 })
@@ -467,7 +467,7 @@ test('a Checkout subscription deep link keeps the fixed plan independent of the 
   await expect(page.locator('#demo-launch')).toContainText('Choose on Checkout')
   await expect(page.getByRole('heading', { name: 'Halden Daily Essentials', exact: true })).toBeVisible()
   await expect(page.locator('#demo-launch').getByText('$5.00', { exact: true })).toBeVisible()
-  await expect(page.getByRole('combobox', { name: 'Payment journey', exact: true })).toHaveCount(0)
+  await expect(page.getByRole('combobox', { name: 'Journey preset', exact: true })).toHaveCount(0)
   expect(mock.calls.filter(call => call.path === '/api/payment/intent')).toHaveLength(0)
   expect(mock.calls.filter(call => call.path === '/api/payment/create')).toHaveLength(0)
   mock.assertClean()

@@ -35,7 +35,7 @@ async function restart(): Promise<void> {
     if (!navigator.locks) throw new Error('PAYMENT_INTENT_LOCK_UNAVAILABLE')
     const response = await navigator.locks.request('onerway-payment-intent', { mode: 'exclusive' }, () => {
       if (disposed) return null
-      return $fetch<CreatePaymentIntentResponse>('/api/payment/intent', { method: 'POST', body: { journeyId: 'apple-pay-direct', method: 'apple-pay', restart: true }, retry: 0 })
+      return $fetch<CreatePaymentIntentResponse>('/api/payment/intent', { method: 'POST', body: { journeyId: 'apple-pay-direct', method: 'apple-pay', restart: true, amountMinor: session.value!.order.amount.minor }, retry: 0 })
     })
     if (!disposed && response) await navigateTo(`/halden/direct/${encodeURIComponent(response.orderId)}`)
   }
@@ -72,7 +72,7 @@ onScopeDispose(() => {
             :submitted="submitted" :submitting="submitting" :checking="checking" :loading="loading" :sheet-open="sheetOpen"
             :manual-captured="manualCaptured" :verification-pending="session?.verificationPending" :message="sheetMessage" />
           <p v-if="submitted && !canRestart && session?.attempt.status !== 'succeeded'" class="text-sm leading-relaxed text-toned">Please do not pay again while this order is unconfirmed. Closing Apple Pay, leaving this page or a timeout does not cancel a payment already submitted.</p>
-          <p v-if="manualCaptured && !submitted" class="text-sm leading-relaxed text-toned">Copy the token below to Apifox and match this USD 5.00 order’s amount and currency. A call made in Apifox is separate from this Showcase order; check that call’s result in Apifox. This page’s order remains unsubmitted.</p>
+          <p v-if="manualCaptured && !submitted" class="text-sm leading-relaxed text-toned">Copy the token below to Apifox and match this order’s amount and currency. A call made in Apifox is separate from this Showcase order; check that call’s result in Apifox. This page’s order remains unsubmitted.</p>
           <p v-if="canRestart" class="text-sm leading-relaxed text-toned">The original result is preserved. Paying again creates a new order and requires fresh Apple Pay authorization.</p>
           <UFormField v-if="!submitted" label="After Wallet authorization" name="apple-pay-mode" :help="sheetOpen ? 'Close Wallet before changing mode.' : submitted ? 'The mode is locked after payment submission.' : undefined">
             <URadioGroup :model-value="mode" :items="modeItems" :disabled="modeLocked" color="neutral" variant="list" :ui="{ item: 'min-h-11 touch-manipulation' }" @update:model-value="selectMode" />

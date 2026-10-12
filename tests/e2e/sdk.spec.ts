@@ -123,7 +123,7 @@ async function installSdkMock(page: Page) {
         await route.fulfill({ status: 401, json: { statusMessage: 'PAYMENT_RECOVERY_UNAUTHORIZED' } })
       }
       else if (url.pathname === '/api/payment/intent' && request.method() === 'POST') {
-        expect(request.postDataJSON()).toEqual({ journeyId: 'standard-success', method: 'card', restart: true })
+        expect(request.postDataJSON()).toEqual({ journeyId: 'standard-success', method: 'card', restart: true, amountMinor: order.amount.minor })
         await route.fulfill({ json: { orderId: ORDER_ID, create: true } })
       }
       else if (url.pathname === '/api/payment/create' && request.method() === 'POST') {

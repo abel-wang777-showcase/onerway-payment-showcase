@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { isPaymentAmount } from '../../../shared/payment/amount'
 import { getJourney, isJourneyId, supportsSandboxMethod } from '../../../shared/payment/journey'
 import { PAYMENT_METHODS, type PaymentMethodId } from '../../../shared/payment/capability'
 import { createAttempt } from '../../../shared/payment/attempt'
@@ -42,9 +43,10 @@ function readInput(value: unknown): CreatePaymentIntentInput {
 
   if (
     !input
-    || keys.some(key => !['journeyId', 'method', 'restart'].includes(key))
+    || keys.some(key => !['journeyId', 'method', 'restart', 'amountMinor'].includes(key))
     || keys.length < 1
-    || keys.length > 3
+    || keys.length > 4
+    || ('amountMinor' in input && !isPaymentAmount(input.amountMinor))
     || !isJourneyId(journeyId)
     || typeof method !== 'string'
     || !PAYMENT_METHODS.includes(method as PaymentMethodId)
@@ -62,6 +64,7 @@ function readInput(value: unknown): CreatePaymentIntentInput {
   return Object.freeze({
     journeyId,
     method: method as PaymentMethodId,
+    ...(input.amountMinor !== undefined ? { amountMinor: input.amountMinor as number } : {}),
     ...(restart ? { restart: true as const } : {}),
   })
 }
@@ -119,6 +122,7 @@ export default defineEventHandler(async (event): Promise<CreatePaymentIntentResp
 
       const now = new Date().toISOString()
       const journey = getJourney(input.journeyId)
+      const amountMinor = input.amountMinor ?? journey.amount
       const orderId = `HLD-${randomUUID().slice(0, 8).toUpperCase()}`
       const attemptId = `${orderId}-attempt-1`
       const merchantTxnId = `showcase-${randomUUID()}`
@@ -130,9 +134,9 @@ export default defineEventHandler(async (event): Promise<CreatePaymentIntentResp
           name: journey.item,
           variant: journey.variant,
           quantity: 1,
-          unitAmount: { minor: journey.amount, currency: journey.currency },
+          unitAmount: { minor: amountMinor, currency: journey.currency },
         },
-        amount: { minor: journey.amount, currency: journey.currency },
+        amount: { minor: amountMinor, currency: journey.currency },
         createdAt: now,
       })
       const attempt = createAttempt({
@@ -144,7 +148,7 @@ export default defineEventHandler(async (event): Promise<CreatePaymentIntentResp
         ...(journey.id === 'hosted-authorization' ? {
           authorization: createAuthorizationState({
             merchantTxnId,
-            amountMinor: journey.amount,
+            amountMinor,
             currency: journey.currency,
             occurredAt: now,
           }),

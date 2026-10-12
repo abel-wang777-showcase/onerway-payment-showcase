@@ -388,6 +388,8 @@ describe('Google Pay client', () => {
 describe('Google Pay independent Sandbox orders', () => {
   async function mountOrder(status: string) {
     const initial = payment()
+    initial.order.amount.minor = 1234
+    initial.config.totalPrice = '12.34'
     initial.submitted = true
     initial.attempt.status = status
     mocks.fetch.mockImplementation(async (url) => url === '/api/payment/intent' ? { orderId: 'new-order-google' } : initial)
@@ -403,7 +405,7 @@ describe('Google Pay independent Sandbox orders', () => {
     expect(wrapper.text()).toContain('This browser will restore the new order')
     await action.trigger('click')
     await flushPromises()
-    expect(mocks.fetch).toHaveBeenCalledWith('/api/payment/intent', { method: 'POST', body: { journeyId: 'google-pay-direct', method: 'google-pay', restart: true }, retry: 0 })
+    expect(mocks.fetch).toHaveBeenCalledWith('/api/payment/intent', { method: 'POST', body: { journeyId: 'google-pay-direct', method: 'google-pay', amountMinor: 1234, restart: true }, retry: 0 })
     expect(mocks.navigate).toHaveBeenCalledExactlyOnceWith('/halden/direct/new-order-google')
     expect(mocks.authorize).not.toHaveBeenCalled()
     expect(mocks.fetch.mock.calls.some(([url]) => url === '/api/payment/google-pay/pay')).toBe(false)

@@ -240,11 +240,11 @@ const details = computed(() => {
       ...(attempt.value.integration === 'web-js-sdk'
         ? [{
             label: 'threeDSJourney',
-            value: contract.value || sdkJourney.value?.id === 'three-ds-success' ? 'challenge' : 'not-required',
+            value: contract.value || (sdkJourney.value?.id === 'three-ds-success' && order.value.amount.minor === sdkJourney.value.amount) ? 'challenge' : 'provider-determined',
           }]
         : [{
             label: 'threeDSJourney',
-            value: contract.value || sdkJourney.value?.id === 'hosted-checkout-three-ds' ? 'challenge' : 'not-selected',
+            value: contract.value || (sdkJourney.value?.id === 'hosted-checkout-three-ds' && order.value.amount.minor === sdkJourney.value.amount) ? 'challenge' : 'provider-determined',
           }]),
       { label: 'returnObserved', value: returned.value ? 'yes' : 'no' },
       { label: 'orderId', value: order.value.id },

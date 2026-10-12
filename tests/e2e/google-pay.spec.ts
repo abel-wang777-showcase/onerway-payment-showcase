@@ -177,7 +177,7 @@ test.describe('Google Pay Direct with synthetic provider boundary', () => {
       })
       await page.route('**/api/payment/intent', async route => {
         creations++
-        expect(route.request().postDataJSON()).toEqual({ journeyId: 'google-pay-direct', method: 'google-pay', restart: true })
+        expect(route.request().postDataJSON()).toEqual({ journeyId: 'google-pay-direct', method: 'google-pay', restart: true, amountMinor: original.order.amount.minor })
         await route.fulfill({ json: { orderId: 'new-order-google' } })
       })
       await gotoHydrated(page, '/halden/direct/order-google')

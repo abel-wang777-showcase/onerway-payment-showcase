@@ -1,3 +1,4 @@
+import { parsePaymentAmount, paymentAmountText } from '#shared/payment/amount'
 import type { JourneyId } from '#shared/payment/journey'
 import type { LocationQuery } from 'vue-router'
 import {
@@ -103,6 +104,7 @@ interface HubState {
   journeyId: JourneyId
   billingMode: 'payment' | 'subscription'
   subscriptionPlanId: SubscriptionPlanId
+  amountInput?: string
 }
 
 function defaultMethod(integration: IntegrationId): PaymentMethodId {
@@ -140,6 +142,7 @@ function readQuery(query: LocationQuery): HubState {
     journeyId: matchingJourney(selection, requested),
     billingMode: query.mode === 'subscription' && journey.integration !== 'direct-api' ? 'subscription' : 'payment',
     subscriptionPlanId: isSubscriptionPlanId(query.plan) ? query.plan : 'halden-daily-essentials-v1',
+    ...(query.amount !== undefined ? { amountInput: typeof query.amount === 'string' ? query.amount : '' } : {}),
   }
 }
 
@@ -174,9 +177,15 @@ export function useHubSelection() {
   const journeyId = computed({
     get: () => state.value.journeyId,
     set: (id: JourneyId) => {
-      if (matchesJourney(id, selection.value)) state.value = { ...state.value, journeyId: id }
+      if (matchesJourney(id, selection.value)) state.value = { ...state.value, journeyId: id, amountInput: undefined }
     },
   })
+  const amountInput = computed({
+    get: () => state.value.amountInput ?? paymentAmountText(getJourney(journeyId.value).amount),
+    set: (value: string) => { state.value = { ...state.value, amountInput: value } },
+  })
+  const amountMinor = computed(() => parsePaymentAmount(amountInput.value))
+  const customAmount = computed(() => amountMinor.value !== getJourney(journeyId.value).amount)
   const billingMode = computed({
     get: () => state.value.billingMode,
     set: (mode: HubState['billingMode']) => {
@@ -192,7 +201,10 @@ export function useHubSelection() {
 
   // Read the router immediately: Nuxt's deferred route can replay an older query after a new selection.
   // Our own replace is only URL persistence; only external navigation restores selection state.
-  watch(() => route.value.query, (query) => {
+  watch(() => route.value.query, (query, previous) => {
+    // Hash-only navigation must not discard an in-progress or invalid amount edit.
+    if (Object.keys(query).length === Object.keys(previous).length
+      && Object.keys(query).every(key => JSON.stringify(query[key]) === JSON.stringify(previous[key]))) return
     if (route.value.path !== '/' || [...pendingQueries].some(pending => matchesQuery(query, pending))) return
     state.value = readQuery(query)
   }, { flush: 'sync' })
@@ -203,6 +215,8 @@ export function useHubSelection() {
       method: selection.value.method,
       mode: billingMode.value,
       ...(billingMode.value === 'subscription' ? { plan: subscriptionPlanId.value } : {}),
+      ...(billingMode.value === 'payment' && state.value.amountInput !== undefined && amountMinor.value !== null
+        ? { amount: paymentAmountText(amountMinor.value) } : {}),
     }
     if (matchesQuery(route.value.query, query)) return
     // Only allowlisted demo choices enter the URL, never provider or capability parameters.
@@ -253,8 +267,8 @@ export function useHubSelection() {
   })))
 
   const journey = computed(() => getJourney(journeyId.value))
-  const amount = computed(() => formatMoney({
-    minor: billingMode.value === 'subscription' ? subscriptionPlan.value.amount.minor : journey.value.amount,
+  const amount = computed(() => billingMode.value === 'payment' && amountMinor.value === null ? '—' : formatMoney({
+    minor: billingMode.value === 'subscription' ? subscriptionPlan.value.amount.minor : amountMinor.value!,
     currency: billingMode.value === 'subscription' ? subscriptionPlan.value.amount.currency : journey.value.currency,
   }))
 
@@ -279,7 +293,7 @@ export function useHubSelection() {
   ])
 
   return {
-    selection, billingMode, subscriptionPlanId, subscriptionPlan, billingItems,
+    selection, billingMode, subscriptionPlanId, subscriptionPlan, billingItems, amountInput, amountMinor, customAmount,
     scenes, integrations, methods, journeyId, journeyItems, journey, amount, passportFacts,
     sceneLabels, integrationLabels, methodLabels, statusLabels,
   }

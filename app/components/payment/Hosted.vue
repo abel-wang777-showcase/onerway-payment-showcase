@@ -26,7 +26,7 @@ const lines = computed(() => current.value ? [
 const details = computed(() => current.value ? [
   { label: 'integration', value: 'checkout' },
   { label: contract.value ? 'subscriptionPlan' : 'journey', value: contract.value?.planId ?? journey.value?.id ?? 'unavailable' },
-  { label: 'threeDSJourney', value: contract.value || journey.value?.id === 'hosted-checkout-three-ds' ? 'challenge' : 'not-selected' },
+  { label: 'threeDSJourney', value: contract.value || (journey.value?.id === 'hosted-checkout-three-ds' && current.value?.order.amount.minor === journey.value.amount) ? 'challenge' : 'provider-determined' },
   { label: 'orderId', value: current.value.order.id },
   { label: 'attemptId', value: current.value.attempt.id },
   { label: 'merchantTxnId', value: current.value.attempt.merchantTxnId ?? 'unavailable' },
@@ -112,7 +112,7 @@ onMounted(async () => {
           <p class="mt-2 text-sm leading-relaxed text-toned">
             {{ authorization ? 'Enter card details and complete any required authentication on Onerway Checkout. Authorizing this order does not charge your card.' : 'Onerway shows the methods enabled for this merchant and eligible for your country, currency and device. Enter payment details only on that page.' }}
           </p>
-          <p v-if="journey?.id === 'hosted-checkout-three-ds'" class="mt-2 text-sm leading-relaxed text-toned">
+          <p v-if="journey?.id === 'hosted-checkout-three-ds' && current.order.amount.minor === journey.amount" class="mt-2 text-sm leading-relaxed text-toned">
             Select Card to test the USD 50.00 Sandbox 3DS challenge. Complete authentication on the hosted page; Onerway Store verifies the payment after your return. Selecting another method does not verify this 3DS journey.
           </p>
           <p v-if="contract" class="mt-2 text-sm leading-relaxed text-toned">
@@ -132,7 +132,7 @@ onMounted(async () => {
         <UAlert v-if="error" :description="error" color="warning" variant="subtle" role="alert" />
         <div v-if="!canOpenCheckout && !authorization" class="flex flex-wrap gap-3">
           <UButton label="Verify existing payment" icon="i-lucide-shield-check" :disabled="busy" :loading="stage === 'verifying'" class="min-h-11" @click="verify()" />
-          <UButton v-if="journey && !contract" label="Start a separate Sandbox order" variant="outline" color="neutral" :disabled="busy" class="min-h-11" @click="start(journey.id, true)" />
+          <UButton v-if="journey && !contract" label="Start a separate Sandbox order" variant="outline" color="neutral" :disabled="busy" class="min-h-11" @click="start(journey.id, true, current.attempt.method, current.order.amount.minor)" />
           <UButton v-if="contract" to="/?mode=subscription&journey=hosted-checkout" label="Return to subscription options" variant="outline" color="neutral" class="min-h-11" />
         </div>
         <section aria-label="Payment references" class="min-w-0 rounded-lg border border-default p-5">

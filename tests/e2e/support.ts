@@ -34,13 +34,13 @@ export async function installSimulationGate(page: Page): Promise<SimulationGate>
 
 export async function selectHubOption(
   page: Page,
-  field: 'Billing experience' | 'Payment method' | 'Payment journey',
+  field: 'Billing experience' | 'Payment method' | 'Journey preset',
   option: string,
 ): Promise<void> {
   const select = page.getByRole('combobox', { name: field, exact: true })
   await select.click()
   await page.getByRole('option', { name: option, exact: true }).click()
-  await expect(select).toContainText(option)
+  await expect(select).toContainText(field === 'Journey preset' ? option.replace(/^USD [\d,.]+ · /, '') : option)
 }
 
 export async function gotoHydrated(page: Page, path = '/'): Promise<void> {

@@ -1,6 +1,7 @@
 import { DirectGatewayError, buildDirectPayload, directRequestEvidence, postDirect, queryDirectPayment, readDirectCreateResponse, readDirectQueryResponse, type DirectQueryContext, type DirectTransaction } from './direct-gateway'
 import type { GooglePayConfiguration } from '../../shared/payment/google-pay'
 import type { Order } from '../../shared/payment/order'
+import { isPaymentAmount, paymentAmountText } from '../../shared/payment/amount'
 import type { CreateContext } from './gateway'
 import { googlePayTokenInfo, readGooglePayRedirectUrl } from '../../shared/payment/google-pay'
 import type { ServerProfile } from './profile'
@@ -14,8 +15,8 @@ function assertContext(profile: ServerProfile, order: Order): void {
   if (profile.profile !== 'sandbox' || profile.transactionPolicy !== 'sandbox-only') {
     throw new DirectGatewayError('PROFILE_PRODUCTION_LOCKED')
   }
-  if (order.scene !== 'ecommerce' || order.amount.currency !== 'USD' || order.amount.minor !== 500
-    || order.item.unitAmount.currency !== 'USD' || order.item.quantity * order.item.unitAmount.minor !== 500) {
+  if (order.scene !== 'ecommerce' || order.amount.currency !== 'USD' || !isPaymentAmount(order.amount.minor)
+    || order.item.unitAmount.currency !== 'USD' || order.item.quantity * order.item.unitAmount.minor !== order.amount.minor) {
     throw new DirectGatewayError('PAYMENT_ORDER_INVALID')
   }
 }
@@ -42,7 +43,7 @@ export function readGooglePayConfiguration(value: unknown, profile: ServerProfil
     allowedCardNetworks: [...new Set(method.subCardTypes as string[])],
     // Required by Onerway's Google Pay contract, not inferred from consult's network list.
     allowedAuthMethods: ['PAN_ONLY', 'CRYPTOGRAM_3DS'],
-    countryCode: 'US', currencyCode: 'USD', totalPrice: '5.00',
+    countryCode: 'US', currencyCode: 'USD', totalPrice: paymentAmountText(order.amount.minor),
   }
 }
 
@@ -51,7 +52,7 @@ export async function consultGooglePay(profile: ServerProfile, order: Order): Pr
   if (profile.profile !== 'sandbox') throw new DirectGatewayError('PROFILE_PRODUCTION_LOCKED')
   const value = await postDirect(profile, '/v1/txn/consultPaymentMethod', {
     merchantNo: profile.merchantNo, appId: profile.appId,
-    country: 'US', orderAmount: '5.00', orderCurrency: 'USD', paymentMode: 'WEB', subProductType: 'DIRECT',
+    country: 'US', orderAmount: paymentAmountText(order.amount.minor), orderCurrency: 'USD', paymentMode: 'WEB', subProductType: 'DIRECT',
   }, 'GooglePay')
   return readGooglePayConfiguration(value, profile, order)
 }

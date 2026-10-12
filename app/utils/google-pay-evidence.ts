@@ -1,3 +1,4 @@
+import { parsePaymentAmount, paymentAmountText } from '#shared/payment/amount'
 import type { DirectRecoveryResponse } from '#shared/payment/apple-pay'
 import type { PrepareGooglePayResponse } from '#shared/payment/google-pay'
 import type { PaymentEvidence } from '#shared/payment/protocol'
@@ -14,12 +15,14 @@ const date = (value: unknown): string | undefined => typeof value === 'string' &
 
 export function googlePreparationEvidence(value: PrepareGooglePayResponse): PaymentEvidence {
   const config = value.config
+  const amount = config.currencyCode === 'USD' && value.order.amount.currency === 'USD' && parsePaymentAmount(config.totalPrice) === value.order.amount.minor
+    ? paymentAmountText(value.order.amount.minor) : 'Not returned'
   const cardNetworks = config.allowedCardNetworks.filter(network => networks.has(network))
   const authMethods = config.allowedAuthMethods.filter(method => ['PAN_ONLY', 'CRYPTOGRAM_3DS'].includes(method))
   const gateway = /^[a-z0-9_-]{1,64}$/.test(config.gateway) ? config.gateway : 'Not returned'
   return { source: 'live', summary: 'The server returned Google Pay configuration for this order.',
-    fields: [field('Amount', 'USD 5.00'), field('Country', 'US'), field('Google environment', 'TEST'), field('Onerway environment', 'Sandbox'), field('Gateway', gateway), field('Networks', cardNetworks.join(', ')), field('Can authorize this order', String(value.canAuthorize === true))],
-    response: json({ environment: 'TEST', gateway, gatewayMerchantId: reference(config.gatewayMerchantId), allowedCardNetworks: cardNetworks, allowedAuthMethods: authMethods, countryCode: 'US', currencyCode: 'USD', totalPrice: '5.00', canAuthorize: value.canAuthorize === true }) }
+    fields: [field('Amount', amount === 'Not returned' ? amount : `USD ${amount}`), field('Country', 'US'), field('Google environment', 'TEST'), field('Onerway environment', 'Sandbox'), field('Gateway', gateway), field('Networks', cardNetworks.join(', ')), field('Can authorize this order', String(value.canAuthorize === true))],
+    response: json({ environment: 'TEST', gateway, gatewayMerchantId: reference(config.gatewayMerchantId), allowedCardNetworks: cardNetworks, allowedAuthMethods: authMethods, countryCode: 'US', currencyCode: 'USD', totalPrice: amount, canAuthorize: value.canAuthorize === true }) }
 }
 
 export function googleReadinessEvidence(eligible: boolean): PaymentEvidence {
@@ -46,8 +49,8 @@ export function googleSubmissionEvidence(value: DirectRecoveryResponse, request?
       const parsed = JSON.parse(request)
       if (parsed?.method === 'POST' && parsed?.path === '/v1/txn/doTransaction'
         && parsed.body?.productType === 'CARD' && parsed.body?.subProductType === 'DIRECT'
-        && parsed.body?.txnType === 'SALE' && parsed.body?.orderAmount === '5.00' && parsed.body?.orderCurrency === 'USD') {
-        safeRequest = json({ method: 'POST', path: '/v1/txn/doTransaction', body: { orderAmount: '5.00', orderCurrency: 'USD', productType: 'CARD', subProductType: 'DIRECT', txnType: 'SALE', tokenInfo: JSON.stringify({ provider: 'GooglePay', tokenId: '[original token string omitted]' }), sign: '[signature omitted]' } })
+        && parsed.body?.txnType === 'SALE' && typeof parsed.body?.orderAmount === 'string' && parsePaymentAmount(parsed.body.orderAmount) === value.order.amount.minor && value.order.amount.currency === 'USD' && parsed.body?.orderCurrency === 'USD') {
+        safeRequest = json({ method: 'POST', path: '/v1/txn/doTransaction', body: { orderAmount: paymentAmountText(value.order.amount.minor), orderCurrency: 'USD', productType: 'CARD', subProductType: 'DIRECT', txnType: 'SALE', tokenInfo: JSON.stringify({ provider: 'GooglePay', tokenId: '[original token string omitted]' }), sign: '[signature omitted]' } })
       }
     }
     catch { /* Unknown evidence is omitted, never displayed as raw text. */ }

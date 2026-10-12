@@ -10,6 +10,8 @@ const emit = defineEmits<{
   'update:modelValue': [value: string]
 }>()
 
+const selectedLabel = computed(() => props.items.find(item => item.value === props.modelValue)?.label.replace(/^USD [\d,.]+ · /, '') ?? '')
+
 const value = computed({
   get: () => props.modelValue,
   set: next => emit('update:modelValue', next),
@@ -17,14 +19,16 @@ const value = computed({
 </script>
 
 <template>
-  <UFormField label="Payment journey" name="payment-journey" class="col-span-2 min-w-0">
+  <UFormField label="Journey preset" name="payment-journey" class="min-w-0">
     <USelect
       v-model="value"
-      aria-label="Payment journey"
+      aria-label="Journey preset"
       :items="items"
       size="lg"
       class="min-h-11 w-full"
       :ui="{ value: 'whitespace-normal text-start', item: 'min-h-11', itemLabel: 'whitespace-normal' }"
-    />
+    >
+      <span class="min-w-0 whitespace-normal text-start">{{ selectedLabel }}</span>
+    </USelect>
   </UFormField>
 </template>

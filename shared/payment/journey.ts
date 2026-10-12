@@ -1,6 +1,7 @@
 import type { IntegrationId, PaymentMethodId, SceneId } from './capability'
 import type { Currency, Order } from './order'
 import type { DemoStage } from './state'
+import { isPaymentAmount } from './amount'
 
 export const JOURNEY_IDS = [
   'apple-pay-direct',
@@ -265,9 +266,9 @@ export function findOrderJourney(order: Order): Journey | null {
       && journey.item === order.item.name
       && journey.variant === order.item.variant
       && order.item.quantity === 1
-      && journey.amount === order.item.unitAmount.minor
+      && order.amount.minor === order.item.unitAmount.minor
       && journey.currency === order.item.unitAmount.currency
-      && journey.amount === order.amount.minor
+      && (journey.modes.includes('sandbox') ? isPaymentAmount(order.amount.minor) : journey.amount === order.amount.minor)
       && journey.currency === order.amount.currency,
     ) ?? null
 }

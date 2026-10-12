@@ -129,7 +129,7 @@ const actionItems = computed(() => {
 })
 const amount = computed(() => current.value ? formatMoney(current.value.order.amount) : '')
 const journey = computed(() => current.value ? findOrderJourney(current.value.order) : null)
-const challenge = computed(() => Boolean(currentSubscription.value) || journey.value?.id === 'three-ds-success')
+const challenge = computed(() => Boolean(currentSubscription.value) || (journey.value?.id === 'three-ds-success' && current.value?.order.amount.minor === journey.value.amount))
 const expectedMethodLabel = computed(() => {
   const labels: Record<PaymentMethodId, string> = {
     card: 'Card',
@@ -205,7 +205,7 @@ async function restart(): Promise<void> {
   const selected = journey.value
 
   if (selected && current.value && !busy.value) {
-    await start(selected.id, true, current.value.attempt.method)
+    await start(selected.id, true, current.value.attempt.method, current.value.order.amount.minor)
   }
 }
 
@@ -396,7 +396,7 @@ onMounted(async () => {
           </h1>
           <p class="mt-3 max-w-2xl text-sm leading-relaxed text-toned">
             A signed {{ amount }} {{ currentSubscription ? 'initial subscription' : '' }} payment was created by the server with all merchant-enabled SDK payment methods.
-            {{ challenge ? 'This journey requires a 3DS Challenge. Automatic return is preferred; if Onerway keeps the browser on its result page, reopen this Showcase to recover the same payment.' : 'This controlled journey is expected to complete without a 3DS Challenge.' }}
+            {{ challenge ? 'This journey requires a 3DS Challenge. Automatic return is preferred; if Onerway keeps the browser on its result page, reopen this Showcase to recover the same payment.' : 'Any required authentication is determined by the payment provider.' }}
             {{ expectedWalletLabel
               ? `For this acceptance target, use the ${expectedWalletLabel} button only if the SDK renders it. The merchant Card action remains available as a fallback and does not prove ${expectedWalletLabel} eligibility.`
               : 'Use only controlled Onerway Sandbox payment data in the hosted SDK surface.' }}
