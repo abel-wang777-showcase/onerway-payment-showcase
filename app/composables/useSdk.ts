@@ -1137,12 +1137,14 @@ export function useSdk() {
 
     const flight = (async () => {
       try {
-        if (result.cancelled) {
+        if (result.cancelled || result.reasonType === 'validation_error') {
           resubmitAttempt = current.attempt.id
           resultAttempt.value = null
           submittedAttempt.value = null
           stage.value = 'ready'
-          setNotice('The payment step was closed. You can try again with this existing payment.')
+          setNotice(result.cancelled
+            ? 'The payment step was closed. You can try again with this existing payment.'
+            : 'Check the payment details in the secure form, then try again with this existing payment.')
           return
         }
 

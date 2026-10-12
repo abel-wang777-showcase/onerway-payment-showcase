@@ -1611,6 +1611,153 @@ describe('SDK composable lifecycle', () => {
     expect(state.get('sdk-stage')?.value).toBe('succeeded')
   })
 
+  it('keeps the same Checkout editable across repeated confirm validation errors without reclaiming submission', async () => {
+    const state = new Map<string, { value: unknown }>([
+      ['sdk-session', { value: unclaimedSession() }],
+      ['sdk-stage', { value: 'ready' }],
+    ])
+    const invalid = {
+      paymentId: 'payment-1',
+      paymentMethod: 'VISA',
+      reason: { type: 'validation_error', code: 'FORM_INCOMPLETE', message: 'Complete the required fields' },
+    }
+    const confirm = vi.fn()
+      .mockResolvedValueOnce(invalid)
+      .mockResolvedValueOnce(invalid)
+      .mockResolvedValueOnce({ paymentId: 'payment-1', paymentMethod: 'VISA', paymentStatus: 'S' })
+    const fetch = claimFetch(queried('succeeded', 'S'))
+    const navigate = vi.fn()
+
+    stubState(state)
+    vi.stubGlobal('onScopeDispose', vi.fn())
+    vi.stubGlobal('$fetch', fetch)
+    vi.stubGlobal('navigateTo', navigate)
+    vi.stubGlobal('crypto', { randomUUID: () => 'event-client-corrected-form' })
+
+    const { useSdk } = await import('../app/composables/useSdk')
+    const sdk = useSdk()
+
+    for (let submission = 1; submission <= 2; submission += 1) {
+      await sdk.submit(confirm)
+
+      expect(confirm).toHaveBeenCalledTimes(submission)
+      expect(sdk.stage.value).toBe('ready')
+      expect(sdk.submitted.value).toBe(false)
+      expect(sdk.failure.value).toBeNull()
+      expect(sdk.elementRevision.value).toBe(0)
+      expect(sdk.session.value).toMatchObject({
+        paymentId: 'payment-1',
+        attempt: { id: 'attempt-1', submissionStartedAt: session().attempt.submissionStartedAt },
+        events: [],
+      })
+      expect(fetch.mock.calls.map(([url]) => url)).toEqual(['/api/payment/submit'])
+      expect(navigate).not.toHaveBeenCalled()
+    }
+
+    await sdk.submit(confirm)
+
+    expect(confirm).toHaveBeenCalledTimes(3)
+    expect(fetch.mock.calls.map(([url]) => url)).toEqual(['/api/payment/submit', '/api/payment/query'])
+    expect(sdk.session.value?.events).toEqual([
+      expect.objectContaining({ source: 'client', status: 'processing', rawStatus: 'S' }),
+      expect.objectContaining({ source: 'query', status: 'succeeded', rawStatus: 'S' }),
+    ])
+    expect(sdk.stage.value).toBe('succeeded')
+    expect(navigate).toHaveBeenCalledWith('/halden/result/order-1', { replace: true })
+  })
+
+  it('accepts a successful SDK callback after repeated validation errors without creating payment facts for the errors', async () => {
+    const current = unclaimedSession()
+    const state = new Map<string, { value: unknown }>([
+      ['sdk-session', { value: current }],
+      ['sdk-stage', { value: 'ready' }],
+    ])
+    const fetch = vi.fn().mockResolvedValueOnce(queried('succeeded', 'S'))
+    const navigate = vi.fn()
+
+    stubState(state)
+    vi.stubGlobal('onScopeDispose', vi.fn())
+    vi.stubGlobal('$fetch', fetch)
+    vi.stubGlobal('navigateTo', navigate)
+    vi.stubGlobal('crypto', { randomUUID: () => 'event-client-corrected-callback' })
+
+    const { useSdk } = await import('../app/composables/useSdk')
+    const sdk = useSdk()
+
+    for (let callback = 0; callback < 2; callback += 1) {
+      await sdk.acceptResult({
+        paymentId: 'payment-1',
+        paymentMethod: 'VISA',
+        reason: { type: 'validation_error' },
+      })
+
+      expect(sdk.stage.value).toBe('ready')
+      expect(sdk.submitted.value).toBe(false)
+      expect(sdk.failure.value).toBeNull()
+      expect(sdk.elementRevision.value).toBe(0)
+      expect(sdk.session.value).toEqual(current)
+      expect(fetch).not.toHaveBeenCalled()
+      expect(navigate).not.toHaveBeenCalled()
+    }
+
+    await sdk.acceptResult({ paymentId: 'payment-1', paymentMethod: 'VISA', paymentStatus: 'S' })
+
+    expect(fetch.mock.calls.map(([url]) => url)).toEqual(['/api/payment/query'])
+    expect(sdk.session.value?.events).toEqual([
+      expect.objectContaining({ source: 'client', status: 'processing', rawStatus: 'S' }),
+      expect.objectContaining({ source: 'query', status: 'succeeded', rawStatus: 'S' }),
+    ])
+    expect(sdk.stage.value).toBe('succeeded')
+  })
+
+  it('does not restore the live validation retry permission after leaving and recovering the claimed payment', async () => {
+    const state = new Map<string, { value: unknown }>([
+      ['sdk-session', { value: unclaimedSession() }],
+      ['sdk-stage', { value: 'ready' }],
+    ])
+    const invalid = { paymentId: 'payment-1', reason: { type: 'validation_error' } }
+    const confirm = vi.fn().mockResolvedValue(invalid)
+    const fetch = claimFetch()
+    let dispose = () => {}
+
+    stubState(state)
+    vi.stubGlobal('onScopeDispose', (callback: () => void) => dispose = callback)
+    vi.stubGlobal('$fetch', fetch)
+    vi.stubGlobal('navigateTo', vi.fn())
+
+    const { useSdk } = await import('../app/composables/useSdk')
+    const sdk = useSdk()
+    await sdk.submit(confirm)
+    expect(sdk.stage.value).toBe('ready')
+    expect(sdk.session.value?.attempt.submissionStartedAt).toBe(session().attempt.submissionStartedAt)
+
+    const persisted = sdk.session.value!
+    dispose()
+    fetch.mockResolvedValueOnce({ ...persisted, submitted: true })
+    const restored = useSdk()
+    await expect(restored.recover('order-1')).resolves.toBe(true)
+
+    await sdk.acceptResult(invalid)
+    await restored.acceptResult(invalid)
+    await restored.submit(confirm)
+
+    expect(restored.stage.value).toBe('not_completed')
+    expect(restored.submitted.value).toBe(true)
+    expect(restored.session.value?.attempt.submissionStartedAt).toBe(persisted.attempt.submissionStartedAt)
+    expect(restored.session.value?.events).toHaveLength(0)
+    expect(confirm).toHaveBeenCalledOnce()
+    expect(fetch.mock.calls.map(([url]) => url)).toEqual(['/api/payment/submit', '/api/payment/recover'])
+
+    fetch.mockResolvedValueOnce(queried('processing', 'P'))
+    await restored.verify(1)
+
+    expect(fetch.mock.calls.map(([url]) => url)).toEqual(['/api/payment/submit', '/api/payment/recover', '/api/payment/query'])
+    expect(restored.submitted.value).toBe(true)
+    expect(restored.session.value?.events).toEqual([
+      expect.objectContaining({ source: 'query', status: 'processing', rawStatus: 'P' }),
+    ])
+  })
+
   it('shows a sanitized SDK diagnostic without inventing processing', async () => {
     const state = new Map<string, { value: unknown }>([
       ['sdk-session', { value: session() }],
