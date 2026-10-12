@@ -14,8 +14,8 @@ for (const width of [320, 390, 834, 1440]) {
     await page.screenshot({ path: testInfo.outputPath(`hub-${width}.png`) })
 
     if (width < 961) {
-      await page.getByRole('link', { name: 'Customize your demo' }).click()
-      await expect(page.getByRole('heading', { name: 'Make it your demo.' })).toBeInViewport()
+      await page.getByRole('link', { name: 'Customize', exact: true }).click()
+      await expect(page.locator('#matrix-title')).toBeInViewport()
       await page.getByRole('navigation', { name: 'Quick demo navigation' }).getByRole('link').click()
       await expect(launch).toBeInViewport()
     }
@@ -46,6 +46,7 @@ test('keeps the selected wallet across integrations and gives Direct-specific gu
   await expect(page.locator('#demo-launch')).toContainText('Halden checks the Direct API payment result')
   await expect(page.locator('#demo-launch')).not.toContainText('SDK renders')
   await expect(page).toHaveURL(/journey=google-pay-direct/)
+  await page.setViewportSize({ width: 834, height: 900 })
   await page.getByRole('navigation', { name: 'Demo sections' }).getByRole('link', { name: 'Review & start' }).click()
   await expect(methodRadio(page, 'google-pay')).toBeChecked()
   await expect(page).toHaveURL(/journey=google-pay-direct/)
@@ -58,12 +59,35 @@ test('keeps the selected wallet across integrations and gives Direct-specific gu
   await page.getByRole('group', { name: 'Billing experience' }).locator('[role="radio"][value="subscription"]').click()
   await expect(page.getByRole('group', { name: 'Payment method', exact: true })).toHaveCount(0)
   await expect(page.locator('#demo-launch')).toContainText('SDK available methods')
-  await page.getByRole('link', { name: 'Customize your demo' }).click()
+  await page.getByRole('link', { name: 'Customize', exact: true }).click()
   await expect(page.getByRole('group', { name: 'Billing experience' }).locator('[role="radio"][value="subscription"]')).toBeChecked()
   gate.assertClean()
 })
 
-test('keeps mobile controls readable in dark mode and with reduced motion', async ({ page }) => {
+for (const width of [1024, 1366, 1440]) {
+  for (const [name, query] of [
+    ['sdk', ''],
+    ['checkout', '?journey=hosted-checkout'],
+    ['wallet', '?journey=standard-success&method=apple-pay'],
+    ['subscription', '?mode=subscription'],
+  ]) {
+    test(`fits desktop ${name} choices and launch in one screen at ${width}px`, async ({ page }, testInfo) => {
+      const gate = await installSimulationGate(page)
+      await page.setViewportSize({ width, height: 768 })
+      await gotoHydrated(page, `/${query}`)
+      await page.screenshot({ path: testInfo.outputPath(`compact-${width}-${name}.png`) })
+      const lastChoice = page.locator('#demo-selection [data-slot="item"]:visible').last()
+      const bounds = await lastChoice.boundingBox()
+      expect(bounds).not.toBeNull()
+      expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(768)
+      await expect(page.locator('#demo-launch button').first()).toBeInViewport({ ratio: 1 })
+      await expectNoHorizontalOverflow(page)
+      gate.assertClean()
+    })
+  }
+}
+
+test('keeps mobile controls readable in dark mode and with reduced motion', async ({ page }, testInfo) => {
   await installSimulationGate(page)
   await page.emulateMedia({ colorScheme: 'dark', reducedMotion: 'reduce' })
   await page.setViewportSize({ width: 390, height: 844 })
@@ -71,12 +95,13 @@ test('keeps mobile controls readable in dark mode and with reduced motion', asyn
   await expect(page.locator('html')).toHaveClass(/dark/)
   await expect(page.getByRole('button', { name: 'Start a new real Sandbox checkout' })).toBeInViewport()
   await expectNoHorizontalOverflow(page)
-  await page.getByRole('link', { name: 'Customize your demo' }).click()
+  await page.getByRole('link', { name: 'Customize', exact: true }).click()
   const integration = page.getByRole('group', { name: 'Integration', exact: true })
   await integration.locator('[role="radio"][value="web-js-sdk"]').focus()
   await page.keyboard.down('ArrowDown')
   await expect(integration.locator('[role="radio"][value="checkout"]')).toBeChecked()
   await page.keyboard.up('ArrowDown')
+  await page.screenshot({ path: testInfo.outputPath('compact-mobile-dark.png') })
 })
 
 test('centers the theme icon inside its touch target in both themes', async ({ page }) => {

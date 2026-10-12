@@ -20,29 +20,17 @@ const value = computed({
 <template>
   <section
     aria-labelledby="journey-title"
-    class="min-w-0 space-y-4"
+    class="min-w-0"
   >
-    <div class="space-y-2">
-      <h2
-        id="journey-title"
-        class="text-2xl font-semibold tracking-tight text-highlighted"
-      >
-        {{ hosted ? 'Choose your hosted payment.' : 'What would you like to demonstrate?' }}
-      </h2>
-      <p class="text-sm leading-relaxed text-toned">
-        {{ hosted ? 'Choose a journey, then pay on Onerway. Halden checks the result when you return.' : 'Choose a standard Sandbox payment or a 3DS challenge with the Web JS SDK. Halden verifies the payment result.' }}
-      </p>
-    </div>
-
+    <h2 id="journey-title" class="sr-only">{{ hosted ? 'Hosted payment journey' : 'SDK payment journey' }}</h2>
     <URadioGroup
       v-model="value"
       legend="Payment journey"
       :items="items"
       variant="card"
       indicator="end"
-      size="lg"
       class="min-w-0"
-      :ui="{ fieldset: 'grid gap-3 sm:grid-cols-2', description: 'text-toned', item: 'min-w-0' }"
+      :ui="{ fieldset: hosted ? 'grid gap-2 md:grid-cols-3' : 'grid gap-2 sm:grid-cols-2', description: 'sr-only', item: 'min-h-11 min-w-0 p-3' }"
     />
   </section>
 </template>

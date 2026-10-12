@@ -18,7 +18,7 @@ defineProps<{
     id="demo-launch"
     aria-labelledby="passport-title"
     tabindex="-1"
-    class="demo-passport min-w-0 scroll-mt-6 rounded-lg border border-default bg-muted p-5 focus-visible:outline-2 focus-visible:outline-primary sm:p-6 lg:sticky lg:top-8"
+    class="demo-passport min-w-0 scroll-mt-6 rounded-lg border border-default bg-muted p-5 focus-visible:outline-2 focus-visible:outline-primary lg:sticky lg:top-6"
   >
     <div class="flex flex-wrap items-start justify-between gap-3">
       <p class="text-sm font-medium text-toned">
@@ -37,23 +37,23 @@ defineProps<{
       {{ title }}
     </h2>
 
-    <p class="mt-3 text-sm leading-relaxed text-toned">
+    <p class="mt-2 text-sm leading-relaxed text-toned">
       {{ description }}
     </p>
 
-    <p class="mt-5 text-3xl font-semibold tracking-tight text-highlighted tabular-nums">
+    <p class="mt-4 text-3xl font-semibold tracking-tight text-highlighted tabular-nums">
       {{ amount }}
     </p>
 
     <slot />
 
-    <dl class="mt-6 divide-y divide-default border-y border-default">
+    <dl class="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 border-y border-default py-3">
       <div
         v-for="fact in facts"
         :key="fact.label"
-        class="flex flex-wrap justify-between gap-x-4 gap-y-1 py-2 text-sm"
+        class="min-w-0 text-sm"
       >
-        <dt class="text-toned">
+        <dt class="text-xs text-toned">
           {{ fact.label }}
         </dt>
         <dd class="min-w-0 break-words font-medium text-highlighted">

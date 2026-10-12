@@ -209,14 +209,17 @@ onMounted(async () => {
 
 <template>
   <UContainer class="pb-24 lg:pb-0">
-    <section class="py-8 sm:py-12">
-      <div class="max-w-3xl">
-        <div class="mb-4 flex flex-wrap items-center gap-2">
-          <UBadge
-            label="Sandbox payment demo"
-            color="primary"
-            variant="soft"
-          />
+    <section class="py-5 sm:py-6">
+      <div class="flex flex-wrap items-start justify-between gap-3">
+        <div class="min-w-0">
+          <h1 class="text-balance text-2xl font-semibold tracking-tight text-highlighted sm:text-3xl">
+            From checkout to confirmation.
+          </h1>
+          <p class="mt-2 max-w-2xl text-pretty text-sm text-toned">
+            Choose how your customers pay. Try the complete Halden purchase in Sandbox.
+          </p>
+        </div>
+        <div class="flex flex-wrap items-center gap-2">
           <UBadge
             :label="profileLabel"
             color="neutral"
@@ -224,20 +227,15 @@ onMounted(async () => {
           />
         </div>
 
-        <h1 class="text-balance text-3xl font-semibold tracking-tight text-highlighted sm:text-4xl lg:text-5xl">
-          From checkout to confirmation.
-        </h1>
-        <p class="mt-4 max-w-2xl text-pretty text-base leading-relaxed text-toned">
-          Experience a Halden purchase as your customer would. Choose an integration and try a payment in Sandbox.
-        </p>
-        <nav aria-label="Demo sections" class="mt-5 flex flex-wrap gap-3">
-          <UButton :to="{ query: route.query, hash: '#demo-selection' }" label="Customize your demo" color="neutral" variant="outline" class="min-h-11" />
-          <UButton :to="{ query: route.query, hash: '#demo-launch' }" label="Review & start" color="neutral" variant="ghost" class="min-h-11" trailing-icon="i-lucide-arrow-down" />
-        </nav>
       </div>
 
-      <div class="mt-8 grid min-w-0 gap-8 border-t border-default pt-8 lg:grid-cols-[minmax(0,1fr)_24rem] lg:items-start">
-        <div class="min-w-0 space-y-8 lg:col-start-1 lg:row-start-1">
+      <nav aria-label="Demo sections" class="mt-3 flex flex-wrap gap-2 lg:hidden">
+        <UButton :to="{ query: route.query, hash: '#demo-selection' }" label="Customize" color="neutral" variant="outline" class="min-h-11" />
+        <UButton :to="{ query: route.query, hash: '#demo-launch' }" label="Review & start" color="neutral" variant="ghost" class="min-h-11" trailing-icon="i-lucide-arrow-down" />
+      </nav>
+
+      <div class="mt-5 grid min-w-0 gap-6 border-t border-default pt-5 lg:grid-cols-3 lg:items-start">
+        <div class="min-w-0 space-y-4 lg:col-span-2 lg:col-start-1 lg:row-start-1">
           <HubMatrix
             v-model="selection"
             :scenes="scenes"
@@ -250,21 +248,22 @@ onMounted(async () => {
               legend="Billing experience"
               :items="billingItems"
               variant="card"
-              :ui="{ fieldset: 'grid gap-3 sm:grid-cols-2', description: 'text-toned' }"
+              :ui="{ fieldset: 'grid grid-cols-2 gap-2', item: 'min-h-11 min-w-0 p-3', description: 'sr-only' }"
             />
+            <template #journey>
+              <HubJourneyPicker
+                v-if="billingMode === 'payment' && ((journey.integration === 'web-js-sdk' && selection.method === 'card') || journey.integration === 'checkout')"
+                v-model="journeyId"
+                :items="journeyItems"
+                :hosted="journey.integration === 'checkout'"
+              />
+            </template>
           </HubMatrix>
-
-          <HubJourneyPicker
-            v-if="billingMode === 'payment' && ((journey.integration === 'web-js-sdk' && selection.method === 'card') || journey.integration === 'checkout')"
-            v-model="journeyId"
-            :items="journeyItems"
-            :hosted="journey.integration === 'checkout'"
-          />
 
         </div>
 
         <HubPassport
-          class="row-start-1 lg:col-start-2"
+          class="row-start-1 lg:col-start-3"
           :title="billingMode === 'subscription' ? subscriptionPlan.productName : journey.label"
           :description="billingMode === 'subscription'
             ? 'Pay USD 5.00 today, authorize daily merchant-managed billing, and complete the required first-payment 3DS in Sandbox.'
