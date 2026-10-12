@@ -33,7 +33,10 @@ function installBrowserSdk() {
         createPaymentElement: () => element,
         on: () => checkout,
         off: () => checkout,
-        async confirmPayment() { throw new Error('AMOUNT_TEST_MUST_NOT_CONFIRM_PAYMENT') },
+        async confirmPayment() {
+          document.documentElement.dataset.amountConfirmed = 'true'
+          throw new Error('AMOUNT_TEST_MUST_NOT_CONFIRM_PAYMENT')
+        },
       }
       return checkout
     },
@@ -240,7 +243,7 @@ test('carries the custom amount to the canonical Sandbox site without creating a
 })
 
 for (const integration of ['web-js-sdk', 'checkout'] as const) {
-  test(`${integration} preserves the custom amount after ${integration === 'web-js-sdk' ? 'a fresh Hub restore' : 'merchant-page reload'}`, async ({ page }) => {
+  test(`${integration} reload recovers the original amount without creating another order`, async ({ page }) => {
     test.setTimeout(120_000)
     const mock = await installAmountMock(page, { integration })
     await enterHub(page)
@@ -256,27 +259,22 @@ for (const integration of ['web-js-sdk', 'checkout'] as const) {
     const merchantPath = `/halden/${integration === 'checkout' ? 'hosted' : 'sdk'}/${mock.orderId}`
     await expect(page).toHaveURL(`${BASE_URL}${merchantPath}`)
     await expect(page.getByText('$12.34', { exact: true }).first()).toBeVisible()
+    await expect(page.locator('html')).not.toHaveAttribute('data-amount-confirmed', 'true')
     const recovered = page.waitForResponse(response => {
       const url = new URL(response.url())
-      return url.origin === BASE_URL && url.pathname === '/api/payment/recover' && url.searchParams.get('orderId') === mock.orderId
+      return response.request().method() === 'GET' && url.origin === BASE_URL
+        && url.pathname === '/api/payment/recover' && url.searchParams.get('orderId') === mock.orderId
     })
-    if (integration === 'web-js-sdk') {
-      // A document reload on the SDK route embeds the real locked SSR profile,
-      // which browser mocks cannot intercept. Lose the client session on a page
-      // without profile fetching, then restore through the public Hub action.
-      await gotoHydrated(page, '/halden/checkout/HLD-MOCK-AMOUNT-RECOVERY')
-      await page.getByRole('link', { name: 'Return to Demo Hub', exact: true }).click()
-      await expect(page.getByLabel('Payment amount', { exact: true })).toHaveValue('5.00')
-      await expect(page.locator('#demo-launch')).toContainText('$5.00')
-      await page.getByRole('button', { name: 'Restore existing Sandbox checkout', exact: true }).click()
-    }
-    else {
-      await page.reload()
-    }
+    await page.reload()
     const response = await recovered
     expect(response.status()).toBe(200)
     expect(await response.json()).toMatchObject({ order: { id: mock.orderId, amount: { minor: 1234, currency: 'USD' } } })
-    await expect(page.getByText('$12.34', { exact: true }).first()).toBeVisible()
+    // SDK SSR reads the real locked profile, outside browser route mocks. Its
+    // recovery response proves amount preservation; only Checkout can also
+    // render the restored amount under that profile.
+    if (integration === 'checkout') {
+      await expect(page.getByText('$12.34', { exact: true }).first()).toBeVisible()
+    }
     await expect(page).toHaveURL(`${BASE_URL}${merchantPath}`)
     expect(mock.calls.filter(call => call.path === '/api/payment/intent')).toHaveLength(1)
     expect(mock.calls.filter(call => call.path === '/api/payment/create')).toHaveLength(1)

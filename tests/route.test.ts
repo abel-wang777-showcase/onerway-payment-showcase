@@ -83,7 +83,9 @@ describe('application routes', () => {
     expect(html).not.toContain('Start a Separate Sandbox Order')
     expect(html).not.toContain('Restore existing Sandbox checkout')
     expect(html).toContain('role="combobox"')
-    expect(html).toContain('USD 5.00 · Standard success')
+    expect(html).toContain('Standard success')
+    expect(html).toMatch(/<input\b[^>]*aria-label="Payment amount"[^>]*>/)
+    expect(html).toContain('$5.00')
     expect(html).toContain('Sandbox profile · Sandbox only')
     expect(mainIds).toHaveLength(1)
 
