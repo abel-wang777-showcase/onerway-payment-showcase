@@ -85,7 +85,7 @@ test.describe('Google Pay Direct with synthetic provider boundary', () => {
       await expect(page.getByText('Sandbox profile · Sandbox only', { exact: true })).toBeVisible()
       await page.getByRole('group', { name: 'Integration', exact: true }).getByRole('tab', { name: 'Direct API', exact: true }).click()
       await selectHubOption(page, 'Payment method', 'Google Pay · Conditional')
-      const launch = page.getByRole('button', { name: entry === 'new order' ? 'Open Google Pay Sandbox' : 'Restore existing Sandbox order', exact: true })
+      const launch = page.getByRole('button', { name: entry === 'new order' ? 'Open Google Pay Sandbox' : 'Retry restoration', exact: true })
       await expect(launch).toBeEnabled()
       if (entry === 'restored order') recoveryAvailable = true
       await launch.click()
