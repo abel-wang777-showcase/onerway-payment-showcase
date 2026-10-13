@@ -683,7 +683,7 @@ describe('payment restoration pages', () => {
     action?.element.click()
     await nextTick()
 
-    expect(wrapper.text()).toContain('Restoring existing Sandbox checkout…')
+    expect(wrapper.text()).toContain('Restoring existing Sandbox order…')
     expect(wrapper.text()).not.toContain('Creating a new Sandbox payment…')
 
     request.resolve(undefined)
@@ -698,7 +698,7 @@ describe('payment restoration pages', () => {
     nuxt.useSdk.mockReturnValue(sdkState({ failure, restore, start }))
     const wrapper = await mountSuspended(HubPage)
     await flushPromises()
-    const action = wrapper.findAll('button').find(button => button.text() === 'Restore existing Sandbox checkout')!
+    const action = wrapper.findAll('button').find(button => button.text() === 'Restore existing Sandbox order')!
 
     // The recovery response can change reactive state before Vue patches the
     // button the user has already seen. Its existing action must remain restore.
@@ -724,7 +724,7 @@ describe('payment restoration pages', () => {
     const wrapper = await mountSuspended(HubPage)
     await nextTick()
 
-    const pending = wrapper.findAll('button').find(button => button.text().includes('Checking for an existing Sandbox checkout'))!
+    const pending = wrapper.findAll('button').find(button => button.text().includes('Checking for an existing Sandbox order'))!
     expect(pending?.exists()).toBe(true)
     expect(pending.attributes('disabled')).toBeDefined()
     expect(wrapper.text()).not.toContain('Start simulated checkout')

@@ -2447,3 +2447,67 @@ describe('Hosted initial subscription', () => {
     expect(navigate).toHaveBeenCalledTimes(2)
   })
 })
+
+
+describe('Direct API launch and recovery', () => {
+  for (const method of ['apple-pay', 'google-pay'] as const) {
+    it.each([true, false])(`opens ${method} without Provider create (new order: %s)`, async (create) => {
+      const state = new Map<string, { value: unknown }>()
+      const current = session()
+      const { paymentId: _paymentId, submissionStartedAt: _submitted, ...original } = current.attempt
+      const attempt = { ...original, integration: 'direct-api' as const, method, status: 'created' as const }
+      const recovered = { ...current, attempt, attempts: [attempt], paymentId: null, query: null, submitted: false }
+      const fetch = vi.fn().mockResolvedValueOnce({ orderId: 'order-1', create }).mockResolvedValueOnce(recovered)
+      const navigate = vi.fn()
+      stubState(state)
+      vi.stubGlobal('onScopeDispose', vi.fn())
+      vi.stubGlobal('$fetch', fetch)
+      vi.stubGlobal('navigateTo', navigate)
+      vi.stubGlobal('navigator', browserNavigator())
+      const { useSdk } = await import('../app/composables/useSdk')
+      await useSdk().start(`${method}-direct`, true, method, 1234)
+      expect(fetch).toHaveBeenCalledTimes(create ? 1 : 2)
+      expect(fetch).toHaveBeenNthCalledWith(1, '/api/payment/intent', {
+        method: 'POST', body: { journeyId: `${method}-direct`, method, restart: true, amountMinor: 1234 },
+      })
+      expect(navigate).toHaveBeenCalledWith('/halden/direct/order-1')
+    })
+  }
+
+  it('preserves a failed restoration and retries only on explicit action', async () => {
+    const state = new Map<string, { value: unknown }>()
+    const fetch = vi.fn().mockResolvedValueOnce({ orderId: 'order-1', create: false })
+      .mockRejectedValue({ statusCode: 503 })
+    stubState(state)
+    vi.stubGlobal('onScopeDispose', vi.fn())
+    vi.stubGlobal('$fetch', fetch)
+    vi.stubGlobal('navigateTo', vi.fn())
+    vi.stubGlobal('navigator', browserNavigator())
+    const { useSdk } = await import('../app/composables/useSdk')
+    const sdk = useSdk()
+    await sdk.start('apple-pay-direct', true, 'apple-pay')
+    expect(fetch).toHaveBeenCalledTimes(2)
+    expect(sdk.failure.value).toMatchObject({ source: 'recovery', action: 'retry_restoration' })
+    await sdk.restore()
+    expect(fetch).toHaveBeenCalledTimes(3)
+    expect(fetch).toHaveBeenLastCalledWith('/api/payment/recover', {})
+  })
+
+  it('shows a safe request status for a Direct launch failure without exposing the response', async () => {
+    const state = new Map<string, { value: unknown }>()
+    const fetch = vi.fn().mockRejectedValue({ statusCode: 503, data: { secret: 'must-not-render' } })
+    stubState(state)
+    vi.stubGlobal('onScopeDispose', vi.fn())
+    vi.stubGlobal('$fetch', fetch)
+    vi.stubGlobal('navigateTo', vi.fn())
+    vi.stubGlobal('navigator', browserNavigator())
+    const { useSdk } = await import('../app/composables/useSdk')
+    const sdk = useSdk()
+    await sdk.start('google-pay-direct', true, 'google-pay')
+    expect(sdk.error.value).toContain('Direct API demo')
+    expect(sdk.error.value).toContain('HTTP 503')
+    expect(sdk.error.value).not.toContain('must-not-render')
+    expect(sdk.failure.value?.title).not.toContain('Checkout')
+    expect(fetch).toHaveBeenCalledTimes(1)
+  })
+})

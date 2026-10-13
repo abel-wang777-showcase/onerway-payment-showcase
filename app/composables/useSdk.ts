@@ -294,7 +294,7 @@ export function useSdk() {
   }
   else if (takingOver && takeoverStage === 'creating') {
     stage.value = 'not_completed'
-    setFailure('create', 'Checkout creation moved to the current page. Restore the existing payment before starting another order.')
+    setFailure('create', 'Order preparation moved to the current page. Restore the existing payment before starting another order.')
   }
   else if (takingOver && ['submitting', 'awaiting_action', 'redirecting'].includes(takeoverStage)) {
     stage.value = 'not_completed'
@@ -476,13 +476,8 @@ export function useSdk() {
         }
 
         if (!intent.create) {
-          const recovery = await navigateRecovered(intent.orderId)
-
-          if (recovery !== 'failed') {
-            return
-          }
-
-          throw new Error('PAYMENT_RECOVERY_PENDING')
+          await navigateRecovered(intent.orderId)
+          return
         }
 
         if (getJourney(journeyId).integration === 'direct-api') {
@@ -505,23 +500,26 @@ export function useSdk() {
 
         await openCreated(created, intent.orderId)
       }
-      catch {
+      catch (reason) {
         if (!ownsState()) {
           return
         }
 
         if (orderId) {
-          const recovery = await navigateRecovered(orderId)
-
-          if (recovery !== 'failed') {
-            return
-          }
+          // Preserve the recovery outcome and its permitted next action. A
+          // failed restore must not be replaced with a generic create error.
+          await navigateRecovered(orderId)
+          return
         }
 
         stage.value = 'not_completed'
+        const status = responseStatus(reason)
+        const requestStatus = status !== null ? ` The order request returned HTTP ${status}.` : ''
+        const entry = getJourney(journeyId).integration === 'direct-api' ? 'Direct API demo' : 'Sandbox payment'
         setFailure(
           'create',
-          'Sandbox checkout could not be opened. If Onerway accepted a payment, this site will recover that attempt before creating another.',
+          `${entry} could not be opened.${requestStatus} Restore any existing order before starting another. No payment result has been confirmed.`,
+          status,
         )
       }
       finally {
