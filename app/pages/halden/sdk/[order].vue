@@ -29,7 +29,7 @@ definePageMeta({
 })
 
 useSeoMeta({
-  title: 'Sandbox checkout · Halden',
+  title: 'Sandbox checkout · Onerway Store',
   description: 'Complete a controlled payment in the Onerway v4 Sandbox hosted payment form.',
 })
 
@@ -129,7 +129,7 @@ const actionItems = computed(() => {
 })
 const amount = computed(() => current.value ? formatMoney(current.value.order.amount) : '')
 const journey = computed(() => current.value ? findOrderJourney(current.value.order) : null)
-const challenge = computed(() => Boolean(currentSubscription.value) || journey.value?.id === 'three-ds-success')
+const challenge = computed(() => Boolean(currentSubscription.value) || (journey.value?.id === 'three-ds-success' && current.value?.order.amount.minor === journey.value.amount))
 const expectedMethodLabel = computed(() => {
   const labels: Record<PaymentMethodId, string> = {
     card: 'Card',
@@ -184,7 +184,7 @@ const payLabel = computed(() => restoring.value && stage.value === 'creating'
     })[stage.value])
 const summaryLines = computed(() => current.value
   ? [
-      { label: current.value.order.item.name, value: current.value.order.item.variant },
+      { label: storeProductName(current.value.order.item.name), value: current.value.order.item.variant },
       { label: 'Quantity', value: String(current.value.order.item.quantity) },
       { label: 'Delivery', value: 'Included' },
       ...(currentSubscription.value
@@ -205,7 +205,7 @@ async function restart(): Promise<void> {
   const selected = journey.value
 
   if (selected && current.value && !busy.value) {
-    await start(selected.id, true, current.value.attempt.method)
+    await start(selected.id, true, current.value.attempt.method, current.value.order.amount.minor)
   }
 }
 
@@ -365,7 +365,17 @@ onMounted(async () => {
     </section>
 
     <div v-else class="grid gap-8 lg:grid-cols-[minmax(0,1fr)_24rem] lg:items-start">
-      <div class="space-y-8">
+      <HaldenSummary
+        class="lg:col-start-2 lg:row-start-1"
+        :lines="summaryLines"
+        :total="amount"
+        :pay-label="payLabel"
+        :disabled="disabled"
+        :busy="busy"
+        footer="Payment methods are hosted by Onerway Sandbox; the merchant button submits Card only."
+        @pay="pay"
+      />
+      <div class="min-w-0 space-y-8 lg:col-start-1 lg:row-start-1">
         <div>
           <div class="flex flex-wrap gap-2">
             <UBadge label="Real Sandbox" color="warning" variant="soft" />
@@ -386,7 +396,7 @@ onMounted(async () => {
           </h1>
           <p class="mt-3 max-w-2xl text-sm leading-relaxed text-toned">
             A signed {{ amount }} {{ currentSubscription ? 'initial subscription' : '' }} payment was created by the server with all merchant-enabled SDK payment methods.
-            {{ challenge ? 'This journey requires a 3DS Challenge. Automatic return is preferred; if Onerway keeps the browser on its result page, reopen this Showcase to recover the same payment.' : 'This controlled journey is expected to complete without a 3DS Challenge.' }}
+            {{ challenge ? 'This journey requires a 3DS Challenge. Automatic return is preferred; if Onerway keeps the browser on its result page, reopen this Showcase to recover the same payment.' : 'Any required authentication is determined by the payment provider.' }}
             {{ expectedWalletLabel
               ? `For this acceptance target, use the ${expectedWalletLabel} button only if the SDK renders it. The merchant Card action remains available as a fallback and does not prove ${expectedWalletLabel} eligibility.`
               : 'Use only controlled Onerway Sandbox payment data in the hosted SDK surface.' }}
@@ -404,6 +414,29 @@ onMounted(async () => {
           color="warning"
           variant="subtle"
           icon="i-lucide-circle-alert"
+        />
+
+        <PaymentElement
+          v-if="collecting"
+          :key="`${current.paymentId}:${elementRevision}`"
+          ref="element"
+          :payment-id="current.paymentId"
+          :url="sdkUrl"
+          :generation="elementRevision"
+          :expected-method="current.attempt.method"
+          @ready="handleElementReady"
+          @error="handleElementError"
+          @result="handleElementResult"
+        />
+
+        <PaymentActions
+          v-if="actionItems.length"
+          title="Choose the safe next step"
+          :description="currentSubscription
+            ? 'Reload keeps this Payment intact and verification queries this same Attempt. Subscription recovery never creates or confirms another payment.'
+            : 'Reload keeps this Payment intact, verification queries this Attempt, and a separate Sandbox order never cancels or overwrites it.'"
+          :items="actionItems"
+          @action="handleAction"
         />
 
         <section
@@ -441,39 +474,7 @@ onMounted(async () => {
           </dl>
         </section>
 
-        <PaymentElement
-          v-if="collecting"
-          :key="`${current.paymentId}:${elementRevision}`"
-          ref="element"
-          :payment-id="current.paymentId"
-          :url="sdkUrl"
-          :generation="elementRevision"
-          :expected-method="current.attempt.method"
-          @ready="handleElementReady"
-          @error="handleElementError"
-          @result="handleElementResult"
-        />
-
-        <PaymentActions
-          v-if="actionItems.length"
-          title="Choose the safe next step"
-          :description="currentSubscription
-            ? 'Reload keeps this Payment intact and verification queries this same Attempt. Subscription recovery never creates or confirms another payment.'
-            : 'Reload keeps this Payment intact, verification queries this Attempt, and a separate Sandbox order never cancels or overwrites it.'"
-          :items="actionItems"
-          @action="handleAction"
-        />
       </div>
-
-      <HaldenSummary
-        :lines="summaryLines"
-        :total="amount"
-        :pay-label="payLabel"
-        :disabled="disabled"
-        :busy="busy"
-        footer="Payment methods are hosted by Onerway Sandbox; the merchant button submits Card only."
-        @pay="pay"
-      />
     </div>
   </UContainer>
 </template>

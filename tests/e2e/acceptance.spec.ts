@@ -3,8 +3,7 @@ import {
   expectNoHorizontalOverflow,
   gotoHydrated,
   installSimulationGate,
-  journeyRadio,
-  methodRadio,
+  selectHubOption,
   startJourney,
   submitSimulation,
 } from './support'
@@ -28,14 +27,19 @@ test('exposes landmarks, keyboard selection and a visible focus indicator', asyn
   await skipLink.press('Enter')
   await expect(page.getByRole('main')).toBeFocused()
 
-  const standard = journeyRadio(page, 'standard-success')
-  const challenge = journeyRadio(page, 'three-ds-success')
-  await expect(standard).toBeChecked()
-  await standard.focus()
-  await page.keyboard.down('ArrowDown')
-  await expect(challenge).toBeChecked()
-  await expect(challenge).toBeFocused()
-  await page.keyboard.up('ArrowDown')
+  await expect(page.getByRole('radio', { includeHidden: true })).toHaveCount(0)
+  const journey = page.getByRole('combobox', { name: 'Journey preset', exact: true })
+  await expect(journey).toContainText('Standard success')
+  await journey.focus()
+  await journey.press('Enter')
+  await expect(page.getByRole('listbox')).toBeVisible()
+  await expect(page.getByRole('option', { selected: true })).toBeFocused()
+  await page.keyboard.press('End')
+  await expect(page.getByRole('option').last()).toBeFocused()
+  await page.keyboard.press('Enter')
+  await expect(journey).toContainText('3DS Challenge')
+  await expect(journey).toBeFocused()
+  await expect(page).toHaveURL(/journey=three-ds-success/)
   gate.assertClean()
 })
 
@@ -59,8 +63,8 @@ for (const wallet of [
     const gate = await installSimulationGate(page)
 
     await gotoHydrated(page, `/?journey=three-ds-success&method=${wallet.method}`)
-    await expect(methodRadio(page, wallet.method)).toBeChecked()
-    await expect(page.getByText('USD 5.00 · Standard success', { exact: true })).toBeVisible()
+    await expect(page.getByRole('combobox', { name: 'Payment method', exact: true })).toContainText(wallet.label)
+    await expect(page.locator('#demo-launch')).toContainText('Standard success')
     await expect(page.getByRole('button', { name: /start simulated checkout/i })).toHaveCount(0)
     await expect(page.getByRole('button', { name: `Open ${wallet.label} Sandbox` })).toBeDisabled()
     gate.assertClean()
@@ -72,12 +76,10 @@ for (const wallet of [
       await page.setViewportSize({ width, height: 900 })
 
       await gotoHydrated(page)
-      const method = methodRadio(page, wallet.method)
-
+      const method = page.getByRole('combobox', { name: 'Payment method', exact: true })
       await expect(method).toBeEnabled()
-      await method.focus()
-      await method.press('Space')
-      await expect(method).toBeChecked()
+      await selectHubOption(page, 'Payment method', `${wallet.label} · Conditional`)
+      await expect(method).toContainText(wallet.label)
       await expect(page.getByRole('button', { name: /start simulated checkout/i })).toHaveCount(0)
       await expect(page.getByRole('button', { name: `Open ${wallet.label} Sandbox` })).toBeDisabled()
       await expect(page.getByText('the Onerway SDK renders its own eligible wallet button', { exact: false })).toBeVisible()

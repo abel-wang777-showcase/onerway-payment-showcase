@@ -99,7 +99,14 @@ export function useGooglePay(orderId: string, initial?: DirectRecoveryResponse) 
         if (!response.verificationPending) message.value = 'The server returned this order’s payment result.'
       }
     }
-    catch { if (current(id)) { error.value = 'Payment is unconfirmed. Check this order; do not pay again.'; recordStep('result', 'interrupted', session.value ? { ...googleResultEvidence(session.value, 'stored'), summary: 'The fresh check failed. The saved order state is preserved.' } : googleInterruptionEvidence('The fresh check failed. No payment result is inferred.')) } }
+    catch {
+      if (current(id)) {
+        error.value = terminal.value
+          ? 'The latest update could not be checked. Your confirmed payment result is preserved.'
+          : 'Payment is unconfirmed. Check this order; do not pay again.'
+        recordStep('result', 'interrupted', session.value ? { ...googleResultEvidence(session.value, 'stored'), summary: 'The fresh check failed. The saved order state is preserved.' } : googleInterruptionEvidence('The fresh check failed. No payment result is inferred.'))
+      }
+    }
     finally { checking.value = false }
   }
   function schedule() {

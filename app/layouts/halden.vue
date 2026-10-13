@@ -40,9 +40,7 @@ const isSandbox = computed(() =>
           class="inline-flex min-h-11 items-center gap-3 rounded-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
           aria-label="Back to Onerway Demo Hub"
         >
-          <span class="font-mono text-sm font-semibold tracking-[0.18em] text-highlighted">
-            HALDEN
-          </span>
+          <BrandWordmark context="store" />
           <UBadge
             :label="isSandbox ? 'Sandbox' : 'Simulation'"
             color="neutral"
@@ -102,10 +100,10 @@ const isSandbox = computed(() =>
       <UContainer class="py-6">
         <p class="text-sm text-toned">
           {{ isDirect
-            ? 'Halden is a fictional merchant. Authorization takes place with your wallet provider. In automatic mode, this merchant server forwards the encrypted token to Onerway Sandbox without saving it.'
+            ? 'Onerway Store is an e-commerce demo, not a real store. Authorization takes place with your wallet provider. In automatic mode, this merchant server forwards the encrypted token to Onerway Sandbox without saving it.'
             : isSandbox
-            ? 'Halden is a fictional merchant. Payment details are entered on Onerway Sandbox pages or fields and never pass through this merchant server.'
-            : 'Halden is a fictional merchant. This journey is simulated and does not collect payment data.' }}
+            ? 'Onerway Store is an e-commerce demo, not a real store. Payment details are entered on Onerway Sandbox pages or fields and never pass through this merchant server.'
+            : 'Onerway Store is an e-commerce demo, not a real store. This journey is simulated and does not collect payment data.' }}
         </p>
       </UContainer>
     </footer>

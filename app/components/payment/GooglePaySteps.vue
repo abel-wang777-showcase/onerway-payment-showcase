@@ -16,7 +16,7 @@ const announcement = computed(() => {
 <template>
   <section aria-labelledby="google-pay-steps-title" class="min-w-0">
     <h2 id="google-pay-steps-title" class="text-balance text-xl font-semibold tracking-tight text-highlighted">How this payment works</h2>
-    <p class="mt-2 max-w-prose text-pretty text-sm leading-relaxed text-toned">Follow the payment across your browser, Halden, Google Pay and Onerway. Explore each stage, then inspect the recorded evidence below.</p>
+    <p class="mt-2 max-w-prose text-pretty text-sm leading-relaxed text-toned">Follow the payment across your browser, Onerway Store, Google Pay and Onerway. Explore each stage, then inspect the recorded evidence below.</p>
     <p v-if="mode === 'manual'" class="mt-2 max-w-prose text-sm leading-relaxed text-toned">Manual debugging stops at token capture. Submission and result paths are explanations only; external Apifox calls do not update this order.</p>
     <p role="status" aria-live="polite" aria-atomic="true" class="sr-only">{{ announcement }}</p>
     <PaymentProtocolFlow wallet="google-pay" title="Google Pay protocol map" :actors="googlePayFlowActors" :flows="flows" :steps="steps" />

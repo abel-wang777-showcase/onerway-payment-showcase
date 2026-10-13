@@ -7,7 +7,7 @@ definePageMeta({
 })
 
 useSeoMeta({
-  title: 'Restoring payment · Halden',
+  title: 'Restoring payment · Onerway Store',
   description: 'Restore the Onerway browser return and verify the final payment state on the server.',
 })
 

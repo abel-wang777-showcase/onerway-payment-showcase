@@ -101,6 +101,27 @@ describe('authorization funds presentation', () => {
     expect(sdk.refreshAuthorization).toHaveBeenCalledOnce()
     expect(sdk.verify).not.toHaveBeenCalled()
     expect(sdk.start).not.toHaveBeenCalled()
+    expect(sdk.openCheckout).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('continues a fresh hosted checkout once without another customer confirmation', async () => {
+    const sdk = state({ fundsStatus: 'pending', paymentId: undefined, authTransactionId: undefined })
+    sdk.canOpenCheckout.value = true
+    sdk.openCheckout.mockImplementation(() => { sdk.canOpenCheckout.value = false })
+    nuxt.useSdk.mockReturnValue(sdk)
+    nuxt.useRoute.mockReturnValue({ params: { order: 'order-auth-1' }, path: '/halden/hosted/order-auth-1' })
+    const wrapper = await mountSuspended(Hosted)
+    await flushPromises()
+    expect(sdk.openCheckout).toHaveBeenCalledOnce()
+    expect(sdk.recover).not.toHaveBeenCalled()
+    const restored = new Event('pageshow')
+    Object.defineProperty(restored, 'persisted', { value: true })
+    window.dispatchEvent(restored)
+    await flushPromises()
+    expect(sdk.recover).toHaveBeenCalledExactlyOnceWith('order-auth-1')
+    expect(sdk.openCheckout).toHaveBeenCalledOnce()
+    expect(sdk.start).not.toHaveBeenCalled()
     wrapper.unmount()
   })
 

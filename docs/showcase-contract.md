@@ -30,10 +30,16 @@ Demo Hub 是公开演示入口，不是第二套后台。它负责：
 
 - 选择 `Scene × Integration × Payment Method`。
 - 明确展示能力为 Available、Conditional、Planned 或 Unavailable。
-- 为确定性的 Sandbox 演示选择测试旅程，例如普通成功或 3DS Challenge。
+- 为真实 Sandbox 演示选择测试旅程，例如普通支付或 3DS Challenge。公开 Demo Hub 不提供本地模拟付款入口；模拟状态机与对应的模拟 checkout 路由仅保留供自动化测试 fixture 使用。
 - 进入对应的参考商户体验。
 
-商户体验负责商品、订单、支付和结果。M0 使用虚构户外电商品牌 **Halden**；未来场景可有不同外观，但支付领域模型、状态真值和安全边界保持一致。
+首页接入页签按 Checkout、Web JS SDK、Direct API 排列；计费方式、支付方式和测试旅程使用有明确标签的紧凑下拉选择，启动摘要随选择同步。桌面配置与摘要可通过拖拽或键盘调整宽度，两侧保留可读下限；大屏限制阅读宽度并在剩余视口内平衡布局，页脚置于底部。常见桌面尺寸下，配置、金额与启动操作应在一屏内；窄屏按配置到摘要的顺序自然排列，保留至少 44px 的操作区域和直达配置/摘要区的导航；底部使用 Edit selection / View summary 的轻量导航样式，不暗示点击会创建订单或付款，不以缩小文字、裁切必要条件或固定高度隐藏内容换取一屏。未开放选项集中在可展开的说明中，不伪装成可启动的入口。
+
+Preview 的支付入口保留跳转到已配置 canonical Sandbox origin 的边界；query 只携带公开选择及一次性金额配置并定位到启动摘要，不携带支付权限，不从 URL 自动创建订单或付款。canonical 首页的一次 Hosted 启动操作创建订单后直接继续 Onerway 收银台，详情页承担过渡与恢复，不再要求重复确认。
+
+首页统一使用 **Onerway Payment Showcase**，以通用支付体验入口呈现场景、接入方式和旅程。电商演示命名为 **Onerway Store**；**Onerway Gaming / Onerway Live / Onerway AI** 是规划中的演示场景名称，不代表已开放能力或独立正式产品。只有已开放场景可启动，其余继续标为 Planned。商户体验负责商品、订单、支付和结果；不同场景可有不同外观，但支付领域模型、状态真值和安全边界保持一致。页面明确标识 Demo / Sandbox，避免被误认为真实商城或服务。
+
+品牌改名仅改变展示与新钱包会话的商户显示名称。原 Halden 的 `/halden/**` 回跳路由、订单 ID、SKU、匹配用商品名和 `halden-daily-essentials-v1` 的 version / Provider `productName` 保持不变，以保证历史订单恢复和契约一致性；Showcase 商品摘要使用独立展示名称，不回写订单或篡改技术证据。托管收银台及历史记录可能仍显示原 Provider 商品名称，若要迁移需单独版本化计划。品牌图形使用用户提供的官方彩色 SVG（`public/brand/onerway.svg`），原样保留颜色与比例；同时用于浏览器图标，并与 Onerway 文字共用页头组件，显式限制尺寸并适配深浅背景，不使用自创图案或 Geist 标记。
 
 ## 3. 能力矩阵
 
@@ -56,13 +62,13 @@ Demo Hub 是公开演示入口，不是第二套后台。它负责：
 
 当前 Demo Hub 的数据化矩阵包含全部 60 个组合，状态边界为：
 
-- `E-commerce × Web JS SDK × Card` 为 Available。`USD 5.00 · Standard success` 同时开放确定性 simulation 与真实 Sandbox SDK；`USD 50.00 · 3DS Challenge` 同时开放 simulation 与仅 Sandbox profile 可见的真实验收入口。两条真实 Sandbox Card 黄金路径均已在 canonical Production 域名完成服务端核验，其中 USD 50.00 覆盖 `R → 3DS Challenge → configured returnUrl → same-payment fresh query`。同一能力下另有独立、仅 Sandbox 的 `Halden Daily Essentials` 初始订阅旅程；它没有伪 simulation，也不把订阅计划建模为新的 Integration。
-- Card simulation 额外开放 processing recovery、cancelled retry、deterministic failure 与 form load recovery 四条异常旅程；它们不含 Sandbox mode、不产生 provider 标识，也不扩张真实 create allowlist。deterministic failure 只形成 `source=simulation / status=failed` 的本地事实，不能作为 Payment-level `failed` 原始状态证据。
-- `E-commerce × Web JS SDK × Google Pay` 与 `E-commerce × Web JS SDK × Apple Pay` 均保持 Conditional，并复用 USD 5.00 `standard-success` 的真实 Sandbox 入口；Showcase 只记录用户选择的预期方式，是否渲染对应钱包按钮及其资格由同一个 Onerway SDK Element 决定。两者都不渲染伪钱包按钮，也没有钱包专属 simulation。Apple Pay 的最终真实设备 / Safari / Wallet canary 仍需单独授权与用户设备配合，不能由桌面浏览器或历史支付替代。
-- `E-commerce × Checkout × All` 为 Conditional，并提供 USD 5.00 普通支付与 USD 50.00 3DS 的 Sandbox 一次性支付入口。`All` 是支付方式选择策略，不代表最终使用某张卡或钱包；具体可选项由商户启用、国家、币种和设备条件决定。USD 50.00 真实 3DS 已获用户人工验收确认，返回恢复、超时取消与通知链路已有独立 Sandbox 证据，执行范围见 Issue #8；这些证据不代表所有设备或具体支付方式均已验证，不宣称任一具体收银台支付方式为 Available。同一入口另有 Card 初始订阅选项，沿用固定 USD 5.00 计划且保持 Conditional，范围及证据边界见 Issue #10 章节。
-- `E-commerce × Checkout × Card` 提供 USD 5.00 预授权旅程及全额请款或撤销操作，保持 Conditional；当前实现、查询补偿与真实 Sandbox 验收边界见 Issue #11 章节。
-- `E-commerce × Direct API × Apple Pay` 提供 USD 5.00 / SALE 条件性 Sandbox 入口；自有 Merchant ID 验证、Onerway 代解密。实际 Direct 设备支付验收仍待 Issue #17，不能沿用 SDK Apple Pay 证据。
-- `E-commerce × Direct API × Google Pay` 提供 US / USD 5.00 / SALE 的 Conditional Sandbox 入口，Google 环境固定 TEST；网关测试 token 的可处理性与托管补充认证仍按本节下述条件记录，不因可取得 token 而标为 Available。
+- `E-commerce × Web JS SDK × Card` 为 Available。`USD 5.00 · Standard success` 与 `USD 50.00 · 3DS Challenge` 作为默认预设，在公开 Demo Hub 提供可编辑一次性金额的真实 Sandbox SDK 入口；按钮只在具备所需 SDK 的 Sandbox profile 启用，锁定预览明确说明尚未启用 Sandbox 支付。两条真实 Sandbox Card 黄金路径均已在 canonical Production 域名完成服务端核验，其中 USD 50.00 覆盖 `R → 3DS Challenge → configured returnUrl → same-payment fresh query`。同一能力下另有独立、仅 Sandbox 的 `Halden Daily Essentials` 初始订阅旅程；它没有伪 simulation，也不把订阅计划建模为新的 Integration。
+- processing recovery、cancelled retry、deterministic failure 与 form load recovery 四条 Card 异常模拟旅程仅保留为自动化测试 fixture，不在公开 Demo Hub 展示；旧 Hub URL 指向这些旅程时归一化为 `standard-success`。它们不含 Sandbox mode、不产生 provider 标识，也不扩张真实 create allowlist。deterministic failure 只形成 `source=simulation / status=failed` 的本地事实，不能作为 Payment-level `failed` 原始状态证据。
+- `E-commerce × Web JS SDK × Google Pay` 与 `E-commerce × Web JS SDK × Apple Pay` 均保持 Conditional，并复用默认 USD 5.00、允许编辑一次性金额的 `standard-success` 真实 Sandbox 入口；Showcase 只记录用户选择的预期方式，是否渲染对应钱包按钮及其资格由同一个 Onerway SDK Element 决定。两者都不渲染伪钱包按钮，也没有钱包专属 simulation。Apple Pay 的最终真实设备 / Safari / Wallet canary 仍需单独授权与用户设备配合，不能由桌面浏览器或历史支付替代。
+- `E-commerce × Checkout × All` 为 Conditional，并提供默认 USD 5.00 普通支付与 USD 50.00 3DS 的 Sandbox 一次性支付预设，金额可按第 4 节范围编辑。`All` 是支付方式选择策略，不代表最终使用某张卡或钱包；具体可选项由商户启用、国家、币种和设备条件决定。USD 50.00 真实 3DS 已获用户人工验收确认，返回恢复、超时取消与通知链路已有独立 Sandbox 证据，执行范围见 Issue #8；这些证据不代表所有设备或具体支付方式均已验证，不宣称任一具体收银台支付方式为 Available。同一入口另有 Card 初始订阅选项，沿用固定 USD 5.00 计划且保持 Conditional，范围及证据边界见 Issue #10 章节。
+- `E-commerce × Checkout × Card` 提供默认 USD 5.00、允许编辑一次性金额的预授权旅程及全额请款或撤销操作，保持 Conditional；当前实现、查询补偿与真实 Sandbox 验收边界见 Issue #11 章节。
+- `E-commerce × Direct API × Apple Pay` 提供默认 USD 5.00、允许编辑一次性金额的 SALE 条件性 Sandbox 入口；自有 Merchant ID 验证、Onerway 代解密。实际 Direct 设备支付验收仍待 Issue #17，不能沿用 SDK Apple Pay 证据。
+- `E-commerce × Direct API × Google Pay` 提供 US / USD / SALE 的 Conditional Sandbox 入口，默认金额 USD 5.00 且允许编辑，Google 环境固定 TEST；网关测试 token 的可处理性与托管补充认证仍按本节下述条件记录，不因可取得 token 而标为 Available。
 - Checkout 的其余具体支付方式直达、其余 Direct API 方式、其余 APM 和 Game / Live / AI 场景当前为 Planned。
 - Unavailable 保留为明确证实不支持时使用的状态；当前不为凑齐 UI 而制造无证据的 Unavailable 组合。
 
@@ -82,6 +88,12 @@ Order → PaymentAttempt → PaymentEvent
 
 金额在领域模型中使用 ISO currency 加整数 minor units，例如 USD 5.00 为 `500`、USD 50.00 为 `5000`；页面格式化金额但不另存一份浮点总额。
 
+2026-10-12 用户确认：全部一次性 Sandbox 入口，包括 Checkout SALE、Checkout AUTH、Web JS SDK（Card 及 SDK 自有钱包）和 Direct Apple Pay / Google Pay，允许用户在创建订单前设置 **USD 0.01–10,000.00**（含端点）。这是 Showcase 演示允许范围，不是 Onerway、商户或渠道统一限额，也不保证范围内每个金额或支付方式均可受理。USD 5.00 / USD 50.00 只作为现有旅程的默认预设；自定义金额不承诺普通成功、是否发生 3DS 或认证结果，既有真实验收仍只证明当时记录的金额和交互。初始订阅继续使用固定 Provider 计划及金额，不接受该自定义金额。
+
+一次性 intent 接受可选 `amountMinor`；省略时取所选旅程默认金额，提供时服务端必须验证为 `1..1_000_000` 的整数，商品单价、数量为 1 的订单总额和 AUTH 授权金额一致后持久化。展示金额字符串最多两位小数，按十进制精确转为 cents，不静默舍入。商品、币种、集成与支付方式仍受服务端 allowlist 约束；真实 Sandbox 旅程按固定商品身份及金额自洽识别，simulation-only fixture 保留固定金额。后续 create、钱包 consult / 授权 / submit、Query 与 Webhook 关联均使用持久化订单金额；客户端不能在这些步骤或 Retry 中再次覆盖金额。
+
+首页金额与跨域 query 仅配置下一笔新订单；恢复已有 Order / Attempt 时保留并展示原金额，不因首页选择变化而改写订单或绕过未完成订单保护。同 Order Retry 继承原金额；支付页显式启动独立 Sandbox 订单时保留当前订单金额，首页显式新单使用当前配置，仍遵守各集成既有新单与恢复边界。金额编辑不改变 production lock、creation claim、token 安全、支付真值或订阅 duplicate guard。
+
 标准化 PaymentAttempt 至少区分：
 
 - `created`
@@ -93,7 +105,7 @@ Order → PaymentAttempt → PaymentEvent
 
 页面可以在此之上表达 `loading`、`ready`、`submitting`、`awaiting_action`、`redirecting`、`verifying`、`not_completed` 等 UI 状态，但不得把页面状态当成支付真值。
 
-Web JS SDK M0 的服务端 Payment query 状态映射为：`S → succeeded`、`I / U / P / A / O → processing`、`R → requires_action`、`N → cancelled`。未知状态拒绝映射并停止结果推进。v4 `confirmPayment()` 与 `payment_result` 使用不同的发起入口和协议：Card 等由商户自定义按钮发起的支付必须先完整处理 `confirmPayment()`；Apple Pay、Google Pay 等由 SDK 自有按钮发起的支付不调用 confirm，以 `payment_result` 作为客户端入口。全局事件订阅可以同时服务这两类方式，但商户 confirm 尚未返回时到达的 callback 只能暂存为白名单化内存事实，不能按到达顺序覆盖或跳过 confirm；多个或不可解析的早到 callback 在 `PresentToShopper` 路径降级为可手动核验的 query-only，`RedirectShopper`、confirm unknown 与其他 query-only 阶段的晚到 callback 一律忽略。confirm 可返回 `R + nextAction.type`，其中 `PresentToShopper` 表示 SDK 已在当前 Checkout 承接并要求商户保留 Element、随后消费 `payment_result`，`RedirectShopper` 表示 SDK 即将外跳并要求商户在 `returnUrl` 后执行服务端 query；两者都只形成非终态 `source: client / requires_action` 事实，不立即 query、不重新 confirm。`payment_result` 不返回 `R`：SDK 自有按钮结果或 `PresentToShopper` 后续结果中的 `P / A / S / N` 只形成非终态 `source: client / processing` 事实并由服务端 query 核验；顶层 `O` 是官方明确允许在同一个未刷新的 `paymentId + Checkout + Element` 上恢复交互和再次 confirm 的唯一支付状态。用户关闭交互返回的 `reason.type=canceled` 不等同于 provider `N`，只在当前仍存活的 Checkout 中恢复交互且不形成 PaymentEvent；没有顶层支付状态的 validation / SDK / API error 不伪装为 `processing`，也不自动 query，刷新后均恢复为 query-only。confirm / callback 的 `rawResult`、完整 `reason` 和 `nextAction` 附加字段均不保存、不记录或原样展示，只在当前内存白名单化匹配的 `paymentId`、`paymentMethod`、顶层 `paymentStatus`、公开的 reason type 与 next-action type。Sandbox 页面可额外展示当前交互中受约束的 SDK 诊断投影：仅接受公开 reason type、格式受限的 reason code，以及经过长度限制和敏感模式清洗的 reason message；URL、邮箱、长数字、控制字符与尖括号内容必须脱敏或移除，一旦检测到 secret / token / signature / authorization / credential / CVV / PAN / capability 等敏感语义则整条 message fail closed 为脱敏占位符。reason 的安全 code / message 投影是主来源；仅当对应投影结果为空时，才允许从同一 SDK 结果的 `rawResult.respCode / rawResult.respMsg` 逐字段兜底并应用完全相同的校验与清洗。主来源与兜底冲突时 reason 胜出；只有 rawResult 诊断时不推断 reason type；`rawResult.data` 和所有其他未知字段始终忽略。该投影不是原始字段透传，不得包含 `rawResult` 或完整 `reason`，不得写入日志、PaymentEvent 或持久化；刷新后不恢复。2026-08-09 真实 Card confirm 观察到的 `reason.type=api_error + reason.code=40000 + reason.message=Invalid transaction URL` 因而可显示具体诊断并提示检查 `returnUrl / notifyUrl`。所有诊断只解释交互失败原因，不形成支付状态，也不改变 query / Webhook 才是最终真值的规则。该协议以 Onerway v4 demo `https://beta-checkout-sdk.ronhan.com/v4/demo/index.html#confirm-payment` 及 2026-08-06 确认的商户按钮 / SDK 自有按钮发起边界为当前受控依据。
+Web JS SDK M0 的服务端 Payment query 状态映射为：`S → succeeded`、`I / U / P / A / O → processing`、`R → requires_action`、`N → cancelled`。未知状态拒绝映射并停止结果推进。v4 `confirmPayment()` 与 `payment_result` 使用不同的发起入口和协议：Card 等由商户自定义按钮发起的支付必须先完整处理 `confirmPayment()`；Apple Pay、Google Pay 等由 SDK 自有按钮发起的支付不调用 confirm，以 `payment_result` 作为客户端入口。全局事件订阅可以同时服务这两类方式，但商户 confirm 尚未返回时到达的 callback 只能暂存为白名单化内存事实，不能按到达顺序覆盖或跳过 confirm；多个或不可解析的早到 callback 在 `PresentToShopper` 路径降级为可手动核验的 query-only，`RedirectShopper`、confirm unknown 与其他 query-only 阶段的晚到 callback 一律忽略。confirm 可返回 `R + nextAction.type`，其中 `PresentToShopper` 表示 SDK 已在当前 Checkout 承接并要求商户保留 Element、随后消费 `payment_result`，`RedirectShopper` 表示 SDK 即将外跳并要求商户在 `returnUrl` 后执行服务端 query；两者都只形成非终态 `source: client / requires_action` 事实，不立即 query、不重新 confirm。`payment_result` 不返回 `R`：SDK 自有按钮结果或 `PresentToShopper` 后续结果中的 `P / A / S / N` 只形成非终态 `source: client / processing` 事实并由服务端 query 核验；顶层 `O` 是官方明确允许在同一个未刷新的 `paymentId + Checkout + Element` 上恢复交互和再次 confirm 的唯一支付状态。用户关闭交互返回的 `reason.type=canceled` 不等同于 provider `N`，只在当前仍存活的 Checkout 中恢复交互且不形成 PaymentEvent；没有顶层支付状态且明确返回 `reason.type=validation_error` 表示本地表单校验失败、未产生支付状态：保留当前 Checkout / Element，提示用户补全支付信息，允许在同一存活交互中再次 confirm，不形成 PaymentEvent、不自动 query；SDK / API error 与无法识别的结果仍进入 query-only，不伪装为 `processing`。这些路径刷新后均恢复为 query-only。confirm / callback 的 `rawResult`、完整 `reason` 和 `nextAction` 附加字段均不保存、不记录或原样展示，只在当前内存白名单化匹配的 `paymentId`、`paymentMethod`、顶层 `paymentStatus`、公开的 reason type 与 next-action type。Sandbox 页面可额外展示当前交互中受约束的 SDK 诊断投影：仅接受公开 reason type、格式受限的 reason code，以及经过长度限制和敏感模式清洗的 reason message；URL、邮箱、长数字、控制字符与尖括号内容必须脱敏或移除，一旦检测到 secret / token / signature / authorization / credential / CVV / PAN / capability 等敏感语义则整条 message fail closed 为脱敏占位符。reason 的安全 code / message 投影是主来源；仅当对应投影结果为空时，才允许从同一 SDK 结果的 `rawResult.respCode / rawResult.respMsg` 逐字段兜底并应用完全相同的校验与清洗。主来源与兜底冲突时 reason 胜出；只有 rawResult 诊断时不推断 reason type；`rawResult.data` 和所有其他未知字段始终忽略。该投影不是原始字段透传，不得包含 `rawResult` 或完整 `reason`，不得写入日志、PaymentEvent 或持久化；刷新后不恢复。2026-08-09 真实 Card confirm 观察到的 `reason.type=api_error + reason.code=40000 + reason.message=Invalid transaction URL` 因而可显示具体诊断并提示检查 `returnUrl / notifyUrl`。所有诊断只解释交互失败原因，不形成支付状态，也不改变 query / Webhook 才是最终真值的规则。该协议以 Onerway v4 demo `https://beta-checkout-sdk.ronhan.com/v4/demo/index.html#confirm-payment` 及 2026-08-06 确认的商户按钮 / SDK 自有按钮发起边界为当前受控依据。
 
 当前受控 SDK 证据记录为：release 标签 `v4/latest`，2026-08-12 观察到的 bundle SHA-256 `80ee223bc5d3561a729c09901379324186f1c65bcb778be10240fe06f338ed64`，最近一次 canonical Production 浏览器验收日期 2026-08-12；本次用户复验确认真实 USD 5.00 普通成功，以及 USD 50.00 重新完成 3DS Challenge 与回跳，不能据此替代同笔 Webhook、fresh query 和 persistence 的独立收敛证据。当天短暂发布的 bundle `2bd80655e316794cf7f96659e589af0a4e9b1429565f82333b53d017441ceabe` 把 Sandbox action gateway 指向无法解析的 `https://sandbox-gateway.ronhan.com`，同一时段观察到 USD 50.00 未发生预期 3DS 跳转；缺少该笔白名单 action-type 证据，因此只记录相关性，不宣称确定因果。当前 bundle 已恢复 `https://sandbox-gateway.onerway.com`，随后两条黄金路径均复验通过。该 router 对 `CARD / TOKEN_V2` 在 provider 返回 `redirectUrl` 时执行顶层 browser navigation；没有 `redirectUrl` 时仍返回未承接，不存在商户可补调的公开 `handleAction()`。Showcase 不读取 `rawResult.redirectUrl` 或自行跳转；`R` 没有公开 browser action 时继续保持 query-only。服务端继续严格校验固定基础入口，对客户端脚本 URL 追加观察到的 SHA-256 作为 `revision` cache namespace；该参数只隔离浏览器缓存，不是不可变 SDK 版本、SRI 证明或后续验收替代品。release、hash 或 SDK 行为任一变化时仍必须重新记录 bundle 证据、验收日期、浏览器结果并更新 allowlist；后续变化不能继承本次证据。
 
@@ -133,13 +145,13 @@ v4 初始化以 `paymentId` 调用 `createCheckout(paymentId, options)`，不传
 
 当前 Web SDK 的可选保存卡能力属于普通支付体验，不新增面向用户的“绑卡旅程”。服务端为匿名浏览器维护稳定的 customer identity，在创建支付时把 `productType` 从旧 SDK 的 `CARD` 调整为当前默认值 `ALL`，`subProductType` 继续使用 `DIRECT` 并传入 `merchantCustId`；不得使用旧 SDK 保存卡逻辑中的 `subProductType=TOKEN`。传入 `merchantCustId` 只允许 SDK 在托管表单中提供保存卡选项，是否保存由用户主动选择；它不证明卡已保存，也不形成新的 PaymentAttempt 状态。后续同一 `merchantNo + appId + environment + merchantCustId` 的支付由 SDK 内部回显可选 saved card，Showcase 不自建卡列表、不读取 SDK 原始 token 结果，也不把 `tokenId` 暴露给客户端。
 
-Web JS SDK 集成内的 Google Pay / Apple Pay 不新增 create adapter、钱包专属 fixture、Google Pay JS 或 Apple Pay JS。Demo Hub 的两个钱包选择都复用 USD 5.00 `standard-success`，服务端仍发送 `paymentMode=WEB + productType=ALL + subProductType=DIRECT + txnType=SALE`；`PaymentAttempt.method=google-pay / apple-pay` 只记录本次验收预期，不保证 SDK 最终渲染对应按钮，也不把支付方式与 Onerway 的 `DIRECT` 交易模型混用。同一聚合 checkout 保留 Card merchant action 和 SDK 自有钱包按钮；Card action 才调用 `confirmPayment()`，SDK 自有按钮继续只通过 `payment_result` 进入核验。该 SDK 路径不实现 merchant session、validation URL、certificate / private key 或 Apple payment token / wallet payload 处理；这些属于 Onerway SDK / 服务端边界。独立 Direct API 路径见下节。Showcase 仅在 `/.well-known/apple-developer-merchantid-domain-association.txt` 原样提供 Apple 要求的域名关联文件，该静态资产不扩张支付数据或凭据处理面。
+Web JS SDK 集成内的 Google Pay / Apple Pay 不新增 create adapter、钱包专属 fixture、Google Pay JS 或 Apple Pay JS。Demo Hub 的两个钱包选择都复用默认 USD 5.00、允许编辑一次性金额的 `standard-success`，服务端仍发送 `paymentMode=WEB + productType=ALL + subProductType=DIRECT + txnType=SALE`；`PaymentAttempt.method=google-pay / apple-pay` 只记录本次验收预期，不保证 SDK 最终渲染对应按钮，也不把支付方式与 Onerway 的 `DIRECT` 交易模型混用。同一聚合 checkout 保留 Card merchant action 和 SDK 自有钱包按钮；Card action 才调用 `confirmPayment()`，SDK 自有按钮继续只通过 `payment_result` 进入核验。该 SDK 路径不实现 merchant session、validation URL、certificate / private key 或 Apple payment token / wallet payload 处理；这些属于 Onerway SDK / 服务端边界。独立 Direct API 路径见下节。Showcase 仅在 `/.well-known/apple-developer-merchantid-domain-association.txt` 原样提供 Apple 要求的域名关联文件，该静态资产不扩张支付数据或凭据处理面。
 
 2026-08-13 真实 Sandbox 验收确认：当前 create 会发送非空 `merchantCustId`，用户可在 SDK 托管表单中主动勾选保存卡，后续同 scope 的新支付会正确回显 saved card。Provider 内部先完成 `DIRECT` 支付交易，再为用户选择的保存卡执行第二笔绑卡交易；Payment result Webhook 不包含 `tokenId`，第二笔绑卡交易也不发送 Webhook，因此商户不能从支付通知链路取得 `tokenId`。需要服务端 token 生命周期时，商户可使用同一 `merchantCustId` 调用 [List saved tokens](https://developers.onerway.com/payments/api-reference/endpoints/list-saved-tokens)，从 `data.tokenInfos[]` 读取 `tokenId`；其中 `id` 是 binding record id，不是支付使用的 `tokenId`。该查询是独立的 server-only 能力，不改变支付真值、不把保存卡并入 PaymentAttempt，也不属于当前 Showcase M0 的卡列表、解绑或 token 支付范围。
 
-真实 Sandbox create 只接受服务端 allowlist 中的固定旅程，并从已持久化 Order 生成金额与商品：普通成功为 USD 5.00 / `HL-SAMPLE-005`，3DS Challenge 为 USD 50.00 / `HL-SAMPLE-050`。两者都固定使用 `paymentMode=WEB`、`productType=ALL`、`subProductType=DIRECT`、`txnType=SALE`、`risk3dsStrategy=DEFAULT` 与 `orderCurrency=USD`，并附带当前 Order 私有绑定的 `merchantCustId`；USD 50.00 是当前 Sandbox 受控资料确认的高金额 3DS 触发条件，不把 `INNER` 或客户端可选金额作为触发补丁。同步 create 的 `respCode=20000` 仅表示创建请求成功，返回 `status=U`、`transactionId` 和 `paymentId` 后才初始化 SDK。客户端只提交 allowlist journey id；普通入口遇到已有非终态恢复能力时始终返回原 Order / Attempt，不因页面后来选择另一旅程而创建平行支付。只有下一段定义的用户显式 Sandbox 新订单入口可以更换恢复绑定。
+真实 Sandbox create 只接受服务端 allowlist 中的旅程，并从已持久化 Order 生成金额与商品：普通预设为 USD 5.00 / `HL-SAMPLE-005`，3DS 预设为 USD 50.00 / `HL-SAMPLE-050`；一次性金额可按第 4 节范围编辑，商品身份保持受控。两者都固定使用 `paymentMode=WEB`、`productType=ALL`、`subProductType=DIRECT`、`txnType=SALE`、`risk3dsStrategy=DEFAULT` 与 `orderCurrency=USD`，并附带当前 Order 私有绑定的 `merchantCustId`；USD 50.00 是既有 Sandbox 受控资料及验收记录中的 3DS 条件；自定义金额不沿用该结果承诺，不把 `INNER` 或修改金额作为强制认证补丁。同步 create 的 `respCode=20000` 仅表示创建请求成功，返回 `status=U`、`transactionId` 和 `paymentId` 后才初始化 SDK。客户端向 intent 提交 allowlist journey id、允许的预期支付方式和可选 amountMinor，由服务端验证后保存；普通入口遇到已有非终态恢复能力时始终返回原 Order / Attempt 及其金额，不因页面后来选择另一旅程或金额而创建平行支付。只有下一段定义的用户显式 Sandbox 新订单入口可以更换恢复绑定。
 
-Demo Hub 继续提供两条同结果、可重复的本地模拟旅程。模拟会话使用版本化 `sessionStorage` 在单个浏览器标签页内保存 Order、PaymentAttempt 和 PaymentEvent，刷新时恢复同一 attempt；Retry 追加新 attempt 并保留旧历史。该存储不包含凭据、PAN / CVV 或原始 provider payload，也不替代第 6 节要求的服务端持久化。真实 Sandbox 会话不写入该 simulation 存储。为避免 Provider-created 非终态阻塞后续受控测试，Demo Hub 的真实 Sandbox 按钮与支付页的 clean-run 按钮都显式启动一个新的独立 Sandbox Order；这不是旧 Order 的 PaymentAttempt Retry，不取消、不覆盖旧 Attempt，也不改变其支付真值，旧 Attempt 仍由 query / Webhook 收敛。该测试入口只在 Sandbox profile 开放，普通恢复入口仍复用同一非终态 Attempt，不能据此推导 Production 的放弃或重试语义。
+公开 Demo Hub 仅展示真实 Sandbox 旅程，不再提供模拟启动按钮或仅模拟异常旅程。底层确定性模拟状态机、模拟 checkout 路由及普通成功、3DS、异常旅程继续作为自动化测试 fixture 保留，由测试显式初始化，不作为客户入口或真实支付证据。测试模拟会话使用版本化 `sessionStorage` 在单个浏览器标签页内保存 Order、PaymentAttempt 和 PaymentEvent，刷新时恢复同一 attempt；Retry 追加新 attempt 并保留旧历史。该存储不包含凭据、PAN / CVV 或原始 provider payload，也不替代第 6 节要求的服务端持久化。真实 Sandbox 会话不写入该 simulation 存储。为避免 Provider-created 非终态阻塞后续受控测试，Demo Hub 的真实 Sandbox 按钮与支付页的 clean-run 按钮都显式启动一个新的独立 Sandbox Order；这不是旧 Order 的 PaymentAttempt Retry，不取消、不覆盖旧 Attempt，也不改变其支付真值，旧 Attempt 仍由 query / Webhook 收敛。该测试入口只在 Sandbox profile 开放，普通恢复入口仍复用同一非终态 Attempt，不能据此推导 Production 的放弃或重试语义。
 
 ### Direct 钱包付款反馈
 
@@ -147,11 +159,11 @@ Apple Pay 与 Google Pay 的主付款区域均先展示商品、订单号和金�
 
 ### Apple Pay Direct API（Issue #17）
 
-固定范围为 `apple-pay-direct`：E-commerce、USD 5.00、SALE，商品 `HL-APPLE-005`。沿用现有 Sandbox merchantNo/appId；Merchant ID 为 `merchant.com.onerway.showcase`，域名为 `https://onerway-payment-showcase.vercel.app`。本期使用自有 Merchant Identity 验证商户，Payment Processing 私钥及 token 代解密由 Onerway 承担；不调用代理验证接口，不采集卡号，不含订阅、AUTH、其他 Direct 方式或 Production 交易。渠道及域名准备的确认不替代真实支付证据。
+旅程为 `apple-pay-direct`：E-commerce、USD、SALE，商品 `HL-APPLE-005`；默认金额 USD 5.00，一次性金额可按第 4 节范围编辑。沿用现有 Sandbox merchantNo/appId；Merchant ID 为 `merchant.com.onerway.showcase`，域名为 `https://onerway-payment-showcase.vercel.app`。本期使用自有 Merchant Identity 验证商户，Payment Processing 私钥及 token 代解密由 Onerway 承担；不调用代理验证接口，不采集卡号，不含订阅、AUTH、其他 Direct 方式或 Production 交易。渠道及域名准备的确认不替代真实支付证据。
 
 - `POST /v1/txn/consultPaymentMethod` 以本交易金额、币种、US、WEB、DIRECT 查询，读取唯一 `ApplePay` 的 `countryCode` 与 `subCardTypes`。浏览器资格另用官方 Apple Pay JS `1.latest` 与能力检测确认；不硬编码 Safari-only。优先验收 iPhone Safari，跨浏览器扫码不在首期必验范围。
 - 订单先持久化并签发既有 HttpOnly recovery cookie。自动支付的 Direct 提交与所有 intent 共用同一独占 Web Lock；锁等待计入授权预算，超时、取消或离页后尚未发出的提交不再执行，防止多标签切换订单覆盖在途提交的恢复绑定。官方 `apple-pay-button` 的用户点击同步启动 ApplePaySession；订单金额和币种由服务端控制。准备、商户验证不创建上游交易；自动支付收到完整 `event.payment.token` 后，服务端才原子认领既有 creation claim 并提交 `/v1/txn/doTransaction`。请求固定 `CARD + DIRECT + SALE`，`tokenInfo = JSON.stringify({ provider: 'ApplePay', tokenId: JSON.stringify(token) })`。每层只序列化一次，使用完整 token 而非仅 paymentData。
-- 2026-10-08 用户授权两种 Sandbox 模式：默认「自动支付」在 Wallet 授权后立即按原流程提交；「手动调试」只捕获 token，不调用 `/api/payment/apple-pay/pay`、不认领提交、不自动轮询 Provider、不把订单投影成 processing / succeeded / failed。模式必须在打开 Wallet 前选择；面板打开、准备中或已提交后禁止切换。手动捕获后取消本地授权 timer 并调用 `ApplePaySession.abort()` 结束本次 sheet，不使用 `STATUS_SUCCESS` 伪报支付成功，也不让 sheet 停留等待复制；本次主动关闭的晚到 `oncancel` 不清除捕获的副本。用户之后主动展开或复制 token 到 Apifox 等工具，以与授权一致的 USD 5.00 请求自行提交并在该工具核对结果；外部请求不自动关联本页 Order。清空 token 不改变「未提交」事实；切换模式或重新打开 Wallet 会清除旧副本，自动模式必须取得新授权，不自动消费手动 token。Apple 的 30 秒回调响应要求不是 token 有效期；授权后 abort 的设备表现及捕获 token 能否被 Onerway 受理仍需真实 Sandbox 验证。
+- 2026-10-08 用户授权两种 Sandbox 模式：默认「自动支付」在 Wallet 授权后立即按原流程提交；「手动调试」只捕获 token，不调用 `/api/payment/apple-pay/pay`、不认领提交、不自动轮询 Provider、不把订单投影成 processing / succeeded / failed。模式必须在打开 Wallet 前选择；面板打开、准备中或已提交后禁止切换。手动捕获后取消本地授权 timer 并调用 `ApplePaySession.abort()` 结束本次 sheet，不使用 `STATUS_SUCCESS` 伪报支付成功，也不让 sheet 停留等待复制；本次主动关闭的晚到 `oncancel` 不清除捕获的副本。用户之后主动展开或复制 token 到 Apifox 等工具，以与本次授权一致的订单金额及币种自行提交请求并在该工具核对结果；外部请求不自动关联本页 Order。清空 token 不改变「未提交」事实；切换模式或重新打开 Wallet 会清除旧副本，自动模式必须取得新授权，不自动消费手动 token。Apple 的 30 秒回调响应要求不是 token 有效期；授权后 abort 的设备表现及捕获 token 能否被 Onerway 受理仍需真实 Sandbox 验证。
 - `ONERWAY_*` 仍由 `server/utils/profile.ts` 唯一解析。新增 Sandbox Apple Merchant ID、证书 PEM 和私钥 PEM 仅在服务端；全部未配时 SDK / Checkout 仍可运行，部分配置则拒绝。身份材料不得放入 public profile、客户端、日志或持久层。Merchant Identity 与 Payment Processing 证书用途不能混用。
 - 验证 URL 来自 Apple 事件，服务端仅允许 HTTPS 的 `apple-pay-gateway-cert.apple.com` 或 `cn-apple-pay-gateway-cert.apple.com`，路径仅 `/paymentservices/startSession` 或 `/paymentservices/paymentSession`；拒绝 userinfo、显式端口、query、fragment、其他主机与重定向。域名取受控 canonical origin；mTLS 总等待与响应大小有界。Apple Sandbox tester 与 Sandbox merchant session 配对，遵守 TN3174 的 2026-10-01 环境变更，不从 Vercel deployment 名称推导 Apple 环境。
 - 商户验证失败的服务端诊断仅记录固定类别（URL / 账号环境、未配置、HTTP 拒绝、超时、TLS、传输、响应格式或大小）及上游 HTTP 状态；不记录实际验证 URL、身份材料、session、响应体或原始异常。诊断不放宽 Sandbox 地址白名单。
@@ -169,9 +181,9 @@ Apple Pay 与 Google Pay 的主付款区域均先展示商品、订单号和金�
 
 ### Google Pay Direct API（Issue #20）
 
-固定旅程为 `google-pay-direct`：E-commerce、US / USD 5.00、SALE，商品 `HL-GOOGLE-005`。Google `PaymentsClient` 固定 `TEST`，现有 Onerway profile 仍为 Sandbox，两者是独立环境维度。使用官方 `pay.js`、`createButton()`、`isReadyToPay()` 和用户点击时的 `loadPaymentData()`；采用 `PAYMENT_GATEWAY`，由 Onerway 处理 gateway token，不做商户自解密。
+旅程为 `google-pay-direct`：E-commerce、US / USD、SALE，商品 `HL-GOOGLE-005`；默认金额 USD 5.00，一次性金额可按第 4 节范围编辑。Google `PaymentsClient` 固定 `TEST`，现有 Onerway profile 仍为 Sandbox，两者是独立环境维度。使用官方 `pay.js`、`createButton()`、`isReadyToPay()` 和用户点击时的 `loadPaymentData()`；采用 `PAYMENT_GATEWAY`，由 Onerway 处理 gateway token，不做商户自解密。
 
-- 服务端用订单固定的 US / USD 5.00 / WEB / DIRECT 调用 `consultPaymentMethod`，只接受唯一 GooglePay 记录并白名单投影 `gatewayName`、`gatewayMerchantId`、`countryCode`、`subCardTypes`。认证方式按当前 Onerway [Google Pay 指南](https://developers.onerway.com/zh/payments/online-payments/payment-methods/google-pay)同时声明 `PAN_ONLY` 与 `CRYPTOGRAM_3DS`，不从网络列表推导实际 token 的认证方式。生产锁定和唯一 profile 解析保持不变，不把 credential 或整个响应放入 public profile。
+- 服务端用持久化订单金额及 US / USD / WEB / DIRECT 调用 `consultPaymentMethod`，只接受唯一 GooglePay 记录并白名单投影 `gatewayName`、`gatewayMerchantId`、`countryCode`、`subCardTypes`。认证方式按当前 Onerway [Google Pay 指南](https://developers.onerway.com/zh/payments/online-payments/payment-methods/google-pay)同时声明 `PAN_ONLY` 与 `CRYPTOGRAM_3DS`，不从网络列表推导实际 token 的认证方式。生产锁定和唯一 profile 解析保持不变，不把 credential 或整个响应放入 public profile。
 - `paymentMethodData.tokenizationData.token` 已是字符串，原样作为 `tokenId`，wire `tokenInfo = JSON.stringify({ provider: 'GooglePay', tokenId: token })`。不解析后重建支付 token，不对 `tokenId` 多做一次 stringify。金额、币种、客户、回跳地址和通知地址由服务器控制；请求保持 CARD / DIRECT / SALE，复用权限、creation claim、独占 Web Lock、签名、Query 与验签 Webhook。
 - 默认自动支付；手动调试在打开 Google 面板前选择，只捕获本次 token，不提交、不认领、不轮询、不改变 Order/Attempt 状态。外部 Apifox 请求及其结果不自动关联本页订单。切换模式、重新授权均清除旧副本，自动模式必须取得新 token。取消与 `loadPaymentData()` 的返回只描述钱包交互，不构成付款成功或 Provider 取消。
 - **2026-10-09 用户明确授权**将完整 token 调试例外扩展到 Google Pay，仅限 Sandbox、用户主动展开、当前页面内存。只提取 token 字符串，不保存完整 PaymentData。JSON 视图仅在可解析为 JSON 对象时展示；否则明确为非对象字符串，不伪造对象。Stringify 提供带外层引号及转义的 JSON 字符串值；Apifox 提供对象形式 `tokenInfo`，交由既有签名脚本序列化外层一次；Direct API 提供已经序列化的 wire 字符串。四种用途必须还原同一个原始 token。清空、新授权、模式切换、离页（含 BFCache）及销毁时清除；刷新不恢复。不进入日志、数据库、PaymentEvent、浏览器存储、URL、公开 profile 或既有 Technical details。剪贴板由用户管理；自动提交后的 token 不得再次用于扣款。该例外不开放 PAN/CVV、Production 或重复提交，测试与截图仅用合成数据。
@@ -186,7 +198,7 @@ Apple Pay 与 Google Pay 的主付款区域均先展示商品、订单号和金�
 
 已确认的官方输入与跳转契约：
 
-- [收银台接入](https://developers.onerway.com/zh/payments/online-payments/checkout)与[创建收银台支付](https://developers.onerway.com/zh/payments/api-reference/endpoints/create-checkout-payment)：调用 `POST /txn/payment`，普通聚合支付使用 `productType=ALL`、`subProductType=DIRECT`、`txnType=SALE`，不传 `lpmsInfo`，避免锁定单一支付方式。金额与商品继续由服务端固定旅程生成；按创建接口必填要求提供固定 Sandbox 账单/收货样例（US、CA 与测试邮箱），不向客户采集这些字段。
+- [收银台接入](https://developers.onerway.com/zh/payments/online-payments/checkout)与[创建收银台支付](https://developers.onerway.com/zh/payments/api-reference/endpoints/create-checkout-payment)：调用 `POST /txn/payment`，普通聚合支付使用 `productType=ALL`、`subProductType=DIRECT`、`txnType=SALE`，不传 `lpmsInfo`，避免锁定单一支付方式。商品来自服务端旅程 allowlist，金额来自经 intent 验证后持久化的订单；按创建接口必填要求提供固定 Sandbox 账单/收货样例（US、CA 与测试邮箱），不向客户采集这些字段。
 - `txnOrderMsg` 提供 `returnUrl` 与 `notifyUrl`；浏览器、设备及持卡人 IP 由托管收银台采集，商户不沿用 SDK create 的 browser/device/IP 输入。创建返回 `U` 与 `redirectUrl` 后跳转，回跳不构成成功证据。
 - 当前公开示例证实的 Sandbox 跳转 origin 为 `https://sandbox-checkout.onerway.com`，路径包含 `/checkout` 与 `/aggregate`；示例不能作为任意子域或 Production origin 的授权。跳转 URL 只用于当前请求后的浏览器导航，不记录日志、不写入 Order / Attempt / Event、不进入 Technical details。
 
@@ -203,9 +215,9 @@ Apple Pay 与 Google Pay 的主付款区域均先展示商品、订单号和金�
 
 实施规则：
 
-- 固定真实旅程为 `hosted-checkout`（USD 5.00、`HL-CHECKOUT-005`）与 `hosted-checkout-three-ds`（USD 50.00、`HL-CHECKOUT-050`），均为 `integration=checkout`、`method=all`，不提供伪造收银台或结果保证的本地 simulation。USD 50.00 触发条件由用户在 Issue #8 确认；验收时在托管页选择 Card，由 Provider 承接 Challenge，不新增商户 3DS、risk strategy 补丁或客户端金额输入。选择其他支付方式不构成 Card 3DS 验收。`all` 通过 `0007_checkout` 迁移加入已有 method 约束；新增旅程复用现有 Order / Attempt / Event，无新增数据库字段。
-- Hosted 页与结果页从持久化 Order 的固定商品和金额识别旅程，`threeDSJourney=challenge` 仅表示本次选择的测试旅程，不证明实际发生或通过 Challenge；USD 5.00 使用 `not-selected`，不承诺 Provider 不会要求认证。Hosted 页显式启动独立 Sandbox Order 时保留当前固定旅程，不静默降回 USD 5.00；恢复和 Retry 继续保留原订单关联。
-- 创建继续分为先持久化 intent 并签发 cookie、再认领 Provider create 两步。adapter 由持久化 Attempt 的 integration 决定；Hosted create 只接受空对象，不调用客户端 browser data 采集。页面位于 `/halden/hosted/:order`，展示订单和白名单引用，再由客户点击进入托管收银台；不挂载 SDK、不调用 confirm 或 SDK submission latch。
+- 真实旅程为 `hosted-checkout`（默认 USD 5.00、`HL-CHECKOUT-005`）与 `hosted-checkout-three-ds`（默认 USD 50.00、`HL-CHECKOUT-050`），一次性金额可按第 4 节范围编辑，均为 `integration=checkout`、`method=all`，不提供伪造收银台或结果保证的本地 simulation。USD 50.00 触发条件由用户在 Issue #8 确认；验收时在托管页选择 Card，由 Provider 承接 Challenge，不新增商户 3DS 或 risk strategy 补丁；金额编辑不保证触发或通过 Challenge。选择其他支付方式不构成 Card 3DS 验收。`all` 通过 `0007_checkout` 迁移加入已有 method 约束；新增旅程复用现有 Order / Attempt / Event，无新增数据库字段。
+- Hosted 页与结果页从持久化 Order 的商品身份、币种与金额自洽识别旅程。默认 USD 50.00 的 3DS 预设可标为 `threeDSJourney=challenge`，只表示所选测试条件，不证明实际发生或通过 Challenge；其他一次性金额使用 `provider-determined`，不承诺 Provider 会要求或跳过认证。Hosted 页显式启动独立 Sandbox Order 时保留当前旅程和金额，不静默降回 USD 5.00；恢复和 Retry 继续保留原订单关联与金额。
+- 创建继续分为先持久化 intent 并签发 cookie、再认领 Provider create 两步。adapter 由持久化 Attempt 的 integration 决定；Hosted create 只接受空对象，不调用客户端 browser data 采集。客户在 Demo Hub 确认当前选择并启动后，`/halden/hosted/:order` 自动消费本次 create 返回且与当前 Attempt 匹配的一次性内存链接，直接进入托管收银台，不再要求第二次确认。该页面仍承载导航失败、刷新和返回后的订单恢复与白名单引用；不存在新鲜链接时只查询原订单，不自动重建或重放。普通支付、预授权与首次订阅共用该导航规则；不挂载 SDK、不调用 confirm 或 SDK submission latch。
 - 跳转 URL 仅保留在当前浏览器内存的独立导航引用中，外跳时消费；不进入 Payment session/Event、持久层或 Technical details。刷新、恢复与结果未知时不重放 create、不拼造收银台 URL，只恢复和查询已有交易。
 - `Return to Merchant Page` 的显示由商户开关控制。2026-09-16 用户确认该入口只返回商户页，不立即关闭交易或发送取消通知；交易置为 `N` 及取消通知须等待 Provider 超时关单。点击入口后仍为 `U` 时继续保持 `processing`，不得把返回、关闭页面或点击行为映射为 `cancelled`。验收分别记录同订单返回恢复与超时关单后的 query / Webhook 收敛，不以返回成功替代 `N` 终态证据，也不假设未确认的关单时长。
 - Checkout 查询调用 `POST /v1/txn/list`，按保存的 `merchantTxnId` 唯一匹配，并核对金额、币种及已有 provider IDs；`S → succeeded`、`N → cancelled`、`R → requires_action`、`I/U/P → processing`。交易 `F` 可能对应仍开放的 Payment，因此保守保持 `processing`，不开放新扣款 Retry；存在 Payment 轴时结合 `S/O/N`，未知值拒绝。
@@ -213,21 +225,21 @@ Apple Pay 与 Google Pay 的主付款区域均先展示商品、订单号和金�
 - 创建响应丢失后若只有无 Payment ID 的 Checkout 取消事实，恢复响应显式返回 `paymentId=null`、`query=null`；页面按 cookie 恢复既有取消，不能伪造 Payment ID、query capability 或调用 SDK。该情形首版不提供同 Order Retry，用户可回 Demo Hub 启动独立 Sandbox Order；具有 Payment ID 的权威取消继续使用既有唯一 child Retry。
 - `returnUrl` 在服务端 SSR 前丢弃附加 query（303、no-store、no-referrer），使用同源恢复 cookie 并对同一订单 fresh query；Checkout 按交易维度查询，SDK 按 Payment 维度查询。双方终态冲突遵循第 6 节用户确认的调和规则。Production 交易、canonical origin、限流及凭据边界不变。
 
-验收按 Showcase 责任与证据类型分层。自动化覆盖固定旅程、创建认领与 URL 单次消费、回跳查询、无 Payment ID 取消、header 验签与幂等、终态冲突、跨 integration 恢复及 SDK 回归；页面检查覆盖约定的响应式、明暗和键盘交互。真实 Sandbox 验证本次承诺的客户旅程和通知链路，不要求每个防御性测试都有真实交易副本。用户于 2026-09-16 确认按 Demo 目标收尾，不将 Provider 拒付及其内部重试机制作为本次交付必验项；状态映射与安全限制不因此放宽。
+验收按 Showcase 责任与证据类型分层。自动化覆盖受控旅程、金额边界及关联、创建认领与 URL 单次消费、回跳查询、无 Payment ID 取消、header 验签与幂等、终态冲突、跨 integration 恢复及 SDK 回归；页面检查覆盖约定的响应式、明暗和键盘交互。真实 Sandbox 验证本次承诺的客户旅程和通知链路，不要求每个防御性测试都有真实交易副本。用户于 2026-09-16 确认按 Demo 目标收尾，不将 Provider 拒付及其内部重试机制作为本次交付必验项；状态映射与安全限制不因此放宽。
 
 一次性支付的执行结果登记在 [Issue #8](https://github.com/abel-wang777-showcase/onerway-payment-showcase/issues/8)，长期验收边界为：
 
 | 范围 | 验收要求 |
 | --- | --- |
-| 当前演示交付 | 保留 USD 5.00 普通入口，交付 USD 50.00 3DS；确认客户可进入托管页、完成约定旅程并由服务端核验。USD 50 的用户人工确认单列，不与其他订单的通知证据拼成同笔全链路 |
+| Issue #8 原始演示验收 | USD 5.00 普通入口与 USD 50.00 3DS；确认客户可进入托管页、完成约定旅程并由服务端核验。USD 50 的用户人工确认单列，不与其他订单的通知证据拼成同笔全链路 |
 | 商户返回与恢复 | Return to Merchant Page、关闭 / 刷新 / 后退只恢复原订单，不以交互判定终态、不重复创建；超时关单后的 N 由 query / Webhook 收敛 |
 | 通知接收 | 核对真实通知的 Provider 发送与 ACK、同笔持久化和结果；重复回放仅证明接收端幂等，不证明 Provider 自动重试。成功通知重发与自动超时取消分别记录 |
-| 后续按需演示 | Apple Pay、Google Pay 和选定 APM 在商户、US / USD、设备与钱包条件具备且明确安排演示时验证，记录实际方式和网络；本次不提升对应能力状态，不作为当前固定 Card 旅程的交付阻断 |
+| 后续按需演示 | Apple Pay、Google Pay 和选定 APM 在商户、US / USD、设备与钱包条件具备且明确安排演示时验证，记录实际方式和网络；本次不提升对应能力状态，不作为当时约定 Card 旅程的交付阻断 |
 | 后续按需诊断 | 3DS 取消 / 失败、Provider 拒付后重试、成功支付首次自动通知，以及通知乱序、缺 Payment ID、创建响应未知等真实异常样本保留未验证范围；仅在明确需求或具体缺陷涉及它们时补验，不为凑齐矩阵制造交易 |
 
 Showcase 对 transaction F 的保守映射、缺 Payment ID 取消的受限关联、未知创建结果禁止重复 create、通知验签 / 幂等 / 终态调和仍是实现要求，继续由相关自动化验证。后续真实样本未验证不等于本次演示未完成，也不得写成已通过。`ALL` 仅表示托管页选择策略，不作为任何具体支付方式已验证的依据；能力改为 Available 仍须满足对应组合条件。
 
-代理执行的真实记录应包含日期、canonical Production 部署 SHA、Sandbox profile、固定旅程、实际方式、设备 / 浏览器、国家 / 币种、观察到的交互及核验来源；未取得的字段明确标为未知。用户人工验收按其明确确认的范围登记，不推定缺失订单或设备信息。受限诊断使用同笔白名单标识关联通知、query 与持久化，公开 Issue / PR 只保留脱敏尾号及证据摘要；不记录完整交易标识、卡数据、导航 URL、query capability 或原始 payload。模拟、自动化、人工确认、真实 Provider 发送与手动回放不得互相替代。
+代理执行的真实记录应包含日期、canonical Production 部署 SHA、Sandbox profile、所选旅程、订单金额、实际方式、设备 / 浏览器、国家 / 币种、观察到的交互及核验来源；未取得的字段明确标为未知。用户人工验收按其明确确认的范围登记，不推定缺失订单或设备信息。受限诊断使用同笔白名单标识关联通知、query 与持久化，公开 Issue / PR 只保留脱敏尾号及证据摘要；不记录完整交易标识、卡数据、导航 URL、query capability 或原始 payload。模拟、自动化、人工确认、真实 Provider 发送与手动回放不得互相替代。
 
 ### Checkout 保存卡与复购（Issue #9）
 
@@ -259,7 +271,7 @@ Checkout 复用第 6.1 节固定 `halden-daily-essentials-v1` 计划、服务端
 
 ### Checkout 预授权、请款与撤销（Issue #11）
 
-本期范围是 Card 的标准全额 `AUTH → CAPTURE` 与 `AUTH → VOID`，继续使用 `Order → PaymentAttempt → PaymentEvent`、服务端 customer scope 和现有恢复权限。部分或多次请款、增量授权、退款、APM 预授权、分期与 Production 交易不在范围内。实现接入固定 USD 5.00 旅程、交易路由、资金操作、通知持久化及原交易查询补偿，能力仍保持 Conditional。真实 Sandbox 与自动化验收分别记录在 Issue #11，不因本地或 mock 闭环通过而宣称真实旅程已验收。
+本期范围是 Card 的标准全额 `AUTH → CAPTURE` 与 `AUTH → VOID`，继续使用 `Order → PaymentAttempt → PaymentEvent`、服务端 customer scope 和现有恢复权限。部分或多次请款、增量授权、退款、APM 预授权、分期与 Production 交易不在范围内。实现接入默认 USD 5.00、允许按第 4 节编辑一次性金额的旅程，以及交易路由、资金操作、通知持久化及原交易查询补偿，能力仍保持 Conditional。真实 Sandbox 与自动化验收分别记录在 Issue #11，不因本地或 mock 闭环通过而宣称真实旅程已验收。
 
 [Checkout 指南](https://developers.onerway.com/payments/online-payments/checkout#pre-authorization)与[创建接口](https://developers.onerway.com/payments/api-reference/endpoints/create-checkout-payment)规定通过 `POST /txn/payment`、`subProductType=DIRECT`、`txnType=AUTH` 创建授权。用户已于 2026-09-18 确认当前 Sandbox 商户支持 `CARD + DIRECT + AUTH`，本期固定使用该组合；商户支持已确认不代表实现或真实验收已经完成。3DS、卡信息与设备信息由托管页承接。
 
@@ -301,7 +313,7 @@ AUTH 回跳仅记录导航事实，再通过恢复入口查询；结果页刷新
 3. Webhook 先可靠持久化、幂等处理，再按 Onerway 契约返回 ACK。
 4. query 与 Webhook 都产生 PaymentEvent，并通过明确的优先级和状态迁移规则收敛 PaymentAttempt。
 5. `processing` 必须可刷新恢复和后续收敛；重复回调不得重复创建业务结果或触发重复扣款。
-6. 浏览器一旦调用 `confirmPayment()`，除当前仍存活的 v4 Checkout 明确返回顶层 `paymentStatus=O` 或 `reason.type=canceled` 外，不得把同一 PaymentAttempt 恢复为可再次提交；`R`、`P`、`A`、离页或客户端结果未知时只允许查询该 attempt，直到服务端真值收敛。刷新会丢失该临时 SDK 交互许可，因此 provider-created Attempt 仍恢复为 query-only。
+6. 浏览器一旦调用 `confirmPayment()`，除当前仍存活的 v4 Checkout 明确返回顶层 `paymentStatus=O`，或没有顶层支付状态的 `reason.type=canceled / validation_error` 外，不得把同一 PaymentAttempt 恢复为可再次提交；`R`、`P`、`A`、离页或客户端结果未知时只允许查询该 attempt，直到服务端真值收敛。刷新会丢失该临时 SDK 交互许可，因此 provider-created Attempt 仍恢复为 query-only。
 
 ### 6.1 Card 初始订阅与独立合约状态
 
@@ -329,15 +341,15 @@ configured `returnUrl` 始终发送，Provider 自动导航到 canonical merchan
 
 SubscriptionContract 自有 customer scope、plan projection、初始审计标识、标准状态、白名单 Provider 状态、可空唯一 `contractId`、server-only `tokenId` 与生命周期时间戳。`initialAttemptId` 唯一；Payment Order 30 天删除后，非终态合约仍可独立执行 duplicate guard、Webhook 关联和 known-contract query。合约明确进入 `dataStatus=3`、`canceled` 或 `ended` 时立即擦除 token，只保留最小 contract/customer/plan tombstone 与首次 `terminalAt`，30 天后删除；重复终态事实不得刷新 `terminalAt`。Payment 最终失败/取消且 `contractId` 仍为空时，placeholder 同样进入 30 天清理；已有 contract 且仍为 `0 + paymentdue` 时保持并等待 query，`dataStatus=2` 在 Provider 明确不可恢复前保持 needs-attention，不自动删除。
 
-Card merchant confirm 使用独立的持久化 submission latch：浏览器在调用 `confirmPayment()` 前，必须以当前 HttpOnly recovery cookie 加精确匹配的 `orderId + attemptId + paymentId` 请求服务端原子写入 `PaymentAttempt.submissionStartedAt`。该时间只证明服务端已经签发一次 confirm 前置许可，不证明浏览器实际调用、confirm 返回或支付成功。首次 claim 返回 `claimed=true` 后客户端才允许调用 confirm；重复 claim 或响应未知不得再次 confirm，只能恢复并查询原 Attempt。顶层 `O` 或 `reason.type=canceled` 仍可在同一未刷新的 Checkout 中沿用已签发的临时许可再次 confirm，但不会清除持久化 latch；刷新后仍一律 query-only。历史 provider-created Attempt 无法证明从未提交，迁移时保守回填该 latch，不能因部署升级重新开放提交。
+Card merchant confirm 使用独立的持久化 submission latch：浏览器在调用 `confirmPayment()` 前，必须以当前 HttpOnly recovery cookie 加精确匹配的 `orderId + attemptId + paymentId` 请求服务端原子写入 `PaymentAttempt.submissionStartedAt`。该时间只证明服务端已经签发一次 confirm 前置许可，不证明浏览器实际调用、confirm 返回或支付成功。首次 claim 返回 `claimed=true` 后客户端才允许调用 confirm；重复 claim 或响应未知不得再次 confirm，只能恢复并查询原 Attempt。顶层 `O` 或没有顶层支付状态的 `reason.type=canceled / validation_error` 仍可在同一未刷新的 Checkout 中沿用已签发的临时许可再次 confirm，但不会清除持久化 latch；刷新后仍一律 query-only。历史 provider-created Attempt 无法证明从未提交，迁移时保守回填该 latch，不能因部署升级重新开放提交。
 
 新 PaymentAttempt Retry 与“重载原 Payment”或“启动独立 Sandbox Order”是三种不同动作：SDK 脚本 / Element 在 pre-confirm 阶段加载失败时先重载同一个 `paymentId`，不创建新 Attempt；create、confirm 或网络结果未知以及 `created / requires_action / processing` 只恢复和 query 原 Attempt；独立 clean-run 继续创建新 Order。只有 query / Webhook 权威建立的 `cancelled`，以及未来具有同等权威来源的 `failed`，才允许服务端在同一 Order 下创建带 `retryOf` 的新 Attempt。当前 transaction `F`（包括 Checkout 查询返回的 `F`）不能单独映射 Payment-level `failed`，在正式来源确认前真实 Sandbox `failed` 路径保持 stop gate。
 
-Retry 由服务端在单一数据库事务中锁定 parent、重新计算资格并 get-or-create 唯一直接 child；数据库以非空 `retry_of` 唯一索引防止多击、请求重放或跨实例并发产生兄弟 Attempt。child 继承 parent 的 integration / method，使用新的 `merchantTxnId`，不覆盖旧 Attempt/Event。切换 recovery cookie 前 child 记录必须已完成数据库提交；响应丢失后，无论浏览器仍持有旧 parent cookie，还是已经收到响应头并切换为该 child cookie，重放同一个 parent retry 请求都只回读同一 child，其他 cookie lineage 一律拒绝。child 调用 Provider create 前必须再次锁定并核验 parent 资格，防止 parent 在建 child 后被 fresh query 调和为 `succeeded` 仍产生新扣款；一旦 child 已有 create claim 或 Provider 标识，后续只恢复该 child，不能重放 create。若 pre-create child 因 parent 真值变化而不再具有 Retry 资格，claim 事务必须先持久化本地、非投影且不可逆的拒绝事件，再永久关闭该 child；recovery 只在该拒绝事实存在时恢复并重绑 direct parent，不查询被拒 child 的 Provider creation、不删除 child 历史，也不把 child 伪装为 Provider `cancelled / failed`。
+Retry 由服务端在单一数据库事务中锁定 parent、重新计算资格并 get-or-create 唯一直接 child；数据库以非空 `retry_of` 唯一索引防止多击、请求重放或跨实例并发产生兄弟 Attempt。child 继承 parent 的 integration / method，复用原 Order 及其金额，使用新的 `merchantTxnId`，不覆盖旧 Attempt/Event。切换 recovery cookie 前 child 记录必须已完成数据库提交；响应丢失后，无论浏览器仍持有旧 parent cookie，还是已经收到响应头并切换为该 child cookie，重放同一个 parent retry 请求都只回读同一 child，其他 cookie lineage 一律拒绝。child 调用 Provider create 前必须再次锁定并核验 parent 资格，防止 parent 在建 child 后被 fresh query 调和为 `succeeded` 仍产生新扣款；一旦 child 已有 create claim 或 Provider 标识，后续只恢复该 child，不能重放 create。若 pre-create child 因 parent 真值变化而不再具有 Retry 资格，claim 事务必须先持久化本地、非投影且不可逆的拒绝事件，再永久关闭该 child；recovery 只在该拒绝事实存在时恢复并重绑 direct parent，不查询被拒 child 的 Provider creation、不删除 child 历史，也不把 child 伪装为 Provider `cancelled / failed`。
 
 Demo Hub 初始化探测恢复会话期间，普通支付的恢复与新单入口保持禁用，并明确显示正在检查。恢复与创建独立订单使用固定、分离的动作：用户点击恢复后，即使会话缺失、失效或异步状态变化，也不得自动转为创建 Order / Attempt 或调用 Provider create；只有明确的新订单入口可以创建独立 Sandbox 订单。
 
-客户端异常动作使用结构化 operation + action 契约，不从任意错误 message 或 HTTP 状态单独猜测：pre-confirm SDK / Element load 失败只重载同一个 `paymentId`；create 结果未知只恢复已有 Attempt；query / confirm 结果未知只核验已有 Attempt；暂时性 recovery 失败只重试 restoration；只有服务端权威允许的终态才显示同 Order Retry；clean-run 始终创建独立 Order。query capability 被拒绝时最多先通过 HttpOnly recovery 刷新一次 capability，再查询同一 Attempt，不循环复用旧 token。Retry 或 child create 响应未知时优先恢复 cookie 当前绑定的 parent/child；不得因此再次 confirm 或无条件重放 Provider create。
+客户端异常动作使用结构化 operation + action 契约，不从任意错误 message 或 HTTP 状态单独猜测：pre-confirm SDK / Element load 失败只重载同一个 `paymentId`；明确的 SDK 本地表单校验失败保留同一存活表单供用户补填；create 结果未知只恢复已有 Attempt；query / confirm 结果未知只核验已有 Attempt；暂时性 recovery 失败只重试 restoration；只有服务端权威允许的终态才显示同 Order Retry；clean-run 始终创建独立 Order。query capability 被拒绝时最多先通过 HttpOnly recovery 刷新一次 capability，再查询同一 Attempt，不循环复用旧 token。Retry 或 child create 响应未知时优先恢复 cookie 当前绑定的 parent/child；不得因此再次 confirm 或无条件重放 Provider create。
 
 授权 recovery 同时返回该 Order 的白名单 Attempt 历史，并显式保留 cookie 当前绑定的 active Attempt；客户端不得用数组末项猜 active。历史只展示 Attempt id、标准状态、active 标记与 `retryOf` 关系，不新增原始 Event/provider payload 暴露面。
 
@@ -403,7 +415,7 @@ Sandbox profile 由 `ONERWAY_SHOWCASE_ORIGIN` 固定公开 canonical origin；�
 - 保存和展示请求、响应、Webhook、Technical details 前统一脱敏；仅第 5 节明确授权的 Sandbox 当前访问 token 调试区允许用户主动展示/复制完整标准 Apple token 或 Google gateway token，仍禁止持久化。
 - Onerway `production` profile 默认锁定。基础域名已确认不代表允许交易；启用实际交易仍需单独确认凭据、回调验签、审计、错误处理和显式开关。
 - 所有 Vercel scope 都不得配置或开放 Onerway Production 实际交易；Vercel Production target 也必须继续服从该锁定。
-- Onerway `production` profile 锁定时仍可运行明确标记为 Simulation 的纯本地旅程，因为它不产生上游请求或交易；页面必须同时保留 Simulation 与 Transactions locked 提示。
+- Onerway `production` profile 锁定时，公开 Demo Hub 的付款入口保持禁用，并明确说明当前预览尚未启用 Sandbox 支付；不自动降级为模拟付款。自动化测试仍可显式初始化纯本地模拟 fixture，保留 Simulation 标识且不产生上游请求或交易。
 
 Sandbox 基础域名为 `https://sandbox-acq.onerway.com`，create 与 query 请求来源必须已加入 Sandbox IP allowlist。Production 基础域名为 `https://acq.onerway.com`；启用条件尚未确认。
 
@@ -416,15 +428,17 @@ Sandbox 基础域名为 `https://sandbox-acq.onerway.com`，create 与 query 请
 - 使用 Nuxt UI 原语和 registry 提供的语义 token，不复制原型中的硬编码样式。
 - 初始只安装 `geist-foundation`；复制动作复用同一已锁定 revision 的 registry `foundation-copy-button` / `foundation-use-copy`，不复制旧 `assets/starter`、旧 export、playground 或 API Docs kit。
 - 验收 1440、834、390、320 宽度；独立静态画板不等于真实响应式已通过。
-- Demo Hub 的选择器使用正确的 radio / `aria-pressed` 语义。
+- Demo Hub 的接入页签使用 `tablist` / `tab` / `tabpanel` 语义，配置下拉使用 `combobox` / `listbox` / `option` 语义，并支持键盘选择。
+- Demo Hub 优先展示当前可运行选择与明确的启动入口；未开放选项保留在展开区。移动端按配置、启动摘要的顺序展示，补充详情可展开，并提供长页面返回启动区的入口；链接只记录 journey、method、mode、plan 等公开选择。跨接入方式切换时保留仍受支持的钱包，订阅模式不展示不能控制初次支付的普通支付方式选择。
+- 商户支付页先展示订单摘要、付款表单和当前可执行动作，再展示排查引用。无法执行且未加载的付款按钮不占据移动端固定操作栏。结果页先展示结果与下一步，再展示尝试历史和技术详情；刷新失败保留此前确认状态并单独报告本次更新失败。
 - 页面提供 `main`、`nav`、`aria-current`、`aria-controls`、可见键盘焦点和状态播报。
 - `Change`、`Back to cart` 等控件在演示中必须有真实行为，否则删除。
 - 不承诺未实现的邮件发送；卡数据文案只陈述经 SDK / 合规确认的边界。
 - SDK 托管输入区的键盘、验证、错误和 iframe 可访问性必须基于真实 SDK 验证。
-- Issue #3 的 Payment Element 只是明确标记的非交互 simulation 区域，不渲染 PAN / CVV、伪钱包按钮或伪 SDK 输入。
-- 模拟结果的 Technical details 只展示白名单化的 mode、journey、order / attempt 标识、minor amount / currency、标准状态、3DS 模拟标记和 attempt 数量；不得伪造 Onerway transaction id、响应码或 provider payload。
+- 仅供自动化测试保留的模拟 Payment Element 是明确标记的非交互 simulation 区域，不渲染 PAN / CVV、伪钱包按钮或伪 SDK 输入；公开 Demo Hub 不提供该入口。
+- 自动化模拟 fixture 结果的 Technical details 只展示白名单化的 mode、journey、order / attempt 标识、minor amount / currency、标准状态、3DS 模拟标记和 attempt 数量；不得伪造 Onerway transaction id、响应码或 provider payload。
 - 真实 Sandbox checkout 在终态形成前必须直接展示可跨系统排查的白名单引用：`merchantTxnId`、Onerway `transactionId`、`paymentId`、Showcase `orderId` 与 `attemptId`；缺失的 provider 标识不伪造。Technical details 可展示 mode、integration、当前 SDK release 标签、受控 journey / 3DS journey 标记、是否观察到 return、上述 order / attempt / merchant transaction / transaction / payment 标识、minor amount / currency、标准状态、query 原始状态、核验 source、预期方式、transaction query 核验的实际钱包和底层网络；SDK callback method 必须另标为非持久的交互事实。当前交互提示还可展示上一段定义的受约束 reason type、reason code 与清洗后的 reason message。不得展示 provider 附加的 return query、query capability、完整 `reason`、未清洗的 `reason.message`、`rawResult` 或其他 provider payload。
-- 模拟旅程不得请求 Onerway API、SDK CDN 或银行页面，也不得把结果写成真实 Sandbox 付款完成。
+- 自动化模拟 fixture 不得请求 Onerway API、SDK CDN 或银行页面，也不得把结果写成真实 Sandbox 付款完成；公开 Sandbox 旅程必须使用真实 adapter，不能由模拟替代。
 - 异常动作必须明确区分 Reload secure form、Verify existing payment、Retry payment 与 Start a separate Sandbox order；页面只显示当前状态允许且真实可执行的动作，服务端仍在执行时重新核验权限。
 - Attempt history 使用语义化列表展示 active Attempt 与 `retryOf` 链；长 identifier 在 320px 仍须换行且不得造成水平滚动。
 
@@ -442,7 +456,7 @@ Sandbox 基础域名为 `https://sandbox-acq.onerway.com`，create 与 query 请
 - Checkout、Web JS SDK、Direct API 共用统一支付模型。
 - 客户可以从 Demo Hub 自助选择已开放场景，不依赖内部 Console。
 - 项目由单人维护，以固定场景和能力模型控制范围，不接受一次性演示分支。
-- Demo Hub 的确定性模拟与真实支付 adapter 共用领域模型，但 simulation 事件显式使用独立 source；浏览器会话恢复不是支付真值或正式持久层。
+- 公开 Demo Hub 只提供真实 Sandbox 旅程；确定性模拟仅保留为自动化测试 fixture，与真实支付 adapter 共用领域模型，但 simulation 事件显式使用独立 source，浏览器模拟会话恢复不是支付真值或正式持久层。
 - Web JS SDK v4 当前使用 `paymentId` 初始化且不需要 `redirectUrl`；客户端结果始终经 `/v1/txn/queryPayments` 按 `paymentId` 服务端核验后才形成最终事件。
 - 当前 Web SDK 使用 `productType=ALL + subProductType=DIRECT + merchantCustId` 提供用户主动选择的保存卡能力；不使用旧 SDK 保存卡逻辑的 `subProductType=TOKEN`，且不回退到 `productType=CARD`；不新增绑卡 journey、卡列表或 CardBinding 状态。
 - Web JS SDK 内的 Google Pay / Apple Pay 复用 `standard-success` 与聚合 SDK Element；Showcase 不新增钱包 create 分支、钱包专属 fixture、自绘按钮、Apple merchant-validation / certificate 处理或 token 处理。`PaymentAttempt.method` 是预期方式，实际钱包 / 底层网络只由 `queryPayments.lastTransactionId → /v1/txn/list` 的严格服务端关联记录补齐；钱包归因需要钱包类型与底层网络两项事实齐全。

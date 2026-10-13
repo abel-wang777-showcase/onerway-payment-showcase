@@ -48,7 +48,7 @@ const iconTone = computed(() => ({ success: 'text-success', error: 'text-error',
   <div ref="receipt" class="wallet-receipt" data-wallet-receipt>
     <div class="flex flex-wrap items-start justify-between gap-4 border-b border-default pb-5" aria-label="Order summary" data-wallet-order-summary>
       <div class="min-w-0 flex-1">
-        <p class="font-medium text-highlighted">{{ order?.item.name ?? 'Your Halden order' }}</p>
+        <p class="font-medium text-highlighted">{{ order ? storeProductName(order.item.name) : 'Your Onerway Store order' }}</p>
         <p v-if="order" class="mt-1 text-sm text-toned">{{ order.item.variant }} · <span class="whitespace-nowrap">Qty {{ order.item.quantity }}</span></p>
         <p class="mt-2 break-all text-xs text-toned">Order <span translate="no" class="font-mono">{{ orderId }}</span></p>
       </div>

@@ -1,4 +1,5 @@
 import type { PaymentStatus } from '../../shared/payment/attempt'
+import { isPaymentAmount, parsePaymentAmount, paymentAmountText } from '../../shared/payment/amount'
 import { mapDirectTransactionStatus } from '../../shared/payment/merge'
 import { buildCreationQueryPayload, signPayload, type CreateContext } from './gateway'
 import type { ServerProfile } from './profile'
@@ -41,9 +42,9 @@ export async function postDirect(profile: SandboxProfile, path: string, payload:
 
 export function buildDirectPayload(profile: SandboxProfile, context: CreateContext, tokenInfo: string, provider: DirectWalletProvider): Payload {
   sandbox(profile)
-  if (context.order.scene !== 'ecommerce' || context.order.amount.currency !== 'USD' || context.order.amount.minor !== 500
-    || context.order.item.unitAmount.currency !== 'USD' || context.order.item.quantity * context.order.item.unitAmount.minor !== 500) failDirect('PAYMENT_ORDER_INVALID')
-  const amount = '5.00'
+  if (context.order.scene !== 'ecommerce' || context.order.amount.currency !== 'USD' || !isPaymentAmount(context.order.amount.minor)
+    || context.order.item.unitAmount.currency !== 'USD' || context.order.item.quantity * context.order.item.unitAmount.minor !== context.order.amount.minor) failDirect('PAYMENT_ORDER_INVALID')
+  const amount = paymentAmountText(context.order.amount.minor)
   if (!id(context.merchantTxnId) || !id(context.merchantCustId)) failDirect(code(provider, 'REQUEST_INVALID'))
   const address = { country: 'US', email: 'customer@test.com', province: 'CA' }
   return {
@@ -54,7 +55,7 @@ export function buildDirectPayload(profile: SandboxProfile, context: CreateConte
     tokenInfo,
     txnOrderMsg: {
       appId: profile.appId, returnUrl: context.returnUrl, notifyUrl: profile.notifyUrl,
-      products: [{ currency: 'USD', name: context.order.item.name, num: String(context.order.item.quantity), price: (context.order.item.unitAmount.minor / 100).toFixed(2) }],
+      products: [{ currency: 'USD', name: context.order.item.name, num: String(context.order.item.quantity), price: paymentAmountText(context.order.item.unitAmount.minor) }],
       transactionIp: context.transactionIp, javaEnabled: context.javaEnabled, colorDepth: context.colorDepth,
       screenHeight: context.screenHeight, screenWidth: context.screenWidth, timeZoneOffset: context.timeZoneOffset,
       accept: context.accept, userAgent: context.userAgent, contentLength: context.contentLength, language: context.language,
@@ -83,8 +84,8 @@ function readTransaction(data: unknown, merchantNo: string, context: DirectQuery
   const missingActionIds = provider === 'GooglePay' && !query && record(data) && data.status === 'R'
     && data.transactionId == null && data.paymentId == null
     && (data.merchantTxnId === context.merchantTxnId || (data.merchantTxnId === undefined
-      && typeof data.orderAmount === 'string' && /^5(?:\.0{1,2})?$/.test(data.orderAmount) && data.orderCurrency === context.currency))
-  if (!record(data) || !id(context.merchantTxnId) || context.amountMinor !== 500 || context.currency !== 'USD'
+      && typeof data.orderAmount === 'string' && parsePaymentAmount(data.orderAmount) === context.amountMinor && data.orderCurrency === context.currency))
+  if (!record(data) || !id(context.merchantTxnId) || !isPaymentAmount(context.amountMinor) || context.currency !== 'USD'
     || (!id(data.transactionId) && !missingActionIds) || (context.transactionId !== undefined && data.transactionId !== context.transactionId)
     || (query ? data.merchantTxnId !== context.merchantTxnId : data.merchantTxnId !== undefined && data.merchantTxnId !== context.merchantTxnId)
     || (data.merchantNo !== undefined && data.merchantNo !== merchantNo)
@@ -94,7 +95,7 @@ function readTransaction(data: unknown, merchantNo: string, context: DirectQuery
     || (data.productType !== undefined && data.productType !== 'CARD')
     || (data.appId != null && data.appId !== context.appId)
     || ((query || data.subProductType !== undefined) && data.subProductType !== 'DIRECT')
-    || ((query || data.orderAmount !== undefined) && (typeof data.orderAmount !== 'string' || !/^5(?:\.0{1,2})?$/.test(data.orderAmount)))
+    || ((query || data.orderAmount !== undefined) && (typeof data.orderAmount !== 'string' || parsePaymentAmount(data.orderAmount) !== context.amountMinor))
     || ((query || data.orderCurrency !== undefined) && data.orderCurrency !== context.currency)) failDirect(code(provider, 'RESPONSE_INVALID'))
   let status: PaymentStatus
   try {
@@ -112,7 +113,7 @@ export function readDirectCreateResponse(value: unknown, merchantNo: string, con
   // Keep query envelopes strict and require the full amount/currency on this exception path.
   const declined = record(value) && typeof value.respCode === 'string' && /^\d{5}$/.test(value.respCode)
     && value.respCode !== '20000' && record(value.data) && value.data.status === 'F'
-    && typeof value.data.orderAmount === 'string' && /^5(?:\.0{1,2})?$/.test(value.data.orderAmount)
+    && typeof value.data.orderAmount === 'string' && parsePaymentAmount(value.data.orderAmount) === context.amountMinor
     && value.data.orderCurrency === context.currency
   return readTransaction(declined ? value.data : responseData(value, provider), merchantNo, context, false, provider)
 }

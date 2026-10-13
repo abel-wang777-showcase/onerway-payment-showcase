@@ -58,7 +58,7 @@ describe('application routes', () => {
     }
   })
 
-  it('renders the home shell with Sandbox creation disabled before recovery', async () => {
+  it('renders the public Sandbox-only home with creation disabled before recovery', async () => {
     const response = await fetch('/', {
       headers: {
         accept: 'text/html',
@@ -68,21 +68,24 @@ describe('application routes', () => {
     const mainIds = html.match(/id="main"/g) ?? []
     const buttons = html.match(/<button\b[^>]*>[\s\S]*?<\/button>/g) ?? []
     const sandboxAction = buttons.find(button => button.includes('Checking for an existing Sandbox checkout'))
-    const simulationAction = buttons.find(button => button.includes('Start simulated checkout'))
     const disabled = /^<button\b[^>]*\sdisabled(?:\s|=|>)/
 
     expect(response.status).toBe(200)
     expect(html).toContain('<title>Demo Hub · Onerway Payment Showcase</title>')
-    expect(html).toContain('Choose a payment journey. See exactly what happens.')
-    expect(html).toContain('Start simulated checkout')
+    expect(html).toContain('id="demo-launch"')
+    expect(html).toContain('id="demo-selection"')
+    expect(html).not.toContain('Start simulated checkout')
     expect(sandboxAction).toBeDefined()
     expect(sandboxAction).toMatch(disabled)
-    expect(simulationAction).toBeDefined()
-    expect(simulationAction).not.toMatch(disabled)
+    expect(html).not.toContain('Simulation + Sandbox')
+    expect(html).not.toMatch(/USD 5\.00 · (Processing recovery|Cancelled retry|Deterministic failure|Form load recovery)/)
     expect(html).not.toContain('Start a new real Sandbox checkout')
     expect(html).not.toContain('Start a Separate Sandbox Order')
     expect(html).not.toContain('Restore existing Sandbox checkout')
-    expect(html).toContain('USD 50.00 · 3DS Challenge')
+    expect(html).toContain('role="combobox"')
+    expect(html).toContain('Standard success')
+    expect(html).toMatch(/<input\b[^>]*aria-label="Payment amount"[^>]*>/)
+    expect(html).toContain('$5.00')
     expect(html).toContain('Sandbox profile · Sandbox only')
     expect(mainIds).toHaveLength(1)
 
@@ -105,11 +108,11 @@ describe('application routes', () => {
   })
 
   it.each([
-    ['/halden/checkout/HLD-DEMO-500', 'Simulated checkout · Halden', 'Restoring demo session'],
-    ['/halden/hosted/HLD-SANDBOX', 'Hosted Checkout · Halden', 'Restoring hosted checkout'],
-    ['/halden/sdk/HLD-SANDBOX', 'Sandbox checkout · Halden', 'Restoring Sandbox checkout'],
-    ['/halden/return/HLD-SANDBOX?a=discarded', 'Restoring payment · Halden', 'Restoring payment return'],
-    ['/halden/result/HLD-DEMO-500', 'Payment result · Halden', 'Restoring payment result'],
+    ['/halden/checkout/HLD-DEMO-500', 'Simulated checkout · Onerway Store', 'Restoring demo session'],
+    ['/halden/hosted/HLD-SANDBOX', 'Hosted Checkout · Onerway Store', 'Restoring hosted checkout'],
+    ['/halden/sdk/HLD-SANDBOX', 'Sandbox checkout · Onerway Store', 'Restoring Sandbox checkout'],
+    ['/halden/return/HLD-SANDBOX?a=discarded', 'Restoring payment · Onerway Store', 'Restoring payment return'],
+    ['/halden/result/HLD-DEMO-500', 'Payment result · Onerway Store', 'Restoring payment result'],
   ])('renders the client-restored shell for %s', async (path, title, label) => {
     const response = await fetch(path, {
       headers: {

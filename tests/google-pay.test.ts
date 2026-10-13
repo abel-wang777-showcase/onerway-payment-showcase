@@ -23,6 +23,13 @@ const response = (data: unknown) => ({ respCode: '20000', data })
 afterEach(() => vi.unstubAllGlobals())
 
 describe('Google Pay gateway preparation', () => {
+  it('consults and displays the persisted custom amount', async () => {
+    const custom = { ...order, amount: { ...order.amount, minor: 1234 }, item: { ...order.item, unitAmount: { ...order.item.unitAmount, minor: 1234 } } }
+    const fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => response([method]) })
+    vi.stubGlobal('fetch', fetch)
+    expect(await consultGooglePay(profile, custom)).toMatchObject({ totalPrice: '12.34' })
+    expect(JSON.parse(fetch.mock.calls[0]![1].body)).toMatchObject({ orderAmount: '12.34', orderCurrency: 'USD' })
+  })
   it('uses the unique actual gateway record and excludes unrelated response fields', () => {
     const config = readGooglePayConfiguration(response([{ ...method, secret: 'do-not-expose', merchantId: 'do-not-infer-google-account', paymentMethodDetail: { token: 'do-not-expose' } }]), profile, order)
     expect(config).toEqual({ environment: 'TEST', gateway: method.gatewayName, gatewayMerchantId: method.gatewayMerchantId,
@@ -111,6 +118,21 @@ describe('Google Pay hosted action URL', () => {
 })
 
 describe('Google Pay Direct transaction', () => {
+  it('keeps custom cents consistent across payload, R without IDs, decline and query', () => {
+    const customOrder = { ...order, amount: { ...order.amount, minor: 1234 }, item: { ...order.item, unitAmount: { ...order.item.unitAmount, minor: 1234 } } }
+    const expected = { ...queryContext, amountMinor: 1234 }
+    expect(buildGooglePayPayload(sandboxProfile, { ...createContext, order: customOrder })).toMatchObject({ orderAmount: '12.34', txnOrderMsg: { products: [{ price: '12.34' }] } })
+    const action = { status: 'R', orderAmount: '12.34', orderCurrency: 'USD' }
+    expect(readGooglePayCreateResponse(response(action), 'synthetic-merchant', expected).status).toBe('requires_action')
+    const decline = { respCode: '12003', data: { ...txn, orderAmount: '12.34', status: 'F' } }
+    expect(readGooglePayCreateResponse(decline, 'synthetic-merchant', expected).status).toBe('failed')
+    expect(readGooglePayQueryResponse(response({ content: [{ ...txn, orderAmount: '12.34' }] }), 'synthetic-merchant', expected).status).toBe('succeeded')
+    for (const orderAmount of ['5.00', '12.35', '12.340', '1.234e1']) {
+      expect(() => readGooglePayCreateResponse(response({ ...action, orderAmount }), 'synthetic-merchant', expected)).toThrow('GOOGLE_PAY_RESPONSE_INVALID')
+      expect(() => readGooglePayCreateResponse({ ...decline, data: { ...decline.data, orderAmount } }, 'synthetic-merchant', expected)).toThrow('GOOGLE_PAY_GATEWAY_REJECTED')
+      expect(() => readGooglePayQueryResponse(response({ content: [{ ...txn, orderAmount }] }), 'synthetic-merchant', expected)).toThrow('GOOGLE_PAY_RESPONSE_INVALID')
+    }
+  })
   it('sends Google token string verbatim and exposes only a safe request projection', async () => {
     const fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => response(txn) })
     vi.stubGlobal('fetch', fetch)

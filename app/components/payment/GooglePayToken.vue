@@ -43,7 +43,7 @@ watch(() => props.token, () => { revealed.value = false })
       </div>
       <div id="google-pay-token-content" class="min-w-0">
         <div v-if="formats" class="space-y-4">
-          <p class="text-xs leading-relaxed text-toned">{{ manual ? 'Use this token only for the USD 5.00 Sandbox call you make in Apifox. Check that call’s result there; this page’s order remains unsubmitted.' : 'This token is part of the automatic payment submission. Inspect it for Sandbox debugging; do not submit it again in Apifox.' }} Copied text remains in your clipboard.</p>
+          <p class="text-xs leading-relaxed text-toned">{{ manual ? 'Use this token only for a Sandbox call in Apifox matching this order’s amount and currency. Check that call’s result there; this page’s order remains unsubmitted.' : 'This token is part of the automatic payment submission. Inspect it for Sandbox debugging; do not submit it again in Apifox.' }} Copied text remains in your clipboard.</p>
           <UTabs :items="tabs" default-value="json" color="neutral" variant="link" size="sm" :ui="{ list: 'flex-wrap', trigger: 'flex-none touch-manipulation', content: 'min-w-0' }">
             <template #json>
               <div class="min-w-0 space-y-3">

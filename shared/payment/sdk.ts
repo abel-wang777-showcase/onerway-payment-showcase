@@ -92,6 +92,7 @@ export interface CreatePaymentIntentResponse {
 
 export interface CreatePaymentIntentInput {
   readonly journeyId: JourneyId
+  readonly amountMinor?: number
   readonly method?: PaymentMethodId
   readonly restart?: true
 }

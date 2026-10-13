@@ -17,7 +17,7 @@ M0 聚焦虚构电商品牌 **Halden** 的 Web JS SDK：
 
 Checkout、Direct API，以及游戏、直播、AI 等场景会沿用同一产品模型逐步加入；iOS / Android SDK 不属于当前范围。
 
-当前 Demo Hub 保留确定性 simulation，并为 `US + USD 5.00` 普通成功与 `US + USD 50.00` 3DS Challenge 开放真实 Web JS SDK Sandbox 入口。所有路径共用 `Order → PaymentAttempt → PaymentEvent`；真实路径由服务端创建和查询支付，卡字段只存在于 Onerway 托管 Element 中。
+公开 Demo Hub 只展示真实 Sandbox 旅程，Web JS SDK 包含 `US + USD 5.00` 普通成功与 `US + USD 50.00` 3DS Challenge。确定性 simulation 仅保留为自动化测试 fixture，没有公开启动入口。所有路径共用 `Order → PaymentAttempt → PaymentEvent`；真实路径由服务端创建和查询支付，卡字段只存在于 Onerway 托管 Element 中。
 
 ## 项目入口
 
@@ -86,7 +86,7 @@ GitHub Actions 将通用质量门与 `Neon integration` 分开运行。两者都
 4. 读取 `GET /api/profile`，确认公开摘要为 Sandbox 与 `sandbox-only`、`canonicalOrigin` 指向 Production 域，且 SDK release URL 符合本节记录；响应不应包含 merchant、secret、API URL 或 notify URL。
 5. 确认 Vercel Production 为 `PAYMENT_MIGRATION_MODE=apply`，Preview 为 `skip`；Neon 连接仍覆盖 Production / Preview，但 `Create database branch for deployment` 保持关闭，两者使用同一共享运行库。若 Vercel 报 `Resource provisioning failed`，先检查该 deployment action 是否被重新启用以及 Neon 分支配额，不要删除共享数据库变量或断开资源。部署环境都不配置 `ONERWAY_SANDBOX_TRANSACTION_IP`，也不配置 Onerway Production 实际交易能力。直接投递时 `ONERWAY_SANDBOX_NOTIFY_RELAY=false`；使用受控 Relay 时必须显式为 `true`，且 Production / Preview 使用同一 Relay URL。
 6. 在 Vercel 检查每日 Cron 最近一次运行成功，并确认独立的诊断 token 已配置。`/api/health` 不验证 Cron、诊断 token 或 Onerway 上游可用性。
-7. 先走 simulation 与异常恢复，再在受控 Sandbox 条件下分别执行 USD 5 普通成功和 USD 50 3DS。最终结论以脱敏的 return / Webhook / fresh query / persistence 收敛证据为准，SDK callback 或结果页不能单独证明成功。
+7. 确认自动化中的 simulation 与异常恢复用例通过，再在受控 Sandbox 条件下分别执行 USD 5 普通成功和 USD 50 3DS。公开首页不提供 simulation 入口。最终结论以脱敏的 return / Webhook / fresh query / persistence 收敛证据为准，SDK callback 或结果页不能单独证明成功。
 8. 用 1440、834、390、320 宽度检查页面，并完成键盘 Tab / 方向键、可见焦点、状态 live-region 和真实 SDK iframe 基本操作验收。
 
 ## 健康检查与故障定位
@@ -135,7 +135,7 @@ Vercel Production / Preview 将 `ONERWAY_SANDBOX_NOTIFY_RELAY=true`，并把 `ON
 
 ## 回滚边界
 
-Vercel 回滚只允许切回已经验收、仍与当前数据库 schema 兼容的 Production deployment，并在操作后重新执行 exact-SHA、health、profile 与关键 simulation 检查。Production build 可能已经执行向前 migration；代码回滚不会回滚 schema，项目也不提供自动 schema downgrade。若旧部署与当前 schema 不兼容，应停止真实 Sandbox 演示并向前修复，不能删除支付事实或手工改库来强行恢复。
+Vercel 回滚只允许切回已经验收、仍与当前数据库 schema 兼容的 Production deployment，并在操作后重新执行 exact-SHA、health、profile 与 Sandbox 入口检查。确定性 simulation 由自动化 fixture 验证，不作为公开回滚验收入口。Production build 可能已经执行向前 migration；代码回滚不会回滚 schema，项目也不提供自动 schema downgrade。若旧部署与当前 schema 不兼容，应停止真实 Sandbox 演示并向前修复，不能删除支付事实或手工改库来强行恢复。
 
 回滚不改变 Onerway 或数据库中的支付真值。回滚前后都必须让已创建 Attempt 继续通过 recovery、Webhook 与 fresh query 收敛；不得因页面版本变化重放 create / confirm。若事故涉及 secret、Webhook、域名、edge / WAF 或 Onerway 配置，应先锁住真实 Sandbox 演示并分别恢复对应外部配置；任何情况下都不得顺带开放 Onerway Production 实际交易。
 

@@ -4,7 +4,7 @@ interface SummaryLine {
   value: string
 }
 
-defineProps<{
+const props = defineProps<{
   lines: readonly SummaryLine[]
   total: string
   payLabel: string
@@ -19,6 +19,7 @@ const emit = defineEmits<{
 
 const open = ref(false)
 const detailsId = 'order-summary-details'
+const floatingAction = computed(() => !props.disabled || props.busy)
 </script>
 
 <template>
@@ -76,7 +77,10 @@ const detailsId = 'order-summary-details'
     </div>
 
     <div
-      class="fixed inset-x-0 bottom-0 z-40 border-t border-default bg-default/95 p-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] backdrop-blur md:flex md:items-center md:justify-end md:gap-4 md:px-6 lg:static lg:mt-4 lg:block lg:border-0 lg:bg-transparent lg:p-0 lg:backdrop-blur-none"
+      :class="floatingAction
+        ? 'fixed inset-x-0 bottom-0 z-40 border-t border-default bg-default/95 p-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] backdrop-blur md:flex md:items-center md:justify-end md:gap-4 md:px-6'
+        : 'mt-4'"
+      class="lg:static lg:mt-4 lg:block lg:border-0 lg:bg-transparent lg:p-0 lg:backdrop-blur-none"
     >
       <div class="mb-3 flex items-center justify-between gap-4 md:mb-0 lg:mb-3">
         <span class="text-sm text-toned">Total</span>

@@ -35,7 +35,7 @@ async function restart(): Promise<void> {
     if (!navigator.locks) throw new Error('PAYMENT_INTENT_LOCK_UNAVAILABLE')
     const response = await navigator.locks.request('onerway-payment-intent', { mode: 'exclusive' }, () => {
       if (disposed) return null
-      return $fetch<CreatePaymentIntentResponse>('/api/payment/intent', { method: 'POST', body: { journeyId: 'apple-pay-direct', method: 'apple-pay', restart: true }, retry: 0 })
+      return $fetch<CreatePaymentIntentResponse>('/api/payment/intent', { method: 'POST', body: { journeyId: 'apple-pay-direct', method: 'apple-pay', restart: true, amountMinor: session.value!.order.amount.minor }, retry: 0 })
     })
     if (!disposed && response) await navigateTo(`/halden/direct/${encodeURIComponent(response.orderId)}`)
   }
@@ -58,25 +58,27 @@ onScopeDispose(() => {
 
 <template>
   <UContainer class="py-6 pb-16 lg:py-12">
+    <PaymentNavigation :references="Boolean(session)" />
     <div class="grid gap-8 lg:grid-cols-3 lg:items-start">
       <div class="min-w-0 space-y-8 lg:col-span-2">
         <header>
           <UBadge label="Sandbox · Direct API · Apple Pay" variant="soft" />
           <h1 class="mt-3 text-2xl font-semibold tracking-tight text-highlighted sm:text-3xl">Pay with Apple Pay.</h1>
-          <p class="mt-4 max-w-2xl text-sm leading-relaxed text-toned">Complete your Halden order in Apple Pay, then explore how your browser, Halden, Apple and Onerway work together.</p>
+          <p class="mt-4 max-w-2xl text-sm leading-relaxed text-toned">Complete your Onerway Store order in Apple Pay, then explore how your browser, Onerway Store, Apple and Onerway work together.</p>
         </header>
-        <section class="space-y-4 rounded-lg border border-default p-5 sm:p-6" aria-labelledby="apple-pay-order-title">
+        <section id="wallet-payment" tabindex="-1" class="scroll-mt-24 space-y-4 rounded-lg border border-default p-5 focus-visible:outline-2 focus-visible:outline-primary sm:p-6" aria-labelledby="apple-pay-order-title">
           <PaymentWalletReceipt
             :order-id="orderId" :order="session?.order" :status="session?.attempt.status" heading-id="apple-pay-order-title"
             :submitted="submitted" :submitting="submitting" :checking="checking" :loading="loading" :sheet-open="sheetOpen"
             :manual-captured="manualCaptured" :verification-pending="session?.verificationPending" :message="sheetMessage" />
           <p v-if="submitted && !canRestart && session?.attempt.status !== 'succeeded'" class="text-sm leading-relaxed text-toned">Please do not pay again while this order is unconfirmed. Closing Apple Pay, leaving this page or a timeout does not cancel a payment already submitted.</p>
-          <p v-if="manualCaptured && !submitted" class="text-sm leading-relaxed text-toned">Copy the token below to Apifox and match this USD 5.00 order’s amount and currency. A call made in Apifox is separate from this Showcase order; check that call’s result in Apifox. This page’s order remains unsubmitted.</p>
+          <p v-if="manualCaptured && !submitted" class="text-sm leading-relaxed text-toned">Copy the token below to Apifox and match this order’s amount and currency. A call made in Apifox is separate from this Showcase order; check that call’s result in Apifox. This page’s order remains unsubmitted.</p>
           <p v-if="canRestart" class="text-sm leading-relaxed text-toned">The original result is preserved. Paying again creates a new order and requires fresh Apple Pay authorization.</p>
           <UFormField v-if="!submitted" label="After Wallet authorization" name="apple-pay-mode" :help="sheetOpen ? 'Close Wallet before changing mode.' : submitted ? 'The mode is locked after payment submission.' : undefined">
             <URadioGroup :model-value="mode" :items="modeItems" :disabled="modeLocked" color="neutral" variant="list" :ui="{ item: 'min-h-11 touch-manipulation' }" @update:model-value="selectMode" />
           </UFormField>
           <UAlert v-if="error || restartError" :description="error ?? restartError ?? ''" color="warning" variant="subtle" />
+          <p v-if="!submitted" class="text-sm leading-relaxed text-toned">Use an Apple Sandbox tester with a supported test card in Wallet. Availability depends on your device and region.</p>
           <component :is="'apple-pay-button'" v-if="canPay" buttonstyle="black" type="pay" locale="en-US" class="apple-pay-control" @click="pay" />
           <div class="flex flex-wrap gap-3">
             <UButton v-if="!submitted && !loading && !sheetOpen && !canPay" label="Retry preparation" color="neutral" variant="outline" class="min-h-11 touch-manipulation" @click="prepare" />
@@ -86,7 +88,9 @@ onScopeDispose(() => {
           </div>
         </section>
         <PaymentApplePayToken v-if="session" :token="tokenDebug" :unavailable="tokenDebugUnavailable" :manual="mode === 'manual'" :captured="manualCaptured" @clear="clearToken" />
-        <PaymentApplePaySteps :steps="steps" />
+        <div id="wallet-explainer" tabindex="-1" class="scroll-mt-24 focus-visible:outline-2 focus-visible:outline-primary">
+          <PaymentApplePaySteps :steps="steps" />
+        </div>
       </div>
       <aside class="min-w-0 space-y-6 lg:sticky lg:top-24" aria-label="Order and test conditions">
         <section class="rounded-lg border border-default bg-muted p-5 text-sm leading-relaxed">
@@ -95,7 +99,7 @@ onScopeDispose(() => {
           <p class="mt-3 text-toned">A compatible browser may offer a code to scan with a supported iPhone or iPad. Availability depends on your device and region; this is not limited by browser name.</p>
           <UButton to="https://developer.apple.com/apple-pay/sandbox-testing/" target="_blank" rel="noopener noreferrer" label="Apple Sandbox setup" variant="link" color="neutral" class="mt-2 min-h-11 touch-manipulation" />
         </section>
-        <section v-if="session" class="rounded-lg border border-default p-5">
+        <section v-if="session" id="wallet-references" tabindex="-1" class="scroll-mt-24 rounded-lg border border-default p-5 focus-visible:outline-2 focus-visible:outline-primary">
           <h2 class="font-semibold text-highlighted">Payment references</h2>
           <dl class="mt-4 space-y-4 text-xs">
             <div v-for="reference in references" :key="reference.label"><dt class="text-muted">{{ reference.label }}</dt><dd class="mt-1 break-all font-mono text-toned">{{ reference.value }}</dd></div>

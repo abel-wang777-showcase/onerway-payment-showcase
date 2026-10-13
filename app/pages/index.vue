@@ -1,39 +1,17 @@
 <script setup lang="ts">
-import type { RadioGroupItem } from '@nuxt/ui'
-import type { JourneyId } from '#shared/payment/journey'
+import { paymentAmountText } from '#shared/payment/amount'
 import type { PublicProfile } from '#shared/profile'
-import {
-  getSubscriptionPlan,
-  isSubscriptionPlanId,
-  type SubscriptionPlanId,
-} from '#shared/payment/subscription'
-import {
-  getJourney,
-  isJourneyId,
-  JOURNEY_IDS,
-  JOURNEYS,
-  supportsSandboxMethod,
-} from '#shared/payment/journey'
+import { supportsSandboxMethod } from '#shared/payment/journey'
 import { isPaymentRestorationAction } from '#shared/payment/failure'
-import {
-  getCapability,
-  INTEGRATIONS,
-  PAYMENT_METHODS,
-  SCENES,
-  type CapabilityStatus,
-  type IntegrationId,
-  type PaymentMethodId,
-  type SceneId,
-} from '#shared/payment/capability'
+import { getCapability } from '#shared/payment/capability'
 
 useSeoMeta({
   title: 'Demo Hub · Onerway Payment Showcase',
-  description: 'Choose a customer-facing payment simulation or confirmed Sandbox journey and explore its capability, order and payment states.',
+  description: 'Choose a customer-facing Sandbox payment journey and explore its capability, order and payment states.',
 })
 
 const { data: profile } = await useFetch<PublicProfile>('/api/profile')
 const route = useRoute()
-const { start } = useDemo()
 const {
   error: sdkError,
   session: sdkSession,
@@ -48,153 +26,14 @@ const {
   probeRecovery,
 } = useSdk()
 
-const initialJourney = getJourney(isJourneyId(route.query.journey) ? route.query.journey : 'standard-success')
-const billingMode = shallowRef<'payment' | 'subscription'>(
-  route.query.mode === 'subscription' && initialJourney.integration !== 'direct-api' ? 'subscription' : 'payment',
-)
-const subscriptionPlanId = shallowRef<SubscriptionPlanId>(
-  isSubscriptionPlanId(route.query.plan) ? route.query.plan : 'halden-daily-essentials-v1',
-)
-const subscriptionPlan = computed(() => getSubscriptionPlan(subscriptionPlanId.value))
-const billingItems = computed<RadioGroupItem[]>(() => [
-  { value: 'payment', label: 'One-time payment', description: 'Run a payment simulation or a real Sandbox journey.' },
-  { value: 'subscription', label: 'Subscription', description: 'Create one merchant-managed daily Sandbox subscription with the selected integration.', disabled: selection.value.integration === 'direct-api' },
-])
-
-function readRoutePaymentMethod(value: unknown): PaymentMethodId {
-  if (
-    typeof value === 'string'
-    && PAYMENT_METHODS.includes(value as PaymentMethodId)
-    && getCapability('ecommerce', 'web-js-sdk', value as PaymentMethodId).runnable
-  ) {
-    return value as PaymentMethodId
-  }
-
-  return 'card'
-}
-
-const selection = ref({
-  scene: initialJourney.scene as SceneId,
-  integration: initialJourney.integration as IntegrationId,
-  method: initialJourney.integration !== 'web-js-sdk' ? initialJourney.method : readRoutePaymentMethod(route.query.method),
-})
-const journeyId = shallowRef<JourneyId>(
-  isJourneyId(route.query.journey) ? route.query.journey : 'standard-success',
-)
+const {
+  selection, billingMode, subscriptionPlanId, subscriptionPlan, billingItems, amountInput, amountMinor, customAmount,
+  scenes, integrations, methods, journeyId, journeyItems, journey, amount, passportFacts,
+  methodLabels,
+} = useHubSelection()
 const currentOrigin = shallowRef<string | null>(null)
 const startingNewSubscriptionCustomer = shallowRef(false)
 const checkingRecovery = shallowRef(profile.value?.profile === 'sandbox')
-
-const sceneLabels: Record<SceneId, string> = {
-  ecommerce: 'E-commerce',
-  game: 'Game',
-  live: 'Live',
-  ai: 'AI',
-}
-const integrationLabels: Record<IntegrationId, string> = {
-  'web-js-sdk': 'Web JS SDK',
-  'checkout': 'Checkout',
-  'direct-api': 'Direct API',
-}
-const methodLabels: Record<PaymentMethodId, string> = {
-  card: 'Card',
-  apm: 'APM',
-  all: 'Choose on Checkout',
-  'google-pay': 'Google Pay',
-  'apple-pay': 'Apple Pay',
-}
-const statusLabels: Record<CapabilityStatus, string> = {
-  available: 'Available',
-  conditional: 'Conditional',
-  planned: 'Planned',
-  unavailable: 'Unavailable',
-}
-
-function option(
-  value: string,
-  label: string,
-  status: CapabilityStatus,
-  runnable: boolean,
-  condition?: string,
-): RadioGroupItem {
-  const description = condition
-    ?? (status === 'available'
-      ? 'Available in this showcase.'
-      : status === 'planned'
-        ? 'Planned for a future delivery.'
-        : 'Not available for this combination.')
-
-  return {
-    value,
-    label: `${label} · ${statusLabels[status]}`,
-    description,
-    disabled: !runnable,
-  }
-}
-
-const scenes = computed<RadioGroupItem[]>(() => SCENES.map((scene) => {
-  const capability = getCapability(scene, selection.value.integration, selection.value.method)
-  return option(scene, sceneLabels[scene], capability.status, capability.runnable, capability.condition)
-}))
-
-const integrations = computed<RadioGroupItem[]>(() => INTEGRATIONS.map((integration) => {
-  const method = integration === 'direct-api' ? 'apple-pay' : integration === 'checkout' ? 'all' : selection.value.method === 'all' ? 'card' : selection.value.method
-  const capability = getCapability(selection.value.scene, integration, method)
-  return option(integration, integrationLabels[integration], capability.status, capability.runnable, capability.condition)
-}))
-
-const methods = computed<RadioGroupItem[]>(() => PAYMENT_METHODS.map((method) => {
-  const capability = getCapability(selection.value.scene, selection.value.integration, method)
-  return option(method, methodLabels[method], capability.status, capability.runnable, capability.condition)
-}))
-
-watch(() => selection.value.integration, (integration) => {
-  if (integration === 'direct-api') billingMode.value = 'payment'
-  selection.value.method = integration === 'direct-api' ? 'apple-pay' : integration === 'checkout' ? 'all' : 'card'
-  journeyId.value = integration === 'direct-api' ? 'apple-pay-direct' : integration === 'checkout' ? 'hosted-checkout' : 'standard-success'
-})
-
-watch(() => selection.value.method, (method) => {
-  if (selection.value.integration === 'direct-api') {
-    journeyId.value = method === 'google-pay' ? 'google-pay-direct' : 'apple-pay-direct'
-  }
-})
-
-const journeyItems = computed<RadioGroupItem[]>(() => JOURNEY_IDS
-  .filter(id => JOURNEYS[id].integration === selection.value.integration)
-  .map(id => ({
-  value: id,
-  label: JOURNEYS[id].label,
-  description: JOURNEYS[id].description,
-  disabled: selection.value.method !== JOURNEYS[id].method
-    && !supportsSandboxMethod(JOURNEYS[id], selection.value.method),
-})))
-
-const journey = computed(() => getJourney(journeyId.value))
-const amount = computed(() => formatMoney({
-  minor: billingMode.value === 'subscription' ? subscriptionPlan.value.amount.minor : journey.value.amount,
-  currency: billingMode.value === 'subscription' ? subscriptionPlan.value.amount.currency : journey.value.currency,
-}))
-
-const passportFacts = computed(() => [
-  ...(billingMode.value === 'subscription'
-    ? [
-        { label: 'Billing', value: 'Merchant-managed subscription' },
-        { label: 'Frequency', value: 'Every day' },
-        { label: 'Ends', value: 'Dec 31, 2099' },
-        { label: 'First payment', value: '3DS required' },
-      ]
-    : []),
-  { label: 'Scene', value: sceneLabels[journey.value.scene] },
-  { label: 'Integration', value: integrationLabels[journey.value.integration] },
-  {
-    label: billingMode.value === 'subscription' ? 'Initial checkout' : 'Expected method',
-    value: billingMode.value === 'subscription'
-      ? selection.value.integration === 'checkout' ? 'Choose on Checkout' : 'SDK available methods'
-      : methodLabels[selection.value.method],
-  },
-  { label: 'Country / currency', value: `${journey.value.country} / ${journey.value.currency}` },
-])
 
 const profileLabel = computed(() => {
   if (!profile.value) {
@@ -225,7 +64,9 @@ const canonicalSandboxHref = computed(() => {
   else {
     url.searchParams.set('journey', journeyId.value)
     url.searchParams.set('method', selection.value.method)
+    if (amountMinor.value !== null) url.searchParams.set('amount', paymentAmountText(amountMinor.value))
   }
+  url.hash = 'demo-launch'
   return url.toString()
 })
 const retryingRestoration = computed(() => sdkFailure.value?.action === 'retry_restoration')
@@ -241,11 +82,6 @@ const selectedWalletLabel = computed(() => {
     ? methodLabels[method]
     : null
 })
-const canStartSimulation = computed(() =>
-  billingMode.value === 'payment'
-  && selection.value.method === journey.value.method
-  && journey.value.modes.includes('simulation'),
-)
 const canStartSdk = computed(() =>
   !checkingRecovery.value
   && profile.value?.profile === 'sandbox'
@@ -254,7 +90,8 @@ const canStartSdk = computed(() =>
     restoringSdk.value
     || billingMode.value === 'subscription'
     || (
-      selectedCapability.value.runnable
+      amountMinor.value !== null
+      && selectedCapability.value.runnable
       && supportsSandboxMethod(journey.value, selection.value.method)
     )
   ),
@@ -266,6 +103,7 @@ const canStartSeparateSandboxOrder = computed(() =>
   && !canonicalSandboxHref.value
   && profile.value?.profile === 'sandbox'
   && (billingMode.value === 'payment' && journey.value.integration !== 'web-js-sdk' || profile.value.sdk?.release === 'v4/latest')
+  && amountMinor.value !== null
   && selectedCapability.value.runnable
   && supportsSandboxMethod(journey.value, selection.value.method),
 )
@@ -277,7 +115,7 @@ const sdkLabel = computed(() => {
   }
 
   if (canonicalSandboxHref.value) {
-    return 'Continue on canonical Production'
+    return 'Open Sandbox site'
   }
 
   if (launching.value) {
@@ -292,10 +130,6 @@ const sdkLabel = computed(() => {
       : 'Restore existing Sandbox checkout'
   }
 
-  if (!journey.value.modes.includes('sandbox')) {
-    return 'Real Sandbox unavailable for this fixture'
-  }
-
   if (journey.value.id === 'hosted-authorization') return 'Start a Sandbox card authorization'
 
   if (journey.value.integration === 'checkout') return 'Start a new Sandbox Hosted Checkout'
@@ -304,16 +138,10 @@ const sdkLabel = computed(() => {
     return `Open ${selectedWalletLabel.value} Sandbox`
   }
 
-  return journeyId.value === 'three-ds-success'
+  return !customAmount.value && journeyId.value === 'three-ds-success'
     ? 'Start a new real Sandbox 3DS'
     : 'Start a new real Sandbox checkout'
 })
-
-async function startDemo(): Promise<void> {
-  if (canStartSimulation.value && !launching.value) {
-    await start(journeyId.value)
-  }
-}
 
 async function startSandbox(): Promise<void> {
   if (canStartSdk.value && !launching.value && !sdkRestoring.value) {
@@ -323,7 +151,7 @@ async function startSandbox(): Promise<void> {
     }
 
     if (restoringSdk.value) return
-    await startSdk(journeyId.value, true, selection.value.method)
+    await startSdk(journeyId.value, true, selection.value.method, amountMinor.value ?? undefined)
   }
 }
 
@@ -335,7 +163,7 @@ async function restoreSandbox(): Promise<void> {
 
 async function startSeparateSandboxOrder(): Promise<void> {
   if (canStartSeparateSandboxOrder.value && !separateSandboxOrderPending.value) {
-    await startSdk(journeyId.value, true, selection.value.method)
+    await startSdk(journeyId.value, true, selection.value.method, amountMinor.value ?? undefined)
   }
 }
 
@@ -382,28 +210,21 @@ onMounted(async () => {
   }
 })
 
-watch(() => selection.value.method, (method) => {
-  const selected = getJourney(journeyId.value)
-
-  if (method !== selected.method && !supportsSandboxMethod(selected, method)) {
-    journeyId.value = JOURNEY_IDS.find(id =>
-      JOURNEYS[id].integration === selection.value.integration
-      && (method === JOURNEYS[id].method || supportsSandboxMethod(JOURNEYS[id], method)),
-    ) ?? 'standard-success'
-  }
-}, { immediate: true })
 </script>
 
 <template>
-  <UContainer>
-    <section class="py-14 sm:py-20">
-      <div class="max-w-3xl">
-        <div class="mb-6 flex flex-wrap items-center gap-2">
-          <UBadge
-            label="M0 · Simulation + Sandbox"
-            color="primary"
-            variant="soft"
-          />
+  <UContainer class="flex flex-1 flex-col pb-24 lg:max-w-7xl lg:justify-center lg:pb-0">
+    <section class="py-4 sm:py-6">
+      <div class="flex flex-wrap items-start justify-between gap-3">
+        <div class="min-w-0">
+          <h1 class="text-balance text-2xl font-semibold tracking-tight text-highlighted sm:text-3xl">
+            Explore payment experiences.
+          </h1>
+          <p class="mt-2 max-w-2xl text-pretty text-sm text-toned">
+            Try Onerway payments in Sandbox.
+          </p>
+        </div>
+        <div class="flex flex-wrap items-center gap-2">
           <UBadge
             :label="profileLabel"
             color="neutral"
@@ -411,120 +232,98 @@ watch(() => selection.value.method, (method) => {
           />
         </div>
 
-        <h1 class="text-balance text-4xl font-semibold tracking-tight text-highlighted sm:text-5xl lg:text-6xl">
-          Choose a payment journey. See exactly what happens.
-        </h1>
-        <p class="mt-6 max-w-2xl text-pretty text-base leading-relaxed text-toned sm:text-lg">
-          Explore a customer-facing merchant flow while the shared payment model keeps capabilities, attempts and events explicit.
-        </p>
       </div>
 
-      <div class="mt-14 grid min-w-0 gap-10 lg:grid-cols-[minmax(0,1fr)_24rem] lg:items-start">
-        <div class="min-w-0 space-y-14">
-          <HubMatrix
-            v-model="selection"
-            :scenes="scenes"
-            :integrations="integrations"
-            :methods="methods"
-          />
-
-          <div
-            aria-label="Capability status legend"
-            class="demo-capability-legend flex flex-wrap gap-2"
-          >
-            <UBadge label="Available · Runs now" color="success" variant="soft" />
-            <UBadge label="Conditional · Merchant and customer eligibility apply" color="warning" variant="soft" />
-            <UBadge label="Planned · Not delivered" color="neutral" variant="soft" />
-            <UBadge label="Unavailable · Explicitly unsupported" color="error" variant="soft" />
-          </div>
-
-          <HubJourneyPicker
-            v-if="billingMode === 'payment' && (canStartSimulation || journey.integration === 'checkout')"
-            v-model="journeyId"
-            :items="journeyItems"
-            :hosted="journey.integration === 'checkout'"
-          />
-
-          <section aria-labelledby="billing-experience-title">
-            <h2 id="billing-experience-title" class="text-xl font-semibold text-highlighted">
-              Billing experience
-            </h2>
-            <URadioGroup v-model="billingMode" :items="billingItems" class="mt-4" />
-          </section>
-        </div>
-
-        <HubPassport
-          :title="billingMode === 'subscription' ? subscriptionPlan.productName : journey.label"
-          :description="billingMode === 'subscription'
-            ? 'Pay USD 5.00 today, authorize daily merchant-managed billing, and complete the required first-payment 3DS in Sandbox.'
-            : journey.description"
-          :amount="amount"
-          :facts="passportFacts"
-          :profile="profileLabel"
-          :sandbox="billingMode === 'subscription' || journey.modes.includes('sandbox')"
-          :simulation="canStartSimulation"
+      <HubWorkspace class="mt-4 lg:mt-6">
+        <HubMatrix
+          v-model="selection"
+          :scenes="scenes"
+          :integrations="integrations"
+          :methods="methods"
+          :subscription="billingMode === 'subscription'"
         >
-          <UButton
-            v-if="canStartSimulation"
-            label="Start simulated checkout"
-            trailing-icon="i-lucide-arrow-right"
-            size="xl"
-            block
-            class="mt-6 min-h-11"
-            :disabled="launching"
-            @click="startDemo"
-          />
-          <UButton
-            v-if="billingMode === 'payment' && restoringSdk && !canonicalSandboxHref"
-            key="sandbox-restoration"
-            :label="sdkLabel"
-            trailing-icon="i-lucide-circle-check"
-            color="neutral"
-            variant="outline"
-            size="xl"
-            block
-            class="mt-3 min-h-11"
-            :disabled="!canStartSdk || launching || sdkRestoring"
-            :loading="checkingRecovery || launching || sdkRestoring"
-            @click="restoreSandbox"
-          />
-          <UButton
-            v-else-if="billingMode === 'payment'"
-            key="sandbox-start"
-            :label="sdkLabel"
-            trailing-icon="i-lucide-circle-check"
-            color="neutral"
-            variant="outline"
-            size="xl"
-            block
-            class="mt-3 min-h-11"
-            :disabled="!canStartSdk || launching || sdkRestoring"
-            :loading="checkingRecovery || launching || sdkRestoring"
-            @click="startSandbox"
-          />
-          <UButton
-            v-if="canStartSeparateSandboxOrder"
-            label="Start a Separate Sandbox Order"
-            trailing-icon="i-lucide-arrow-right"
-            color="neutral"
-            variant="ghost"
-            size="lg"
-            block
-            class="mt-2 min-h-11"
-            :disabled="separateSandboxOrderPending"
-            @click="startSeparateSandboxOrder"
-          />
-          <p
-            v-if="canStartSeparateSandboxOrder"
-            class="mt-2 text-xs leading-relaxed text-toned"
+          <UFormField label="Billing experience" name="billing-mode" class="min-w-0">
+            <USelect
+              v-model="billingMode"
+              aria-label="Billing experience"
+              :items="billingItems"
+              size="lg"
+              class="h-11 w-full"
+              :ui="{ base: 'text-base md:text-sm', value: 'min-w-0 text-start', item: 'min-h-11', itemLabel: 'whitespace-normal' }"
+            />
+          </UFormField>
+          <template #journey>
+            <HubJourneyPicker
+              v-if="billingMode === 'payment' && ((journey.integration === 'web-js-sdk' && selection.method === 'card') || journey.integration === 'checkout')"
+              v-model="journeyId"
+              :items="journeyItems"
+              class="col-span-1"
+            />
+            <HubAmountField v-if="billingMode === 'payment'" v-model="amountInput" />
+          </template>
+        </HubMatrix>
+
+        <template #summary>
+          <HubPassport
+            :title="billingMode === 'subscription' ? storeProductName(subscriptionPlan.productName) : customAmount ? 'Custom amount' : journey.label"
+            :description="billingMode === 'subscription'
+              ? 'Pay USD 5.00 today, authorize daily merchant-managed billing, and complete the required first-payment 3DS in Sandbox.'
+              : customAmount ? 'Try a custom Sandbox amount. Payment outcome and authentication depend on the payment provider.' : journey.description"
+            :amount="amount"
+            :facts="passportFacts"
           >
-            This creates a new Sandbox Order. The existing PaymentAttempt is not cancelled or overwritten and may still settle through Query or Webhook.
-          </p>
-          <p
-            v-if="billingMode === 'payment' && selectedWalletLabel"
-            class="mt-3 text-xs leading-relaxed text-toned"
-          >
-            {{ selectedWalletLabel }} remains Conditional until the Onerway SDK renders its own eligible wallet button. Card stays available in the same aggregated checkout; the result records what was actually used.
+            <UButton
+              v-if="billingMode === 'payment' && restoringSdk && !canonicalSandboxHref"
+              key="sandbox-restoration"
+              :label="sdkLabel"
+              trailing-icon="i-lucide-arrow-right"
+              size="xl"
+              block
+              class="mt-3 min-h-11 lg:mt-5"
+              :disabled="!canStartSdk || launching || sdkRestoring"
+              :loading="checkingRecovery || launching || sdkRestoring"
+              @click="restoreSandbox"
+            />
+            <UButton
+              v-else-if="billingMode === 'payment'"
+              key="sandbox-start"
+              :label="sdkLabel"
+              trailing-icon="i-lucide-arrow-right"
+              size="xl"
+              block
+              class="mt-3 min-h-11 lg:mt-5"
+              :disabled="!canStartSdk || launching || sdkRestoring"
+              :loading="checkingRecovery || launching || sdkRestoring"
+              @click="startSandbox"
+            />
+            <UButton
+              v-if="canStartSeparateSandboxOrder"
+              label="Start a Separate Sandbox Order"
+              trailing-icon="i-lucide-arrow-right"
+              color="neutral"
+              variant="ghost"
+              size="lg"
+              block
+              class="mt-2 min-h-11"
+              :disabled="separateSandboxOrderPending"
+              @click="startSeparateSandboxOrder"
+            />
+            <p
+              v-if="canStartSeparateSandboxOrder"
+              class="mt-2 text-xs leading-relaxed text-toned"
+            >
+              This creates a new Sandbox Order. The existing PaymentAttempt is not cancelled or overwritten and may still settle through Query or Webhook.
+            </p>
+            <p
+              v-if="billingMode === 'payment' && selectedWalletLabel"
+              class="mt-3 text-xs leading-relaxed text-toned"
+            >
+              <template v-if="selection.integration === 'web-js-sdk'">
+                {{ selectedWalletLabel }} remains Conditional until the Onerway SDK renders its own eligible wallet button. Card stays available in the same aggregated checkout; the result records what was actually used.
+            </template>
+            <template v-else>
+              {{ selectedWalletLabel }} needs a supported device and test wallet. Authorize in your wallet, then Onerway Store checks the Direct API payment result.
+            </template>
           </p>
           <SubscriptionLaunchActions
             v-if="billingMode === 'subscription'"
@@ -540,7 +339,7 @@ watch(() => selection.value.method, (method) => {
             v-if="billingMode === 'payment' && journey.id === 'hosted-authorization'"
             class="mt-3 text-xs leading-relaxed text-toned"
           >
-            Conditional · Card authorization in Sandbox. Authorize USD 5.00, then choose full capture or void. Missing confirmation keeps funds actions locked while you refresh the saved status.
+            Conditional · Card authorization in Sandbox. Authorize the selected amount, then choose full capture or void. Missing confirmation keeps funds actions locked while you refresh the saved status.
           </p>
           <p
             v-if="billingMode === 'subscription' && selection.integration === 'checkout'"
@@ -552,7 +351,13 @@ watch(() => selection.value.method, (method) => {
             v-if="canonicalSandboxHref"
             class="mt-3 text-xs leading-relaxed text-toned"
           >
-            Real Sandbox starts on canonical Production so the recovery cookie, return path and Webhook evidence share one origin. Review the selected journey there before creating payment.
+            Payments run on the Sandbox site. Your selection carries over; confirm it there to keep checkout and return links on the same domain.
+          </p>
+          <p
+            v-else-if="profile?.transactionPolicy === 'locked'"
+            class="mt-3 text-sm leading-relaxed text-toned"
+          >
+            Sandbox payments are disabled in this preview. Open a demo configured for Sandbox to try a real test payment.
           </p>
           <p
             v-if="launching"
@@ -577,7 +382,13 @@ watch(() => selection.value.method, (method) => {
             class="mt-4"
           />
         </HubPassport>
-      </div>
+        </template>
+      </HubWorkspace>
     </section>
+    <nav aria-label="Quick demo navigation" class="demo-mobile-nav fixed inset-x-0 bottom-0 z-30 flex items-center justify-between gap-2 border-t border-default bg-default px-3 py-2 lg:hidden">
+      <UButton :to="{ query: route.query, hash: '#demo-selection' }" label="Edit selection" color="neutral" variant="ghost" size="sm" class="min-h-11 shrink-0 px-2 text-xs sm:text-sm" />
+      <span class="shrink-0 text-xs font-medium text-highlighted tabular-nums sm:text-sm">{{ amount }}</span>
+      <UButton :to="{ query: route.query, hash: '#demo-launch' }" label="View summary" color="neutral" variant="ghost" size="sm" class="min-h-11 shrink-0 px-2 text-xs sm:text-sm" icon="i-lucide-list-checks" />
+    </nav>
   </UContainer>
 </template>

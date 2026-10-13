@@ -11,7 +11,7 @@ definePageMeta({
 })
 
 useSeoMeta({
-  title: 'Simulated checkout · Halden',
+  title: 'Simulated checkout · Onerway Store',
   description: 'Run a deterministic merchant checkout simulation without collecting payment data.',
 })
 
@@ -92,7 +92,7 @@ const summaryLines = computed(() => {
   }
 
   return [
-    { label: current.value.order.item.name, value: current.value.order.item.variant },
+    { label: storeProductName(current.value.order.item.name), value: current.value.order.item.variant },
     { label: 'Quantity', value: String(current.value.order.item.quantity) },
     { label: 'Delivery', value: 'Included' },
   ]
@@ -146,7 +146,16 @@ onMounted(async () => {
       v-else
       class="grid gap-8 lg:grid-cols-[minmax(0,1fr)_24rem] lg:items-start"
     >
-      <div class="space-y-8">
+      <HaldenSummary
+        class="lg:col-start-2 lg:row-start-1"
+        :lines="summaryLines"
+        :total="amount"
+        :pay-label="payLabel"
+        :disabled="disabled"
+        :busy="busy"
+        @pay="pay"
+      />
+      <div class="min-w-0 space-y-8 lg:col-start-1 lg:row-start-1">
         <div>
           <p class="font-mono text-xs font-medium uppercase tracking-[0.16em] text-muted">
             {{ journey?.label }}
@@ -183,7 +192,7 @@ onMounted(async () => {
                 Demo delivery
               </h2>
               <p class="mt-1 text-sm leading-relaxed text-toned">
-                A fictional Halden order reserved for this browser session. No fulfillment request is created.
+                A fictional Onerway Store order reserved for this browser session. No fulfillment request is created.
               </p>
             </div>
           </div>
@@ -207,14 +216,6 @@ onMounted(async () => {
         </p>
       </div>
 
-      <HaldenSummary
-        :lines="summaryLines"
-        :total="amount"
-        :pay-label="payLabel"
-        :disabled="disabled"
-        :busy="busy"
-        @pay="pay"
-      />
     </div>
   </UContainer>
 </template>

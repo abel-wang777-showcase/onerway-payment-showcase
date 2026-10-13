@@ -1,6 +1,6 @@
 import { EventEmitter } from 'node:events'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { buildApplePayPayload, createApplePayPayment, mapApplePayStatus, readApplePayConfiguration, readApplePayCreateResponse, readApplePayQueryResponse, readApplePayValidationUrl, validateApplePayMerchant } from '../server/utils/apple-pay'
+import { buildApplePayPayload, consultApplePay, createApplePayPayment, mapApplePayStatus, readApplePayConfiguration, readApplePayCreateResponse, readApplePayQueryResponse, readApplePayValidationUrl, validateApplePayMerchant } from '../server/utils/apple-pay'
 import { signPayload } from '../server/utils/gateway'
 import { readProfile, toPublicProfile } from '../server/utils/profile'
 import type { Order } from '../shared/payment/order'
@@ -22,6 +22,17 @@ afterEach(() => {
 })
 
 describe('Apple Pay Direct gateway', () => {
+  it('uses the persisted custom amount for consult, wallet configuration, creation and query', async () => {
+    const custom = { ...order, amount: { ...order.amount, minor: 1234 }, item: { ...order.item, unitAmount: { ...order.item.unitAmount, minor: 1234 } } }
+    const fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ respCode: '20000', data: [{ paymentMethod: 'ApplePay', countryCode: 'US', subCardTypes: ['visa'] }] }) })
+    vi.stubGlobal('fetch', fetch)
+    expect(await consultApplePay(profile, custom)).toMatchObject({ amount: '12.34' })
+    expect(JSON.parse(fetch.mock.calls[0]![1].body)).toMatchObject({ orderAmount: '12.34', orderCurrency: 'USD' })
+    expect(buildApplePayPayload(profile, { ...context, order: custom })).toMatchObject({ orderAmount: '12.34', txnOrderMsg: { products: [{ price: '12.34' }] } })
+    const expected = { ...query, amountMinor: 1234 }
+    expect(readApplePayQueryResponse(response([{ ...row, orderAmount: '12.34' }]), 'merchant', expected).status).toBe('succeeded')
+    expect(() => readApplePayQueryResponse(response([row]), 'merchant', expected)).toThrow('APPLE_PAY_RESPONSE_INVALID')
+  })
   it('projects safe evidence from the actual sent payload without any protected material', async () => {
     const sensitive = {
       ciphertext: 'CIPHERTEXT_MARKER_DO_NOT_EXPOSE', signature: 'SIGNATURE_MARKER_DO_NOT_EXPOSE',
@@ -180,7 +191,7 @@ describe('Apple mTLS transport', () => {
     const req = transport(200, [JSON.stringify(session)])
     expect(await validateApplePayMerchant(profile, url)).toEqual(session)
     expect(httpsRequest.mock.lastCall?.[1]).toMatchObject({ cert: profile.applePay!.certificatePem, key: profile.applePay!.privateKeyPem, rejectUnauthorized: true, minVersion: 'TLSv1.2', signal: expect.any(AbortSignal) })
-    expect(JSON.parse(req.end.mock.calls[0]![0])).toEqual({ merchantIdentifier: 'merchant.example', displayName: 'Halden', initiative: 'web', initiativeContext: 'showcase.example' })
+    expect(JSON.parse(req.end.mock.calls[0]![0])).toEqual({ merchantIdentifier: 'merchant.example', displayName: 'Onerway Store', initiative: 'web', initiativeContext: 'showcase.example' })
   })
   it.each([301, 302, 307, 308, 500])('rejects HTTP %s without redirecting', async (status) => {
     transport(status, [])

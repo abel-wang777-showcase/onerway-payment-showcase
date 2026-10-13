@@ -91,7 +91,7 @@ function sdkState(
     subscription: shallowRef(subscription(state, statusSource)),
     retainedSubscriptionOrderId: shallowRef<string | null>(null),
     retainedSubscriptionPaymentStatus: shallowRef<PaymentStatus | null>(null),
-    error: shallowRef(null),
+    error: shallowRef<string | null>(null),
     failure: shallowRef(null),
     restoring: shallowRef(false),
     retrying: shallowRef(false),
@@ -113,6 +113,26 @@ beforeEach(() => {
 })
 
 describe('subscription result outcome', () => {
+  it('shows a retained subscription refresh failure while preserving the confirmed result', async () => {
+    const state = sdkState('active')
+    state.session.value = null
+    state.retainedSubscriptionOrderId.value = 'order-1'
+    state.retainedSubscriptionPaymentStatus.value = 'succeeded'
+    nuxt.useSdk.mockReturnValue(state)
+    const wrapper = await mountSuspended(ResultPage)
+    state.recover.mockImplementation(async () => {
+      state.error.value = 'Retry restoration without creating a new payment.'
+      return false
+    })
+    await wrapper.findAll('button').find(button => button.text().includes('Verify retained subscription'))!.trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[role="alert"]').text()).toContain('last confirmed subscription status is still shown')
+    expect(wrapper.text()).toContain('active')
+    expect(wrapper.text()).toContain('succeeded')
+    expect(state.retry).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
   it('renders a fresh retained two-axis status without exposing provider identifiers', async () => {
     const state = sdkState('active')
     state.session.value = null

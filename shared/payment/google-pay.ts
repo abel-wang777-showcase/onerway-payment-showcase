@@ -39,7 +39,7 @@ export interface GooglePayConfiguration {
   readonly allowedAuthMethods: readonly ['PAN_ONLY', 'CRYPTOGRAM_3DS']
   readonly countryCode: 'US'
   readonly currencyCode: 'USD'
-  readonly totalPrice: '5.00'
+  readonly totalPrice: string
 }
 
 export interface PrepareGooglePayResponse extends DirectRecoveryResponse {

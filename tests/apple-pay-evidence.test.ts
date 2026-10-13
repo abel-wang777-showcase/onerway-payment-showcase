@@ -8,7 +8,7 @@ describe('Apple Pay demonstration safe projections', () => {
   })
   it('projects real session times and public fields without retaining session credentials', () => {
     const result = validationEvidence('https://apple-pay-gateway-cert.apple.com/paymentservices/paymentSession', 'merchant.example', 'shop.example', {
-      epochTimestamp: 1790168840000, expiresAt: 1790169140000, domainName: 'shop.example', displayName: 'Halden',
+      epochTimestamp: 1790168840000, expiresAt: 1790169140000, domainName: 'shop.example', displayName: 'Onerway Store',
       signature: 'SECRET_SIGNATURE_MARKER', nonce: 'SECRET_NONCE_MARKER', merchantSessionIdentifier: 'SECRET_SESSION_MARKER', merchantIdentifier: 'SECRET_OPAQUE_ID_MARKER', unknown: 'SECRET_EXTRA_MARKER',
     })
     const text = JSON.stringify(result)
@@ -37,7 +37,7 @@ describe('Apple Pay demonstration safe projections', () => {
   it('maps only bundled card brands while preserving the exact reported network text', () => {
     const prepared = preparationEvidence({
       order: {} as never, attempt: {} as never, events: [], merchantIdentifier: 'merchant.example', canAuthorize: true,
-      paymentRequest: { countryCode: 'US', currencyCode: 'USD', supportedNetworks: ['visa', 'MASTERCARD', 'UnionPay'], merchantCapabilities: ['supports3DS'], total: { label: 'Halden', amount: '5.00' } },
+      paymentRequest: { countryCode: 'US', currencyCode: 'USD', supportedNetworks: ['visa', 'MASTERCARD', 'UnionPay'], merchantCapabilities: ['supports3DS'], total: { label: 'Onerway Store', amount: '5.00' } },
     })
     expect(prepared.fields[2]?.networks).toEqual([
       { value: 'visa', icon: 'i-simple-icons-visa' },

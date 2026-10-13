@@ -113,6 +113,17 @@ describe('deterministic demo journeys', () => {
     })).toBeNull()
   })
 
+  it('accepts custom Sandbox amounts while keeping simulation-only fixtures fixed', () => {
+    for (const journeyId of ['standard-success', 'three-ds-success', 'processing-recovery'] as const) {
+      const { order } = createSession(journeyId)
+      const custom = { ...order, amount: { ...order.amount, minor: 1234 }, item: { ...order.item, unitAmount: { ...order.item.unitAmount, minor: 1234 } } }
+      expect(findOrderJourney(custom)?.id ?? null).toBe(journeyId === 'processing-recovery' ? null : journeyId)
+      expect(findOrderJourney({ ...custom, amount: { ...custom.amount, minor: 1235 } })).toBeNull()
+      const invalid = { ...custom, amount: { ...custom.amount, minor: 1_000_001 }, item: { ...custom.item, unitAmount: { ...custom.item.unitAmount, minor: 1_000_001 } } }
+      expect(findOrderJourney(invalid)).toBeNull()
+    }
+  })
+
   it('advances the standard journey without mutating prior snapshots', () => {
     const loading = createSession('standard-success')
     const ready = advanceSession(loading)

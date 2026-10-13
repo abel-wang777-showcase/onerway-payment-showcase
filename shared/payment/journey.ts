@@ -1,6 +1,7 @@
 import type { IntegrationId, PaymentMethodId, SceneId } from './capability'
 import type { Currency, Order } from './order'
 import type { DemoStage } from './state'
+import { isPaymentAmount } from './amount'
 
 export const JOURNEY_IDS = [
   'apple-pay-direct',
@@ -94,7 +95,7 @@ export const JOURNEYS = Object.freeze({
   'hosted-checkout': Object.freeze({
     id: 'hosted-checkout',
     label: 'USD 5.00 · Hosted Checkout',
-    description: 'Choose from the payment methods available on Onerway Checkout, then return to Halden for server verification.',
+    description: 'Choose from the payment methods available on Onerway Checkout, then return to Onerway Store for server verification.',
     scene: 'ecommerce',
     integration: 'checkout',
     method: 'all',
@@ -112,7 +113,7 @@ export const JOURNEYS = Object.freeze({
   'hosted-checkout-three-ds': Object.freeze({
     id: 'hosted-checkout-three-ds',
     label: 'USD 50.00 · Hosted Checkout 3DS',
-    description: 'Select Card on Onerway Checkout to exercise the Sandbox 3DS challenge, then return to Halden for server verification. Other methods depend on eligibility.',
+    description: 'Select Card on Onerway Checkout to exercise the Sandbox 3DS challenge, then return to Onerway Store for server verification. Other methods depend on eligibility.',
     scene: 'ecommerce',
     integration: 'checkout',
     method: 'all',
@@ -265,9 +266,9 @@ export function findOrderJourney(order: Order): Journey | null {
       && journey.item === order.item.name
       && journey.variant === order.item.variant
       && order.item.quantity === 1
-      && journey.amount === order.item.unitAmount.minor
+      && order.amount.minor === order.item.unitAmount.minor
       && journey.currency === order.item.unitAmount.currency
-      && journey.amount === order.amount.minor
+      && (journey.modes.includes('sandbox') ? isPaymentAmount(order.amount.minor) : journey.amount === order.amount.minor)
       && journey.currency === order.amount.currency,
     ) ?? null
 }

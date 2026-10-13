@@ -50,7 +50,7 @@ onMounted(() => { mounted.value = true })
   <div class="min-w-0 max-w-full overflow-hidden rounded-md border border-muted">
     <div class="flex min-w-0 items-center justify-between gap-3 border-b border-muted bg-default px-3 py-2">
       <span class="min-w-0 break-words text-xs font-medium text-toned">{{ label }}</span>
-      <div class="shrink-0 [&_button]:justify-center [&_button]:touch-manipulation pointer-coarse:[&_button]:min-h-11 pointer-coarse:[&_button]:min-w-11">
+      <div class="shrink-0 pointer-coarse:[&_button]:min-h-11 pointer-coarse:[&_button]:min-w-11">
         <CopyButton
           :value="value"
           :label="`Copy ${label}`"

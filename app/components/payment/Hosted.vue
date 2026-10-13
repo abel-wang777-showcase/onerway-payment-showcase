@@ -18,7 +18,7 @@ const authorization = computed(() => current.value?.attempt.authorization)
 const busy = computed(() => restoring.value || ['creating', 'verifying', 'redirecting'].includes(stage.value))
 const amount = computed(() => current.value ? formatMoney(current.value.order.amount) : '')
 const lines = computed(() => current.value ? [
-  { label: current.value.order.item.name, value: current.value.order.item.variant },
+  { label: storeProductName(current.value.order.item.name), value: current.value.order.item.variant },
   ...(contract.value
     ? [{ label: 'Billing', value: 'Merchant-managed · Every day' }, { label: 'Today', value: 'First payment' }]
     : [{ label: 'Quantity', value: String(current.value.order.item.quantity) }, { label: 'Delivery', value: 'Included' }]),
@@ -26,7 +26,7 @@ const lines = computed(() => current.value ? [
 const details = computed(() => current.value ? [
   { label: 'integration', value: 'checkout' },
   { label: contract.value ? 'subscriptionPlan' : 'journey', value: contract.value?.planId ?? journey.value?.id ?? 'unavailable' },
-  { label: 'threeDSJourney', value: contract.value || journey.value?.id === 'hosted-checkout-three-ds' ? 'challenge' : 'not-selected' },
+  { label: 'threeDSJourney', value: contract.value || (journey.value?.id === 'hosted-checkout-three-ds' && current.value?.order.amount.minor === journey.value.amount) ? 'challenge' : 'provider-determined' },
   { label: 'orderId', value: current.value.order.id },
   { label: 'attemptId', value: current.value.attempt.id },
   { label: 'merchantTxnId', value: current.value.attempt.merchantTxnId ?? 'unavailable' },
@@ -68,6 +68,9 @@ onMounted(async () => {
     await navigateTo(paymentPath(current.value.attempt), { replace: true })
     return
   }
+  // A fresh create carries a one-use in-memory URL. The Hub already collected
+  // the customer's choice; recovery never restores this navigation capability.
+  if (canOpenCheckout.value) await openCheckout()
   await nextTick()
   title.value?.focus()
 })
@@ -90,14 +93,15 @@ onMounted(async () => {
       <UButton v-else to="/" label="Return to Demo Hub" class="mt-6 min-h-11" />
     </section>
     <div v-else class="grid gap-8 lg:grid-cols-[minmax(0,1fr)_24rem] lg:items-start">
-      <div class="min-w-0 space-y-8">
+      <HaldenSummary class="lg:col-start-2 lg:row-start-1" :lines="lines" :total="amount" pay-label="Continue to Onerway Checkout" :disabled="!canOpenCheckout || busy" :busy="stage === 'redirecting'" @pay="openCheckout" />
+      <div class="min-w-0 space-y-8 lg:col-start-1 lg:row-start-1">
         <div>
           <UBadge label="Sandbox · Hosted Checkout" variant="soft" />
           <h1 ref="title" tabindex="-1" class="mt-4 text-3xl font-semibold tracking-tight text-highlighted sm:text-4xl">
-            {{ authorization ? 'Authorize your Halden order.' : contract ? 'Start your Halden subscription.' : 'Complete your Halden order.' }}
+            {{ authorization ? 'Authorize your Onerway Store order.' : contract ? 'Start your Onerway Store subscription.' : 'Complete your Onerway Store order.' }}
           </h1>
           <p class="mt-4 max-w-2xl text-sm leading-relaxed text-toned">
-            {{ authorization ? 'Authorize a card on Onerway’s secure checkout. Funds are frozen first; the merchant demo can then capture the full amount or release the authorization.' : 'Choose your payment method on Onerway’s secure checkout. You will return to Halden to see your verified payment result.' }}
+            {{ authorization ? 'Authorize a card on Onerway’s secure checkout. Funds are frozen first; the merchant demo can then capture the full amount or release the authorization.' : 'Choose your payment method on Onerway’s secure checkout. You will return to Onerway Store to see your verified payment result.' }}
           </p>
         </div>
         <section class="rounded-lg border border-default p-5 sm:p-6" aria-labelledby="hosted-methods-title">
@@ -108,11 +112,11 @@ onMounted(async () => {
           <p class="mt-2 text-sm leading-relaxed text-toned">
             {{ authorization ? 'Enter card details and complete any required authentication on Onerway Checkout. Authorizing this order does not charge your card.' : 'Onerway shows the methods enabled for this merchant and eligible for your country, currency and device. Enter payment details only on that page.' }}
           </p>
-          <p v-if="journey?.id === 'hosted-checkout-three-ds'" class="mt-2 text-sm leading-relaxed text-toned">
-            Select Card to test the USD 50.00 Sandbox 3DS challenge. Complete authentication on the hosted page; Halden verifies the payment after your return. Selecting another method does not verify this 3DS journey.
+          <p v-if="journey?.id === 'hosted-checkout-three-ds' && current.order.amount.minor === journey.amount" class="mt-2 text-sm leading-relaxed text-toned">
+            Select Card to test the USD 50.00 Sandbox 3DS challenge. Complete authentication on the hosted page; Onerway Store verifies the payment after your return. Selecting another method does not verify this 3DS journey.
           </p>
           <p v-if="contract" class="mt-2 text-sm leading-relaxed text-toned">
-            Select Card to pay {{ amount }} today for {{ contract.productName }} and authorize daily merchant-managed billing. Complete the first-payment 3DS on Checkout. Halden verifies payment and subscription activation separately; this showcase does not schedule later charges. Other methods are outside this subscription demonstration.
+            Select Card to pay {{ amount }} today for {{ storeProductName(contract.productName) }} and authorize daily merchant-managed billing. Complete the first-payment 3DS on Checkout. Onerway Store verifies payment and subscription activation separately; this showcase does not schedule later charges. Other methods are outside this subscription demonstration.
           </p>
         </section>
         <SubscriptionStatusPair v-if="contract" :payment="current.attempt.status" :subscription="contract" />
@@ -128,7 +132,7 @@ onMounted(async () => {
         <UAlert v-if="error" :description="error" color="warning" variant="subtle" role="alert" />
         <div v-if="!canOpenCheckout && !authorization" class="flex flex-wrap gap-3">
           <UButton label="Verify existing payment" icon="i-lucide-shield-check" :disabled="busy" :loading="stage === 'verifying'" class="min-h-11" @click="verify()" />
-          <UButton v-if="journey && !contract" label="Start a separate Sandbox order" variant="outline" color="neutral" :disabled="busy" class="min-h-11" @click="start(journey.id, true)" />
+          <UButton v-if="journey && !contract" label="Start a separate Sandbox order" variant="outline" color="neutral" :disabled="busy" class="min-h-11" @click="start(journey.id, true, current.attempt.method, current.order.amount.minor)" />
           <UButton v-if="contract" to="/?mode=subscription&journey=hosted-checkout" label="Return to subscription options" variant="outline" color="neutral" class="min-h-11" />
         </div>
         <section aria-label="Payment references" class="min-w-0 rounded-lg border border-default p-5">
@@ -141,7 +145,6 @@ onMounted(async () => {
           </dl>
         </section>
       </div>
-      <HaldenSummary :lines="lines" :total="amount" pay-label="Continue to Onerway Checkout" :disabled="!canOpenCheckout || busy" :busy="stage === 'redirecting'" @pay="openCheckout" />
     </div>
   </UContainer>
 </template>

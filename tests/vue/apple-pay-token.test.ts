@@ -48,7 +48,7 @@ describe('Apple Pay token panel', () => {
     expect(wrapper.text()).toContain('This page did not submit a payment')
     expect(wrapper.text()).not.toContain('synthetic-private-token')
     await wrapper.get('button[aria-controls]').trigger('click')
-    expect(wrapper.text()).toContain('USD 5.00')
+    expect(wrapper.text()).toContain('matching this order’s amount and currency')
     expect(wrapper.text()).toContain('this page’s order remains unsubmitted')
     await wrapper.findAll('button').find(button => button.text() === 'Clear token')!.trigger('click')
     expect(wrapper.emitted('clear')).toHaveLength(1)

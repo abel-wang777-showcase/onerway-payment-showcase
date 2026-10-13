@@ -78,7 +78,7 @@ async function installAppleMock(page: Page, result: 'succeeded' | 'failed' = 'su
         await route.fulfill({ json: current })
       }
       else if (url.pathname === '/api/payment/intent') {
-        expect(body).toEqual({ journeyId: 'apple-pay-direct', method: 'apple-pay', restart: true })
+        expect(body).toEqual({ journeyId: 'apple-pay-direct', method: 'apple-pay', restart: true, amountMinor: current.order.amount.minor })
         current = payment('created', 'order-direct-2')
         await route.fulfill({ json: { orderId: current.order.id, create: true } })
       }

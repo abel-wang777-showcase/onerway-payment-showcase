@@ -6,19 +6,44 @@
 @import "@fontsource/geist-mono/latin-500.css";
 @import "@fontsource/geist-mono/latin-600.css";
 @import "@fontsource/geist-mono/latin-700.css";
+@reference "./main.css";
 
 /*
  * Consumer-owned styles belong here.
  * Keep registry-managed foundation styles in main.css unchanged.
  */
 
-.demo-passport {
-  background:
-    linear-gradient(
-      135deg,
-      color-mix(in srgb, var(--ui-primary) 10%, var(--ui-bg)) 0%,
-      var(--ui-bg-elevated) 72%
-    );
+.demo-passport button,
+.demo-passport button [data-slot="label"] {
+  white-space: normal;
+  text-align: center;
+  overflow: visible;
+}
+
+.demo-mobile-nav {
+  padding-bottom: calc(0.5rem + env(safe-area-inset-bottom));
+}
+
+.demo-workspace {
+  display: block !important;
+  height: auto !important;
+  overflow: visible !important;
+
+  @variant lg {
+    display: flex !important;
+  }
+}
+
+.demo-workspace > [data-panel] {
+  overflow: visible !important;
+}
+
+html {
+  scroll-padding-block: 1.5rem 7rem;
+}
+
+button, a, summary {
+  touch-action: manipulation;
 }
 
 .halden-shell {

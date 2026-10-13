@@ -30,7 +30,7 @@ const primaryTarget = computed(() => {
 
 const primaryLabel = computed(() => {
   if (props.canonicalHref) {
-    return 'Continue on canonical Production'
+    return 'Open Sandbox site'
   }
 
   if (props.existing) {

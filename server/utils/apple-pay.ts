@@ -2,6 +2,7 @@ import { DirectGatewayError, buildDirectPayload, directRequestEvidence, postDire
 import { request } from 'node:https'
 import type { PaymentStatus } from '../../shared/payment/attempt'
 import type { Order } from '../../shared/payment/order'
+import { isPaymentAmount, paymentAmountText } from '../../shared/payment/amount'
 import { mapDirectTransactionStatus } from '../../shared/payment/merge'
 import type { CreateContext } from './gateway'
 import type { ServerProfile } from './profile'
@@ -21,9 +22,9 @@ function sandbox(profile: ServerProfile): asserts profile is SandboxProfile {
   if (profile.profile !== 'sandbox' || profile.transactionPolicy !== 'sandbox-only') fail('PROFILE_PRODUCTION_LOCKED')
 }
 function orderAmount(order: Order): string {
-  if (order.scene !== 'ecommerce' || order.amount.currency !== 'USD' || order.amount.minor !== 500
-    || order.item.unitAmount.currency !== 'USD' || order.item.quantity * order.item.unitAmount.minor !== 500) fail('PAYMENT_ORDER_INVALID')
-  return '5.00'
+  if (order.scene !== 'ecommerce' || order.amount.currency !== 'USD' || !isPaymentAmount(order.amount.minor)
+    || order.item.unitAmount.currency !== 'USD' || order.item.quantity * order.item.unitAmount.minor !== order.amount.minor) fail('PAYMENT_ORDER_INVALID')
+  return paymentAmountText(order.amount.minor)
 }
 function responseData(value: unknown): unknown {
   if (!record(value) || value.respCode !== '20000') fail('APPLE_PAY_GATEWAY_REJECTED')
@@ -80,7 +81,7 @@ export async function validateApplePayMerchant(profile: SandboxProfile, validati
     validationDiagnostic('not-configured')
     fail('APPLE_PAY_NOT_CONFIGURED')
   }
-  const body = JSON.stringify({ merchantIdentifier: profile.applePay.merchantIdentifier, displayName: 'Halden', initiative: 'web', initiativeContext: new URL(profile.showcaseOrigin).hostname })
+  const body = JSON.stringify({ merchantIdentifier: profile.applePay.merchantIdentifier, displayName: 'Onerway Store', initiative: 'web', initiativeContext: new URL(profile.showcaseOrigin).hostname })
   try {
     return await new Promise((resolve, reject) => {
       const req = request(url, {
