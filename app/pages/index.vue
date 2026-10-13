@@ -242,14 +242,14 @@ onMounted(async () => {
           :methods="methods"
           :subscription="billingMode === 'subscription'"
         >
-          <UFormField label="Billing experience" name="billing-mode">
+          <UFormField label="Billing experience" name="billing-mode" class="min-w-0">
             <USelect
               v-model="billingMode"
               aria-label="Billing experience"
               :items="billingItems"
               size="lg"
-              class="min-h-11 w-full"
-              :ui="{ value: 'whitespace-normal text-start', item: 'min-h-11', itemLabel: 'whitespace-normal' }"
+              class="h-11 w-full"
+              :ui="{ base: 'text-base md:text-sm', value: 'min-w-0 text-start', item: 'min-h-11', itemLabel: 'whitespace-normal' }"
             />
           </UFormField>
           <template #journey>

@@ -25,10 +25,11 @@ const value = computed({
       aria-label="Journey preset"
       :items="items"
       size="lg"
-      class="min-h-11 w-full"
-      :ui="{ value: 'whitespace-normal text-start', item: 'min-h-11', itemLabel: 'whitespace-normal' }"
+      class="h-11 w-full"
+      :title="selectedLabel"
+      :ui="{ base: 'text-base md:text-sm', value: 'min-w-0 text-start', item: 'min-h-11', itemLabel: 'whitespace-normal' }"
     >
-      <span class="min-w-0 whitespace-normal text-start">{{ selectedLabel }}</span>
+      <span class="min-w-0 truncate text-start">{{ selectedLabel }}</span>
     </USelect>
   </UFormField>
 </template>

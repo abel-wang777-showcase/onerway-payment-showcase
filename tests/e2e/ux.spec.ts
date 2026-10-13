@@ -193,3 +193,48 @@ test('offers only Sandbox journeys and normalizes old simulation links', async (
   }
   gate.assertClean()
 })
+
+for (const colorScheme of ['light', 'dark'] as const) {
+  test(`aligns demo form controls across widths in ${colorScheme} mode`, async ({ page }, testInfo) => {
+    const gate = await installSimulationGate(page)
+    await page.emulateMedia({ colorScheme })
+    await gotoHydrated(page, '/?journey=hosted-checkout&method=all&mode=payment')
+    const fields = [
+      page.getByRole('combobox', { name: 'Billing experience', exact: true }),
+      page.getByRole('combobox', { name: 'Payment method', exact: true }),
+      page.getByRole('combobox', { name: 'Journey preset', exact: true }),
+      page.getByRole('textbox', { name: 'Payment amount', exact: true }),
+    ]
+    for (const width of [320, 390, 556, 834, 985, 1440]) {
+      await page.setViewportSize({ width, height: 900 })
+      const controls = await Promise.all(fields.map(field => field.evaluate((element) => {
+        const rect = element.getBoundingClientRect()
+        return { x: rect.x, y: rect.y, width: rect.width, height: rect.height, fontSize: getComputedStyle(element).fontSize }
+      })))
+      for (const control of controls) {
+        expect(control.height).toBeGreaterThanOrEqual(44)
+        expect(control.height).toBe(controls[0]!.height)
+        expect(control.fontSize).toBe(controls[0]!.fontSize)
+        expect(Math.abs(control.width - controls[0]!.width)).toBeLessThan(2)
+      }
+      expect(controls[0]!.y).toBe(controls[1]!.y)
+      expect(controls[2]!.y).toBe(controls[3]!.y)
+      expect(controls[0]!.x).toBe(controls[2]!.x)
+      expect(controls[1]!.x).toBe(controls[3]!.x)
+      await expectNoHorizontalOverflow(page)
+      if ([390, 556, 1440].includes(width)) {
+        await page.screenshot({ path: testInfo.outputPath(`aligned-${width}-${colorScheme}.png`), fullPage: true })
+      }
+    }
+    await page.setViewportSize({ width: 556, height: 771 })
+    await fields[1]!.focus()
+    await page.keyboard.press('Enter')
+    await expect(page.getByRole('option', { name: 'Choose on Checkout · Conditional', exact: true })).toBeVisible()
+    await page.keyboard.press('Escape')
+    await expect(fields[1]!).toBeFocused()
+    await selectHubOption(page, 'Journey preset', getJourney('hosted-checkout-three-ds').label)
+    await expect(fields[2]!).toHaveCSS('height', '44px')
+    await expect(fields[3]!).toHaveValue('50.00')
+    gate.assertClean()
+  })
+}

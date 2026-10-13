@@ -22,11 +22,11 @@ const presets = [
       size="lg"
       placeholder="0.01–10,000.00"
       class="w-full"
-      :ui="{ base: 'min-h-11 tabular-nums', trailing: 'pe-0' }"
+      :ui="{ base: 'h-11 tabular-nums', trailing: 'pe-0' }"
     >
       <template #trailing>
         <UDropdownMenu :items="presets">
-          <UButton aria-label="Amount presets" icon="i-lucide-chevron-down" color="neutral" variant="ghost" class="min-h-11 min-w-11" />
+          <UButton aria-label="Amount presets" icon="i-lucide-chevron-down" color="neutral" variant="ghost" class="size-11 text-dimmed" :ui="{ leadingIcon: 'size-5' }" />
         </UDropdownMenu>
       </template>
     </UInput>

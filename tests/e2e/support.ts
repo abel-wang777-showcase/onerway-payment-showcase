@@ -40,7 +40,10 @@ export async function selectHubOption(
   const select = page.getByRole('combobox', { name: field, exact: true })
   await select.click()
   await page.getByRole('option', { name: option, exact: true }).click()
-  await expect(select).toContainText(field === 'Journey preset' ? option.replace(/^USD [\d,.]+ · /, '') : option)
+  const selectedLabel = field === 'Journey preset'
+    ? option.replace(/^USD [\d,.]+ · /, '')
+    : field === 'Payment method' ? option.split(' · ')[0]! : option
+  await expect(select).toContainText(selectedLabel)
 }
 
 export async function gotoHydrated(page: Page, path = '/'): Promise<void> {

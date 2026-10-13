@@ -31,6 +31,7 @@ const integration = field('integration')
 const method = field('method')
 const availableScenes = computed(() => props.scenes.filter(item => !item.disabled))
 const availableMethods = computed(() => props.methods.filter(item => !item.disabled))
+const selectedMethod = computed(() => props.methods.find(item => item.value === method.value))
 const otherScenes = computed(() => props.scenes.filter(item => item.disabled))
 const otherMethods = computed(() => props.methods.filter(item => item.disabled))
 const unavailableGroups = computed(() => [
@@ -82,15 +83,18 @@ const methodCondition = computed(() => {
         <p class="mb-3 text-sm leading-relaxed text-toned">{{ integrationDescription }}</p>
         <div class="grid min-w-0 grid-cols-2 items-start gap-3 lg:gap-4">
           <slot />
-          <UFormField v-if="!subscription" label="Payment method" name="payment-method">
+          <UFormField v-if="!subscription" label="Payment method" name="payment-method" class="min-w-0">
             <USelect
               v-model="method"
               aria-label="Payment method"
               :items="availableMethods"
               size="lg"
-              class="min-h-11 w-full"
-              :ui="{ value: 'whitespace-normal text-start', item: 'min-h-11', itemLabel: 'whitespace-normal' }"
-            />
+              class="h-11 w-full"
+              :title="selectedMethod?.label"
+              :ui="{ base: 'text-base md:text-sm', value: 'min-w-0 text-start', item: 'min-h-11', itemLabel: 'whitespace-normal' }"
+            >
+              <span class="min-w-0 truncate text-start">{{ selectedMethod?.title ?? selectedMethod?.label }}</span>
+            </USelect>
           </UFormField>
           <div v-else class="space-y-2 text-sm">
             <p class="font-medium text-highlighted">First payment</p>
