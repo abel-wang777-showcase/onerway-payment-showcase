@@ -50,7 +50,7 @@ const isSandbox = computed(() =>
         </NuxtLink>
 
         <nav
-          aria-label="Checkout progress"
+          aria-label="Payment progress"
           class="hidden items-center gap-2 text-sm md:flex"
         >
           <span
@@ -58,7 +58,7 @@ const isSandbox = computed(() =>
             :class="isCheckout ? 'text-highlighted' : 'text-muted'"
             :aria-current="isCheckout ? 'step' : undefined"
           >
-            Checkout
+            {{ isDirect ? 'Wallet payment' : 'Checkout' }}
           </span>
           <UIcon
             name="i-lucide-chevron-right"

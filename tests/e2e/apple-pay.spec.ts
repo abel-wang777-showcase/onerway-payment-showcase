@@ -1,7 +1,7 @@
 import { expect, test, type Page } from '@playwright/test'
 import type { PrepareApplePayResponse } from '../../shared/payment/apple-pay'
 import { APPLE_PAY_SCRIPT } from '../../app/utils/apple-pay.client'
-import { expectNoHorizontalOverflow, gotoHydrated } from './support'
+import { expectNoHorizontalOverflow, gotoHydrated, selectHubOption } from './support'
 
 const BASE_URL = 'http://127.0.0.1:4173'
 
@@ -94,6 +94,54 @@ async function installAppleMock(page: Page, result: 'succeeded' | 'failed' = 'su
 }
 
 test.describe('mock Apple Pay Direct browser journey', () => {
+  for (const entry of ['new order', 'restored order'] as const) {
+    test(`opens a ${entry} from the Hub into Apple Pay Direct manual debugging without submitting payment`, async ({ page }) => {
+      const mock = await installAppleMock(page)
+      let recoveryAvailable = false
+      await page.route('**/api/payment/recover*', async route => {
+        const url = new URL(route.request().url())
+        mock.calls.push(url.pathname)
+        if (!recoveryAvailable) {
+          await route.fulfill({ status: 401, json: { statusMessage: 'PAYMENT_RECOVERY_UNAUTHORIZED' } })
+          return
+        }
+        if (url.searchParams.has('orderId')) expect(url.searchParams.get('orderId')).toBe('order-direct')
+        await route.fulfill({ json: payment() })
+      })
+      await page.route('**/api/payment/intent', async route => {
+        mock.calls.push('/api/payment/intent')
+        expect(route.request().postDataJSON()).toEqual({ journeyId: 'apple-pay-direct', method: 'apple-pay', restart: true, amountMinor: 500 })
+        recoveryAvailable = true
+        await route.fulfill({ json: { orderId: 'order-direct', create: entry === 'new order' } })
+      })
+
+      // Client navigation uses the mocked public profile while Nitro stays Production / locked.
+      await gotoHydrated(page, '/halden/checkout/HLD-MOCK-ENTRY')
+      await page.getByRole('link', { name: 'Return to Demo Hub', exact: true }).click()
+      await expect(page.getByText('Sandbox profile · Sandbox only', { exact: true })).toBeVisible()
+      await page.getByRole('group', { name: 'Integration', exact: true }).getByRole('tab', { name: 'Direct API', exact: true }).click()
+      await selectHubOption(page, 'Payment method', 'Apple Pay · Conditional')
+      const launch = page.getByRole('button', { name: 'Open Apple Pay Sandbox', exact: true })
+      await expect(launch).toBeEnabled()
+      await launch.click()
+
+      await expect(page).toHaveURL(/\/halden\/direct\/order-direct$/)
+      await expect(page.locator('[data-apple-pay-flow]')).toBeVisible()
+      const manual = page.getByRole('radio', { name: 'Manual debugging', exact: true })
+      await expect(manual).toBeVisible()
+      const panel = page.locator('[data-apple-pay-token]')
+      await expect(panel).toBeVisible()
+      await manual.click()
+      await page.locator('apple-pay-button').getByRole('button').click()
+      await expect(page.getByRole('heading', { name: /Token captured.*payment not submitted/ })).toBeVisible()
+      await panel.getByRole('button', { name: 'Show token', exact: true }).click()
+      await expect.poll(async () => JSON.parse((await panel.locator('code[data-language]').textContent())!)).toEqual(syntheticToken)
+      expect(mock.calls.filter(path => path.endsWith('/intent'))).toHaveLength(1)
+      expect(mock.calls.filter(path => path.endsWith('/pay') || path.endsWith('/create'))).toHaveLength(0)
+      mock.assertClean()
+    })
+  }
+
   for (const presentation of [{ width: 320, colorScheme: 'light' }, { width: 1440, colorScheme: 'dark' }] as const) {
     test(`captures a manual token without submitting and clears it on leaving at ${presentation.width}px`, async ({ page }, testInfo) => {
       await page.setViewportSize({ width: presentation.width, height: 1000 })

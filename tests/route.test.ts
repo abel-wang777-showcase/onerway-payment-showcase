@@ -67,7 +67,7 @@ describe('application routes', () => {
     const html = await response.text()
     const mainIds = html.match(/id="main"/g) ?? []
     const buttons = html.match(/<button\b[^>]*>[\s\S]*?<\/button>/g) ?? []
-    const sandboxAction = buttons.find(button => button.includes('Checking for an existing Sandbox checkout'))
+    const sandboxAction = buttons.find(button => button.includes('Checking for an existing Sandbox order'))
     const disabled = /^<button\b[^>]*\sdisabled(?:\s|=|>)/
 
     expect(response.status).toBe(200)
@@ -81,7 +81,7 @@ describe('application routes', () => {
     expect(html).not.toMatch(/USD 5\.00 · (Processing recovery|Cancelled retry|Deterministic failure|Form load recovery)/)
     expect(html).not.toContain('Start a new real Sandbox checkout')
     expect(html).not.toContain('Start a Separate Sandbox Order')
-    expect(html).not.toContain('Restore existing Sandbox checkout')
+    expect(html).not.toContain('Restore existing Sandbox order')
     expect(html).toContain('role="combobox"')
     expect(html).toContain('Standard success')
     expect(html).toMatch(/<input\b[^>]*aria-label="Payment amount"[^>]*>/)

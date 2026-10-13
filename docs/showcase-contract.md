@@ -439,6 +439,7 @@ Sandbox 基础域名为 `https://sandbox-acq.onerway.com`，create 与 query 请
 - 自动化模拟 fixture 结果的 Technical details 只展示白名单化的 mode、journey、order / attempt 标识、minor amount / currency、标准状态、3DS 模拟标记和 attempt 数量；不得伪造 Onerway transaction id、响应码或 provider payload。
 - 真实 Sandbox checkout 在终态形成前必须直接展示可跨系统排查的白名单引用：`merchantTxnId`、Onerway `transactionId`、`paymentId`、Showcase `orderId` 与 `attemptId`；缺失的 provider 标识不伪造。Technical details 可展示 mode、integration、当前 SDK release 标签、受控 journey / 3DS journey 标记、是否观察到 return、上述 order / attempt / merchant transaction / transaction / payment 标识、minor amount / currency、标准状态、query 原始状态、核验 source、预期方式、transaction query 核验的实际钱包和底层网络；SDK callback method 必须另标为非持久的交互事实。当前交互提示还可展示上一段定义的受约束 reason type、reason code 与清洗后的 reason message。不得展示 provider 附加的 return query、query capability、完整 `reason`、未清洗的 `reason.message`、`rawResult` 或其他 provider payload。
 - 自动化模拟 fixture 不得请求 Onerway API、SDK CDN 或银行页面，也不得把结果写成真实 Sandbox 付款完成；公开 Sandbox 旅程必须使用真实 adapter，不能由模拟替代。
+- 共用启动入口使用中性的订单准备与恢复文案；Direct API 不称为 Hosted Checkout 创建。已有订单恢复失败时保留恢复错误及对应操作，不在同次启动中重复恢复或覆盖为创建失败；可展示 HTTP 状态码，不透出原始响应或异常内容。
 - 异常动作必须明确区分 Reload secure form、Verify existing payment、Retry payment 与 Start a separate Sandbox order；页面只显示当前状态允许且真实可执行的动作，服务端仍在执行时重新核验权限。
 - Attempt history 使用语义化列表展示 active Attempt 与 `retryOf` 链；长 identifier 在 320px 仍须换行且不得造成水平滚动。
 

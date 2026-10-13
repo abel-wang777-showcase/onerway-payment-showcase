@@ -57,7 +57,7 @@ const views = Object.freeze({
   }),
   create: Object.freeze({
     action: 'recover_attempt',
-    title: 'Checkout creation interrupted',
+    title: 'Payment could not be opened',
     description: 'Restore the existing PaymentAttempt before any new Sandbox order is considered.',
   }),
   query: Object.freeze({

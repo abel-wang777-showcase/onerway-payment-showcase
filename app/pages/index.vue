@@ -111,7 +111,7 @@ const launching = computed(() => sdkStage.value === 'creating')
 const separateSandboxOrderPending = computed(() => launching.value || sdkRestoring.value)
 const sdkLabel = computed(() => {
   if (checkingRecovery.value) {
-    return 'Checking for an existing Sandbox checkout…'
+    return 'Checking for an existing Sandbox order…'
   }
 
   if (canonicalSandboxHref.value) {
@@ -120,14 +120,14 @@ const sdkLabel = computed(() => {
 
   if (launching.value) {
     return restoringSdk.value
-      ? 'Restoring existing Sandbox checkout…'
-      : 'Creating a new Sandbox payment…'
+      ? 'Restoring existing Sandbox order…'
+      : 'Preparing a new Sandbox order…'
   }
 
   if (restoringSdk.value) {
     return retryingRestoration.value
       ? 'Retry restoration'
-      : 'Restore existing Sandbox checkout'
+      : 'Restore existing Sandbox order'
   }
 
   if (journey.value.id === 'hosted-authorization') return 'Start a Sandbox card authorization'
@@ -369,7 +369,7 @@ onMounted(async () => {
               ? 'Creating a separate Sandbox customer and signed Order. The existing subscription is not cancelled or modified.'
               : restoringSdk
               ? 'Restoring the existing authorized PaymentAttempt. No new Order or provider create will be requested.'
-              : 'Creating and persisting a separate signed Sandbox order. This may take several seconds; the previous payment is not cancelled or overwritten.' }}
+              : 'Preparing a separate Sandbox order. This may take several seconds; the previous payment is not cancelled or overwritten.' }}
           </p>
           <UAlert
             v-if="sdkError"

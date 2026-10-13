@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test'
 import type { PrepareGooglePayResponse } from '../../shared/payment/google-pay'
-import { expectCenteredButtonIcon, expectNoHorizontalOverflow, gotoHydrated } from './support'
+import { expectCenteredButtonIcon, expectNoHorizontalOverflow, gotoHydrated, selectHubOption } from './support'
 
 const origin = 'http://127.0.0.1:4173'
 const token = JSON.stringify({ protocolVersion: 'ECv2', signature: 'synthetic-signature', signedMessage: JSON.stringify({ encryptedMessage: 'synthetic-encrypted-message', ephemeralPublicKey: 'synthetic-key', tag: 'synthetic-tag' }) })
@@ -57,6 +57,56 @@ async function installMock(page: Page, hostedVerification = false) {
 }
 
 test.describe('Google Pay Direct with synthetic provider boundary', () => {
+  for (const entry of ['new order', 'restored order'] as const) {
+    test(`opens a ${entry} from the Hub into Google Pay Direct manual debugging without submitting payment`, async ({ page }) => {
+      const mock = await installMock(page)
+      let recoveryAvailable = false
+      await page.route('**/api/payment/recover*', async route => {
+        const url = new URL(route.request().url())
+        mock.calls.push(url.pathname)
+        if (!recoveryAvailable) {
+          await route.fulfill({ status: entry === 'new order' ? 401 : 503, json: { statusMessage: entry === 'new order' ? 'PAYMENT_RECOVERY_UNAUTHORIZED' : 'PAYMENT_RECOVERY_UNAVAILABLE' } })
+          return
+        }
+        if (url.searchParams.has('orderId')) expect(url.searchParams.get('orderId')).toBe('order-google')
+        await route.fulfill({ json: payment() })
+      })
+      await page.route('**/api/payment/intent', async route => {
+        mock.calls.push('/api/payment/intent')
+        expect(entry).toBe('new order')
+        expect(route.request().postDataJSON()).toEqual({ journeyId: 'google-pay-direct', method: 'google-pay', restart: true, amountMinor: 500 })
+        recoveryAvailable = true
+        await route.fulfill({ json: { orderId: 'order-google', create: true } })
+      })
+
+      // Client navigation uses the mocked public profile while Nitro stays Production / locked.
+      await gotoHydrated(page, '/halden/checkout/HLD-MOCK-ENTRY')
+      await page.getByRole('link', { name: 'Return to Demo Hub', exact: true }).click()
+      await expect(page.getByText('Sandbox profile · Sandbox only', { exact: true })).toBeVisible()
+      await page.getByRole('group', { name: 'Integration', exact: true }).getByRole('tab', { name: 'Direct API', exact: true }).click()
+      await selectHubOption(page, 'Payment method', 'Google Pay · Conditional')
+      const launch = page.getByRole('button', { name: entry === 'new order' ? 'Open Google Pay Sandbox' : 'Retry restoration', exact: true })
+      await expect(launch).toBeEnabled()
+      if (entry === 'restored order') recoveryAvailable = true
+      await launch.click()
+
+      await expect(page).toHaveURL(/\/halden\/direct\/order-google$/)
+      await expect(page.locator('[data-google-pay-flow]')).toBeVisible()
+      const manual = page.getByRole('radio', { name: 'Manual debugging', exact: true })
+      await expect(manual).toBeVisible()
+      const panel = page.locator('[data-google-pay-token]')
+      await expect(panel).toBeVisible()
+      await manual.click()
+      await page.getByRole('button', { name: 'Pay with Google Pay', exact: true }).click()
+      await expect(page.getByRole('heading', { name: /Token captured.*payment not submitted/ })).toBeVisible()
+      await panel.getByRole('button', { name: 'Show token', exact: true }).click()
+      await expect.poll(async () => JSON.parse((await panel.locator('code[data-language]').textContent())!)).toEqual(JSON.parse(token))
+      expect(mock.calls.filter(path => path.endsWith('/intent'))).toHaveLength(entry === 'new order' ? 1 : 0)
+      expect(mock.calls.filter(path => path.endsWith('/pay') || path.endsWith('/create'))).toHaveLength(0)
+      expect(mock.violations).toEqual([])
+    })
+  }
+
   test('navigates a long wallet page without recreating or submitting its order', async ({ page }) => {
     await page.setViewportSize({ width: 320, height: 844 })
     const mock = await installMock(page)
