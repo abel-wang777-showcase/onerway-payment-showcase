@@ -158,8 +158,8 @@ mobile 已暂存：`.env.example`、README、契约、gateway/profile/store、at
 
 | 文件 | SHA-256 |
 | --- | --- |
-| `docs/showcase-contract.md` | `77c87f4381a9af5f4be856bd168a0e0a610392440c1c67f17256291443be2784` |
-| `docs/api/demo-v1.openapi.json` | `3cc4804f8addf74837d3c322324a9daddcafbe4f65832b90d0884c3118f6e1ac` |
-| `docs/api/demo-v1.examples.json` | `f95f42b3fb4c79e096fa97108422e0dcde40c8f75cf2659a211e1ee797983a09` |
+| `docs/showcase-contract.md` | `2333be913fc4c878bdd0eb074b2738539f3ae658f5909282f07b2464fdf23a20` |
+| `docs/api/demo-v1.openapi.json` | `30f06f818281d766ed26082c2e5a31bbd4790d4fde32e160ec2c211f9435a992` |
+| `docs/api/demo-v1.examples.json` | `db0ec174fcf1e57cfc13dfc9284bf5a5f16219b307d80efb4820fdd06a46416e` |
 
 交回 Claude：只读本次 PR 的收敛前快照与最终提交，按 PR 决定对照表确认语义未变、无规则遗漏及证据升级；核对上述 SHA-256。只报告具体差异或确认语义未变，不实施、不部署、不交易。回读通过前不合并。历史审阅编号的完整落点表只保存在 PR 描述，不在本文重复维护。

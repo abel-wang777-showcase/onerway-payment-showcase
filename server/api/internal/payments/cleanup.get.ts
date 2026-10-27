@@ -1,3 +1,5 @@
+import { runDemoMaintenance } from '../../../utils/demo/maintenance'
+import { requireServerProfile } from '../../../utils/profile'
 import { verifyBearerToken } from '../../../utils/access'
 import {
   PaymentStoreError,
@@ -13,12 +15,14 @@ export default defineEventHandler(async (event) => {
   }
 
   try {
+    const profile = requireServerProfile()
+    const demo = profile.profile === 'sandbox' ? await runDemoMaintenance(profile) : null
     const [payments, subscriptions] = await Promise.all([
       purgeExpiredPayments(),
       purgeExpiredSubscriptions(),
     ])
 
-    return Object.freeze({ deleted: payments, subscriptions })
+    return Object.freeze({ deleted: payments, subscriptions, demo })
   }
   catch (error) {
     if (error instanceof PaymentStoreError) {

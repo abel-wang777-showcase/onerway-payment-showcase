@@ -1187,6 +1187,39 @@ export async function executeAuthorizationOperation(
   return readAuthorizationOperationResponse(response, context)
 }
 
+// Native APP adapter adapted from the mobile worktree; v1 validates its own amount/scene.
+export interface MobileCreateContext extends Pick<CreateContext, 'merchantTxnId' | 'merchantCustId' | 'order' | 'returnUrl'> {
+  platform: 'ANDROID' | 'IOS'
+}
+
+export function buildMobileCreatePayload(profile: Extract<ServerProfile, { profile: 'sandbox' }>, context: MobileCreateContext): Payload {
+  if (context.order.amount.currency !== 'USD'
+    || !Number.isSafeInteger(context.order.amount.minor)
+    || context.order.amount.minor < 1 || context.order.amount.minor > 1_000_000
+    || !['ANDROID', 'IOS'].includes(context.platform)
+    || !/^[A-Za-z0-9_-]{1,63}$/.test(context.merchantCustId)) {
+    throw new TypeError('PAYMENT_ORDER_INVALID')
+  }
+  return Object.freeze({
+    merchantNo: profile.merchantNo,
+    merchantTxnId: context.merchantTxnId,
+    merchantCustId: context.merchantCustId,
+    orderAmount: formatAmount(context.order.amount.minor),
+    orderCurrency: context.order.amount.currency,
+    paymentMode: 'APP', osType: context.platform,
+    productType: 'ALL', subProductType: 'DIRECT', txnType: 'SALE',
+    txnOrderMsg: {
+      returnUrl: context.returnUrl, notifyUrl: profile.notifyUrl, appId: profile.appId,
+      products: [{ currency: context.order.item.unitAmount.currency, name: context.order.item.name,
+        num: String(context.order.item.quantity), price: formatAmount(context.order.item.unitAmount.minor) }],
+    },
+  })
+}
+
+export async function createMobilePayment(profile: Extract<ServerProfile, { profile: 'sandbox' }>, context: MobileCreateContext): Promise<CreatedPayment> {
+  return readCreateResponse(await post(profile, '/v1/sdkTxn/doTransaction', buildMobileCreatePayload(profile, context)))
+}
+
 export async function createSubscriptionPayment(
   profile: Extract<ServerProfile, { profile: 'sandbox' }>,
   context: SubscriptionCreateContext,

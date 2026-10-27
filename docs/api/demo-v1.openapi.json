@@ -1170,7 +1170,7 @@
       "post": {
         "operationId": "createCheckoutSession",
         "summary": "领取或接替同一支付启动租约",
-        "description": "实时核验状态、能力与归属；只允许符合规则的 U/O 再启动。P/R/A 禁止再次提交；租约不是 Provider 防重复承诺。 首批只覆盖原生 SDK 启动；WEB SDK 后批按实际生命周期补齐。",
+        "description": "实时核验状态、能力与归属；只允许符合规则的 U/O 再启动。P/R/A 禁止再次提交；租约不是 Provider 防重复承诺。 首批只覆盖原生 SDK 启动；WEB SDK 后批按实际生命周期补齐。 保守继续窗口到期时，首次领取或原键回读均返回 HTTP 409、code=PAYMENT_EXPIRED，并附已确认归属的 currentView；不返回可用 SDK 启动资料，不将到期映射为 Provider N。",
         "parameters": [
           {
             "$ref": "#/components/parameters/Client"
@@ -3601,7 +3601,7 @@
     "ttlMinutesDefault": 30,
     "providerDictionary": "CHECKOUT_MIMUTES",
     "deadline": "首次 Provider 创建请求发送时间 + 本次服务端 TTL 配置快照",
-    "expired": "CONTINUE_SDK disabled / PAYMENT_EXPIRED，attention=null；仍可 QUERY，不将本地到期当 Provider N",
+    "expired": "CONTINUE_SDK disabled / PAYMENT_EXPIRED，attention=null；仍可 QUERY，不将本地到期当 Provider N；保守继续窗口到期时，首次领取或原键回读均返回 HTTP 409、code=PAYMENT_EXPIRED，并附已确认归属的 currentView；不返回可用 SDK 启动资料，不将到期映射为 Provider N。",
     "providerExpiresAt": "不使用保守窗口填充，可靠 Provider 时间未知时 null"
   },
   "x-error-code-catalog": {
@@ -3611,7 +3611,8 @@
       "SESSION_EXPIRED",
       "REQUEST_NOT_FOUND",
       "SESSION_MISSING",
-      "SESSION_INVALID"
+      "SESSION_INVALID",
+      "PAYMENT_EXPIRED"
     ],
     "authentication401": {
       "SESSION_MISSING": "无凭证",

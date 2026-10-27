@@ -1,3 +1,7 @@
+import { recordDemoWebhook } from '../../../utils/demo/maintenance'
+import { runPaymentJob } from '../../../utils/demo/payment'
+import { DemoError } from '../../../utils/demo/errors'
+import { DemoDatabaseError } from '../../../utils/demo/database'
 import { isDirectWalletAttempt } from '../../../../shared/payment/attempt'
 import {
   isSubscriptionWebhookProcessed,
@@ -61,6 +65,16 @@ export default defineEventHandler(async (event): Promise<string> => {
       if (!verifyWebhookSignature(body, profile.secret, signatureHeader)) {
         throw new WebhookError('PAYMENT_WEBHOOK_SIGNATURE_INVALID')
       }
+      if (typeof body.merchantTxnId === 'string' && /^demo_[a-f0-9]{32}$/.test(body.merchantTxnId)) {
+      const nativeFact = readPaymentWebhook(body, profile.secret, profile.merchantNo, signatureHeader)
+      const nativeId = await recordDemoWebhook(nativeFact)
+      if (nativeId) {
+        // Nitro binds this promise to the response lifecycle; failed queries remain in the outbox.
+        event.waitUntil(runPaymentJob(profile, nativeId).catch(() => {}))
+        setResponseHeader(event, 'Content-Type', 'text/plain; charset=utf-8')
+        return nativeFact.transactionId
+      }
+      }
       const timeline = typeof body.merchantTxnId === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(body.merchantTxnId)
         ? await getPaymentTimeline(body.merchantTxnId) : null
       const direct = Boolean(timeline && timeline.attempt.merchantTxnId === body.merchantTxnId
@@ -75,6 +89,9 @@ export default defineEventHandler(async (event): Promise<string> => {
     return transactionId
   }
   catch (error) {
+    if (error instanceof DemoError) fail(error.statusCode, error.body.error.code)
+    if (error instanceof DemoDatabaseError) fail(503, 'DEMO_DATABASE_UNAVAILABLE')
+
     if (error instanceof WebhookError) {
       console.warn('[payment-webhook] rejected', {
         code: error.code,
