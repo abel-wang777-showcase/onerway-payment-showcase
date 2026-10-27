@@ -93,6 +93,7 @@ mobile 已暂存：`.env.example`、README、契约、gateway/profile/store、at
 - Web Cookie/CSRF：Web 批次前冻结。
 - 订阅管理 URL 有效期：开发者文档未覆盖，阶段 C 按“期限未知”兜底（MANAGE_URL_EXPIRY_UNKNOWN），不写成已确认。
 - 自管理 expireDate 上限：开发者文档未覆盖，阶段 C 按“期限未知”兜底，不猜测上限或写成已确认。
+- 自管理升降级：开发者文档未覆盖，阶段 C 补证。
 
 阶段 C 的续费客户动作恢复仍属既定契约与实施工作，不另列为 Provider 调研缺口。
 
@@ -157,7 +158,7 @@ mobile 已暂存：`.env.example`、README、契约、gateway/profile/store、at
 
 | 文件 | SHA-256 |
 | --- | --- |
-| `docs/showcase-contract.md` | `0d81c6d82f5850405ebd334120b401b43ef4e92d696e884e1470a5e4c8c2e144` |
+| `docs/showcase-contract.md` | `77c87f4381a9af5f4be856bd168a0e0a610392440c1c67f17256291443be2784` |
 | `docs/api/demo-v1.openapi.json` | `3cc4804f8addf74837d3c322324a9daddcafbe4f65832b90d0884c3118f6e1ac` |
 | `docs/api/demo-v1.examples.json` | `f95f42b3fb4c79e096fa97108422e0dcde40c8f75cf2659a211e1ee797983a09` |
 
