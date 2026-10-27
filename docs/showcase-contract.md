@@ -2,10 +2,10 @@
 
 > 状态：M0 Web JS SDK Card、订阅与钱包；Sandbox Hosted Checkout 已有真实演示证据，逐方式能力保持条件限制
 >
-> 更新日期：2026-10-25（B0 契约准备）
+> 更新日期：2026-10-27（文档收敛；v1 目标尚未实施）
 > 作用：这是项目长期有效的产品、架构、状态和安全边界。GitHub Issues 负责交付顺序，不替代本文件。
 
-> B0 文档基线：第 1–11 节同步自已提交 `fa7c4a859c63d33bb5c34e98c539efa37313b2e6` 的契约；本工作区源码仍在 `6d1adf9`，本次没有同步业务实现。第 12–13 节为三端 v1 目标，尚未实现或部署。旧入口的 latch、单订单 Cookie、固定客户等现行规则仅约束旧实现，v1 按新规则实施；旧入口须完成消费者、数据和恢复迁移验证后才可删除。
+> 适用范围与来源：第 1–11 节同步自已提交 `fa7c4a859c63d33bb5c34e98c539efa37313b2e6` 的契约；这些旧入口规则不表示三端 v1 已实现，源码版本与工作区基线另见交付 PR。第 12–13 节为三端 v1 目标，尚未实现或部署。旧入口的 latch、单订单 Cookie、固定客户等现行规则仅约束旧实现，v1 按新规则实施；旧入口须完成消费者、数据和恢复迁移验证后才可删除。
 > 首批结构唯一来源：[Demo v1 OpenAPI](api/demo-v1.openapi.json)；[共享合成示例](api/demo-v1.examples.json)。B0 只准备一次性 SDK SALE 及其依赖；订阅、时间线、其他支付方式的目标语义保留，结构按后续批次补齐。不能从目标文档推定运行时能力 Available。
 
 ## 1. 产品目标、受众和非目标
@@ -504,13 +504,25 @@ Sandbox 基础域名为 `https://sandbox-acq.onerway.com`，create 与 query 请
 
 ## 12. 三端 Demo v1 目标契约（B0）
 
-以下为已确认业务语义及首批结构候选：`/api/demo/v1`，替代未交付 mobile v0 的设计，不表示已实现/可调用。在现有领域层之上增加应用服务层，不重写 gateway/webhook/store；阶段 B 安排 Web 一起迁入 v1，阶段 C 补订阅与时间线。新会话、客户、操作、任务及条款按领域拆模块，不继续堆进 store.ts。旧恢复路由、recovery.ts 和 mobile v0 仅在消费者检查、存量恢复/数据迁移与回滚方案确认并完成切换后删除，不以契约准备授权删除或让两套状态机长期并存。无认证迁移内容。金额始终整数 minor units，时间为 UTC ISO 8601，ID 为不透明字符串；状态版本 `revision` 单调递增，客户端拒绝旧视图覆盖新视图。
+以下为三端 v1 的目标业务语义与首批接口结构：`/api/demo/v1`，替代未交付 mobile v0 的设计，不表示已实现/可调用。在现有领域层之上增加应用服务层，不重写 gateway/webhook/store；阶段 B 安排 Web 一起迁入 v1，阶段 C 补订阅与时间线。新会话、客户、操作、任务及条款按领域拆模块，不继续堆进 store.ts。旧恢复路由、recovery.ts 和 mobile v0 仅在消费者检查、存量恢复/数据迁移与回滚方案确认并完成切换后删除，不以契约准备授权删除或让两套状态机长期并存。无认证迁移内容。金额始终整数 minor units，时间为 UTC ISO 8601，ID 为不透明字符串；状态版本 `revision` 单调递增，客户端拒绝旧视图覆盖新视图。
 
-**响应结构与协议边界（用户确认采用方案 b，替代方案 a）**：本节只定义 Showcase `/api/demo/v1/*` 返回给 Web、Android、iOS 的 Demo 接口，不修改 Onerway API 响应、SDK 回调或 Webhook 协议。
+**响应结构与协议边界**：本节只定义 Showcase `/api/demo/v1/*` 返回给 Web、Android、iOS 的 Demo 接口，不修改 Onerway API 响应、SDK 回调或 Webhook 协议。
 
 成功响应直接返回业务资源，不加统一 data/session 外层：单资源直接返回 PaymentView、Operation 等；订阅创建及其恢复返回 `{subscription,payment}`，续费返回 `{operation,payment}`，分页返回 `{items,nextCursor}`（末页 nextCursor=null）。连接与会话接口同样直接返回各自公开字段。错误保持 `{error:<统一错误>}`，不增加 session。会话期限**只通过 X-Demo-Session-Expires-At 响应头返回**，包括会话签发、读取与 renew；204 无 body。不存在 JSON session.expiresAt 或会话期限的 body expiresAt，业务资源自己的 recordExpiresAt/leaseExpiresAt 等字段不受影响。
 
 Showcase 只适配 Demo 共同职责：会话/归属、客户引用、幂等恢复、历史分页、allowedActions、查询进度、保留期限及脱敏。PaymentView/Operation 是 Demo 视图，不是 Onerway 原始返回。Onerway 标识与原始状态保留含义，不用归一值覆盖：例如 Demo 的 status.rawPaymentStatus 对应 Onerway paymentStatus，status.rawTransactionStatus 对应 transactionStatus；normalized/fundsState/allowedActions 是明确标注的 Demo 投影。技术时间线展示 Onerway 请求、响应和 Webhook 的脱敏投影，保留被展示字段的原名及来源，不以 PaymentView 冒充原始报文；完整敏感报文仍不得保存或透传。SDK 回调不因此变成最终支付依据。这里不重新封装 Onerway 全部 API，也不扩大已有演示范围。
+
+### 三端产品范围与交互边界
+
+普通演示公开，Web、Android、iOS 各自只访问本会话的客户、支付、订阅与脱敏记录；内部调试使用独立凭证。无需输入内部 Demo Token，不建设账号系统、跨端历史同步、配对登录、组织或角色管理；清除浏览器数据或卸载 App 后不提供身份找回。共享后端不意味着共享数据访问权限，公开资源 ID 不是凭据。
+
+客户选择仅限当前客户、新建客户或本会话已有客户，不接受任意 merchantCustId。移动端首页“待继续”显示最近一笔可继续或创建结果未知的支付，导航为首页、记录、订阅、设置。页面组织建议：连接地址/访问凭证放设置或首次配置，可预置默认服务地址，自定义地址放高级设置；SDK 外观配置放设置，金额/客户/条款/回跳放场景配置，不新增每笔下单必经的配置页；订单和订阅详情为业务入口，不长期藏在临时调试页。Android 本地50条缓存上限不成为后端业务限制，本地清理不取消支付或 Provider 合约，重要未完成支付不得静默失去关联。
+
+“继续原支付”“恢复未知创建结果”“开始独立测试”分别处理。用户显式开始独立 Sandbox 测试可以保留旧支付，不自动取消旧支付；新支付不必等同新商业订单，Order/Attempt 关系须避免重复履约。托管收银台在未发生支付且状态与 URL 可用性核验通过时可继续原 redirectUrl。Direct API 已提交的原支付只查询；用户明确再付款才使用新请求/交易标识，首次响应要求的外部动作仍属原流程。
+
+阶段 B 的 Web Direct 范围为既有 Apple Pay / Google Pay 的 US/USD/SALE 钱包旅程，不扩展通用 PAN/CVV 表单、APM 或 Direct AUTH/SUBSCRIBE。Apple Pay 流程包括服务端商户验证和钱包授权；Google Pay 首次 R 的受校验托管 CVC 跳转保留，transactionId/paymentId 可为空时以 merchantTxnId 关联。钱包 token 仅瞬时提交，不进入永久幂等摘要、日志、outbox 或共享示例；结果未知只查原交易，不重发 token。安全 action 投影及导航 URL 保存/恢复期限在 Web 批次补契约。固定账单/收货测试信息由服务端提供，商户手动 token 调试入口不作为三端主链路。
+
+诊断记录与领域事件分开，不参与支付真值或任意重放；先脱敏再保存/展示，脱敏副本不能用于复验原始签名，保留验签结果与安全元信息。Provider 跳转/管理 URL 按受保护导航信息处理；保存恢复用 URL 不等于公开原始 payload。客户端事件缺失不阻碍后台收敛，不伪造事件补齐时间线。notifyUrl 由共享后端控制，自定义 returnUrl 不改变通知归属；外部地址能否唤回 App 取决于域名关联。
 
 ### SDK 场景支持与防重复边界（2026-10-26 确认）
 
@@ -523,13 +535,13 @@ Showcase 只适配 Demo 共同职责：会话/归属、客户引用、幂等恢�
 | Web SDK 首次订阅 | `SALE + SUBSCRIBE`，`subscription.requestType=0` | [订阅场景](https://developers.onerway.com/payments/online-payments/scenarios/subscriptions)，documented |
 | Web SDK 预授权 | `AUTH + DIRECT`，成功后由服务端 CAPTURE 或 VOID | [预授权场景](https://developers.onerway.com/payments/online-payments/scenarios/pre-authorization)，documented |
 
-公开文档经 Onerway 开发者文档 MCP list-pages → get-page 于 2026-10-26 回读，未提供发布 revision。APP 交叉组合与同 ID 最多成功扣款一次的保证以本次用户确认为依据，不从字段枚举或调用图推导；不再列为支持性未知。Web SDK 的三类路径有明确发布说明。
+公开文档经 Onerway 开发者文档 MCP list-pages → get-page 于 2026-10-26 回读，未提供发布 revision。APP 交叉组合与同 ID 最多成功扣款一次的保证以2026-10-26 用户确认为依据，不从字段枚举或调用图推导；不再列为支持性未知。Web SDK 的三类路径有明确发布说明。
 
 AUTH 表示预授权，资金先冻结、后续请款或撤销；SUBSCRIBE 表示首次订阅子产品。二者是不同场景，不能推导 `AUTH + SUBSCRIBE`，也不能将首次订阅支持扩大为 SDK 承担续费或全部合约管理。具体支付方式、商户配置和对应参数约束仍按发布协议执行。
 
 Provider 的单 paymentId 防重复保证与 Demo 的请求幂等、权限和状态校验同时适用。不得据此自动新建 paymentId、重复发送结果未知的上游创建请求，或跳过 AUTH 的 CAPTURE/VOID 校验；订阅后续扣款按独立支付关联处理。重复提交的具体响应码未作为新的业务保证，客户端仍按既定未知结果恢复与服务端查询处理，不把 Provider 内部锁审计列为实施前置条件。
 
-上述确认更新支持性证据，不代表当前 v1 已实现、已部署或真实 Sandbox 已验收。首批 OpenAPI 保持 Native SDK SALE 范围，AUTH 与 Web 按阶段 B 后续批次、订阅按阶段 C 补齐结构；不能再以 APP 支持性未知阻断相应契约准备，也不能仅因支持性确认将未交付组合标 Available。paymentId 的 30 分钟期限及过期边界见 §13.1。本轮只更新契约，仍停在实施前。
+上述确认更新支持性证据，不代表当前 v1 已实现、已部署或真实 Sandbox 已验收。首批 OpenAPI 保持 Native SDK SALE 范围，AUTH 与 Web 按阶段 B 后续批次、订阅按阶段 C 补齐结构；不能再以 APP 支持性未知阻断相应契约准备，也不能仅因支持性确认将未交付组合标 Available。paymentId 的 30 分钟期限及过期边界见 §13.1。
 
 ### 12.1 会话、连接与规则
 
@@ -537,9 +549,9 @@ Provider 的单 paymentId 防重复保证与 Demo 的请求幂等、权限和状
 
 Native 凭证通过 Authorization Bearer 传输，保存在 Keystore/Keychain；Web 使用 Secure/HttpOnly/host-only Cookie，变更接口必须有同源/CSRF 保护。后端只存凭证哈希，响应 no-store；不把凭证放 URL、报文或 SDK 参数。内部入口凭证与普通匿名会话分开。
 
-新会话不立即生成测试客户，currentCustomerId 可为 null；首笔 current 支付在本地幂等事务中创建/关联默认 Customer，并生成稳定 merchantCustId，不调用独立的 Provider 客户创建 API。不同支付并发也只能认领同一默认客户。POST /customers 同样只是本地持久化，响应丢失仍按原 operationId 回读。客户数额度由 capabilities.limits.customersPerSession 返回并计入创建中占位，超额返回 409 CUSTOMER_LIMIT_REACHED/not_started；**已确认初值为 20**，是可调整的服务端配置，客户端读取规则而非写死；占位与已创建客户原子计数，同键重放不重复占额度。**U1 已确认**：新建测试客户成功后自动成为当前客户，适用于 POST /customers 和支付/订阅中的 {kind:new}。客户创建与当前引用更新同一本地事务提交；并发以服务端最后成功提交的事务为准，不按请求开始或响应抵达顺序覆盖。失败不切换；幂等重放只回读原资源，不再次切换。响应的 currentCustomerId 读取响应时实际当前值，不沿用旧操作快照；并发响应乱序时 App 通过 GET /session 核对最终当前引用，不能用旧响应强制回滚。每笔支付仍持有首次解析的固定 customerId，不随当前客户切换。revision 只覆盖支付资源字段，currentCustomerId 是响应时的会话信息，不参与 revision 比较；支付 revision 相同不表示当前客户引用未变，也不能用响应抵达顺序裁定会话引用。
+新会话不立即生成测试客户，currentCustomerId 可为 null；首笔 current 支付在本地幂等事务中创建/关联默认 Customer，并生成稳定 merchantCustId，不调用独立的 Provider 客户创建 API。不同支付并发也只能认领同一默认客户。POST /customers 同样只是本地持久化，响应丢失仍按原 operationId 回读。客户数额度由 capabilities.limits.customersPerSession 返回并计入创建中占位，超额返回 409 CUSTOMER_LIMIT_REACHED/not_started；**已确认初值为 20**，是可调整的服务端配置，客户端读取规则而非写死；占位与已创建客户原子计数，同键重放不重复占额度。新建测试客户成功后自动成为当前客户，适用于 POST /customers 和支付/订阅中的 {kind:new}。客户创建与当前引用更新同一本地事务提交；并发以服务端最后成功提交的事务为准，不按请求开始或响应抵达顺序覆盖。失败不切换；幂等重放只回读原资源，不再次切换。响应的 currentCustomerId 读取响应时实际当前值，不沿用旧操作快照；并发响应乱序时 App 通过 GET /session 核对最终当前引用，不能用旧响应强制回滚。每笔支付仍持有首次解析的固定 customerId，不随当前客户切换。revision 只覆盖支付资源字段，currentCustomerId 是响应时的会话信息，不参与 revision 比较；支付 revision 相同不表示当前客户引用未变，也不能用响应抵达顺序裁定会话引用。
 
-capabilities 分开返回 scenes[] 与 presets[]。A1 建议稳定场景 ID：one_time、pre_auth、subscription_hosted、subscription_merchant（采纳现有 App 占位命名，不宣称已正式接入）；建议预设 ID：usd_standard_5、usd_3ds_50，后者是参数/旅程预设，不是保证发起 3DS 的新场景。preset 返回适用 sceneIds/integrations/platforms、defaults 与自身 availability/verification；客户端按组合 availability 判断能否执行，而不以 verification 单独阻断。integration 闭集为 native-sdk/web-sdk/checkout/direct-api，platform 为 ANDROID/IOS/WEB，服务端校验配对，不接受客户端自选跨平台绕过规则。
+capabilities 分开返回 scenes[] 与 presets[]。稳定场景 ID：one_time、pre_auth、subscription_hosted、subscription_merchant（采纳现有 App 占位命名，不宣称已正式接入）；建议预设 ID：usd_standard_5、usd_3ds_50，后者是参数/旅程预设，不是保证发起 3DS 的新场景。preset 返回适用 sceneIds/integrations/platforms、defaults 与自身 availability/verification；客户端按组合 availability 判断能否执行，而不以 verification 单独阻断。integration 闭集为 native-sdk/web-sdk/checkout/direct-api，platform 为 ANDROID/IOS/WEB，服务端校验配对，不接受客户端自选跨平台绕过规则。
 
 规则返回只使用有限表单类型：amount、enum、integer、date、text、httpsUrl，包含 min/max/precision/enum/requiredWhen 和稳定错误码；requiredWhen 仅单层 {field,equals} 或 {field,in}，两者互斥，不支持递归/逻辑表达式；不传可执行表达式或要求 App 做通用脚本引擎。`availability=available|conditional|planned|unavailable` 与 `verification=user_confirmed|documented|source_checked|sandbox_verified|unverified` 分离。decision_required 仅是阶段方案的决策登记状态，不加入 availability 枚举；待产品决定的能力以 planned + reasonCode=PRODUCT_DECISION_PENDING 表达，相关动作 enabled=false。Provider 事实未知则 conditional/unverified + CAPABILITY_UNVERIFIED；不能混为产品已拒绝。iOS SDK 1.0.0 支持 Sandbox 已由交付包公开 Swift interface 核实，verification=source_checked；present/resumeFromReturn 显式传 .sandbox，默认均为 .production，且无 Android 式 configure(merchantId)。U/O/P/R/A 的原生再次 present 规则仍记 user_confirmed。两项事实不再因旧证据缺口标 unverified；真实 Sandbox 验收单独保持 unverified，不能把源码检查升级为交易通过；是否自动附加 paymentId 仍待 SDK 团队确认，本契约按“不附加”设计 merchantTxnId 回跳查单，不以此阻塞 App 自有结果页方案。user_confirmed 不等于 sandbox_verified，也不自动将尚未部署/验收的整个场景标 available。金额初始可沿用既有 USD 1..1_000_000 cents，订阅模式规则单独计算；不能用一次性范围推定所有 Provider 产品均可受理。
 
@@ -567,11 +579,11 @@ operationId 提供同样 hash、claim、结果未知及查询规则。请款/撤
 
 **Operation 语义**：结构与枚举见 OpenAPI。创建接口的 requestId 就是对应 Operation 的 operationId，不生成第二个幂等键。恢复 GET 对已知未过期操作返回 200，未结束由 execution 表达；POST 未完成返回 202。accepted/unknown 的 outcome 为 null，completed 给出确定的操作结果；App 以 PaymentView 判断支付状态。未持久受理时没有 Operation 视图，返回 not_started 错误。已建立占位资源时返回其 Demo 本地引用，resource.id 不是 Provider paymentId；未建立或明确拒绝可无资源引用。unknown 可带诊断 error，但不能据此判为 rejected。
 
-创建类 payment_create/subscription_create/customer_create/checkout_session 的 effective=资源已建立，rejected=确定未建立；资金类 capture/void/subscription_renewal 的 effective/rejected=资金操作成功/拒绝已核验；订阅变更类 subscription_change/subscription_cancel 的 scheduled/effective 按相应来源的受理与生效语义：托管按 Provider；本轮已确认的自管理 period_end 在 Demo 预约持久化成功即 completed/scheduled（来源 Demo），不代表 Provider 已取消。后续 Provider 取消结果在合约视图及取消执行记录体现，不改写原预约已成功的历史事实；自管理升降级仍须按实际协议核实，不借此宣称 Provider 已改条款。
+创建类 payment_create/subscription_create/customer_create/checkout_session 的 effective=资源已建立，rejected=确定未建立；资金类 capture/void/subscription_renewal 的 effective/rejected=资金操作成功/拒绝已核验；订阅变更类 subscription_change/subscription_cancel 的 scheduled/effective 按相应来源的受理与生效语义：托管按 Provider；自管理 period_end 在 Demo 预约持久化成功即 completed/scheduled（来源 Demo），不代表 Provider 已取消。后续 Provider 取消结果在合约视图及取消执行记录体现，不改写原预约已成功的历史事实；自管理升降级按开发者文档协议适配，不借此宣称 Provider 已改条款。
 
 主资源映射：payment_create/capture/void/subscription_renewal → payment；subscription_create/subscription_change/subscription_cancel → subscription；checkout_session → checkout_session；customer_create → customer。订阅初始创建的恢复接口仍同时返回订阅与初始支付视图。leaseState 随租约状态更新，GET 不续租；领取操作已 completed/effective 后租约过期不把历史 outcome 改为 rejected。对结束租约 GET 返回 200 + ended leaseState，旧键 POST 仍返回 CHECKOUT_SESSION_ENDED；需要新 operationId 才能再次领取，不重用旧领取操作。
 
-创建请求本地首次保存时记录不可变 clientCreatedAt（客户端队列字段，不是新增 Provider 参数），重启/重试不重置。采纳 M5 的客户端限制：仅在此时间后 24 小时内、原分区原键原参数重 POST；超过窗口只 GET 恢复，不因 404 换键自动下单。时间丢失或时钟回退无法可靠确定窗口时仅 GET，并提示人工开始独立测试。此窗口不限制同一 paymentId 的继续体验，也不延长记录保留期；服务端记录的 createdAt 是首次认领时间，不拿客户端时间作信任依据。资金操作结果未知仍只恢复原操作，不应用该窗口自动重新扣款。
+创建请求本地首次保存时记录不可变 clientCreatedAt（客户端队列字段，不是新增 Provider 参数），重启/重试不重置。客户端重放限制：仅在此时间后 24 小时内、原分区原键原参数重 POST；超过窗口只 GET 恢复，不因 404 换键自动下单。时间丢失或时钟回退无法可靠确定窗口时仅 GET，并提示人工开始独立测试。此窗口不限制同一 paymentId 的继续体验，也不延长记录保留期；服务端记录的 createdAt 是首次认领时间，不拿客户端时间作信任依据。资金操作结果未知仍只恢复原操作，不应用该窗口自动重新扣款。
 
 “待继续”不是只有 UI 看过的记录：详情和列表统一返回 `attention:{kind:creation_unknown|continue_sdk|continue_checkout}|null`；包括尚无 paymentId 的已持久创建记录。不把所有 P/A 都默认列为可继续；记录页仍能查看 query-only 支付。查询失败但旧视图可用时标 stale，不删除条目。首页 limit=1 不限制服务端保留数量，也不阻止新建独立测试。
 
@@ -580,13 +592,13 @@ operationId 提供同样 hash、claim、结果未知及查询规则。请款/撤
 PaymentView 的字段、必填与可空约束见 [OpenAPI](api/demo-v1.openapi.json)，合成示例见 [共享示例](api/demo-v1.examples.json)。
 
 
-P 禁止再次 present 是本轮用户确认的业务规则，仅允许查询原支付，不表示支付失败。`verified` 指当前状态有可信服务端查询/已验签关联通知证据，不是“本次请求查过”或“支付成功”。客户端回调永不设置它。刷新失败保留旧观察时间和来源；外部状态的陈旧程度由 observedAt 表达，不把所有查询失败重置为未支付。
+P 禁止再次 present 是2026-10-26 用户确认的业务规则，仅允许查询原支付，不表示支付失败。`verified` 指当前状态有可信服务端查询/已验签关联通知证据，不是“本次请求查过”或“支付成功”。客户端回调永不设置它。刷新失败保留旧观察时间和来源；外部状态的陈旧程度由 observedAt 表达，不把所有查询失败重置为未支付。
 
 creationState 闭集为 pending/ready/unknown/rejected：pending=已持久受理、尚未准备好；unknown=上游创建结果无法确定；rejected=有明确证据确认未创建或已拒绝，不包含网络超时；ready=已取得可关联结果。删除 expired：支付记录超过 recordExpiresAt 后，详情/对应支付创建恢复/该支付时间线返回 410，列表和待继续均不再列出，不存在对外的 expired PaymentView；内部最小核验投影不是 API 详情。资源或操作自己的保留期独立：仍有效的 Operation 可返回原资源引用，随后访问已过期支付仍为 410；操作自身过期则 GET /operations 返回 410。订阅 initialPayment.state=expired 仅是合约内引用摘要，继续保留。
 
-status.normalized 闭集为 created/requires_action/processing/succeeded/failed/cancelled/unknown；前六个沿现有领域模型，unknown 是新 API 的安全视图兜底，不擅改内部状态映射。status.source 闭集为 server/query/webhook；模拟场景不进入本轮真实 API，client/return 只能进时间线。未知原始状态不得推进既有可信终态，视图保留最近可信值并记录刷新错误；无可信值则 unknown、verified=false、isTerminal=false。AUTH fundsState=authorized/captured/voided/unknown；非 AUTH 使用 not_applicable，不能因为 payment A 就允许新扣款。
+status.normalized 闭集为 created/requires_action/processing/succeeded/failed/cancelled/unknown；前六个沿现有领域模型，unknown 是新 API 的安全视图兜底，不擅改内部状态映射。status.source 闭集为 server/query/webhook；模拟场景不进入v1 API，client/return 只能进时间线。未知原始状态不得推进既有可信终态，视图保留最近可信值并记录刷新错误；无可信值则 unknown、verified=false、isTerminal=false。AUTH fundsState=authorized/captured/voided/unknown；非 AUTH 使用 not_applicable，不能因为 payment A 就允许新扣款。
 
-**服务端支付映射（M4）**：下表输入是可信、已关联同一支付的 `rawPaymentStatus`，不是 SDK 回调或 `rawTransactionStatus`。txnType 指原始支付的 SALE/AUTH，CAPTURE/VOID 是后续操作，不覆盖原 txnType；PaymentView 与列表新增 txnType=SALE|AUTH。原始状态解释依据 [Query payments](https://developers.onerway.com/payments/api-reference/endpoints/query-payments)，AUTH 组合依据当前 mobile worktree `shared/payment/authorization.ts:60–80`；此为 Demo 草案映射，不证明原生 APP 能力已验收。
+**服务端支付映射**：下表输入是可信、已关联同一支付的 `rawPaymentStatus`，不是 SDK 回调或 `rawTransactionStatus`。txnType 指原始支付的 SALE/AUTH，CAPTURE/VOID 是后续操作，不覆盖原 txnType；PaymentView 与列表新增 txnType=SALE|AUTH。原始状态解释依据 [Query payments](https://developers.onerway.com/payments/api-reference/endpoints/query-payments)，AUTH 组合依据当前 mobile worktree `shared/payment/authorization.ts:60–80`；此为 Demo 草案映射，不证明原生 APP 能力已验收。
 
 | rawPaymentStatus | SALE → normalized / fundsState | AUTH → normalized / fundsState |
 | --- | --- | --- |
@@ -604,7 +616,7 @@ AUTH 的 A 选择 **processing + authorized**，保持现有资金生命周期�
 
 若输入只有 `rawTransactionStatus`，先关联交易类型和 Payment，不能套用上表：交易 F + Payment O 是一次尝试失败、支付仍 processing；交易 F + 已可信 Payment S 不得覆盖成功。AUTH S + Payment A、CAPTURE S + Payment S、VOID S + Payment N 按上述资金组合处理，其他资金组合保留旧投影并查询。无 Payment 证据的一般交易 F 暂用 processing/未核实，不宣告整个支付 failed。未知或冲突组合记录错误，不发放依赖该状态的资金动作。查询 AUTH/CAPTURE/VOID 需使用适用的交易查询/通知证据；已发布 Query payments 请求 txnType 仅允许 SALE/REFUND，不能将此映射表当作该接口可传 AUTH 的声明。
 
-可信状态合并允许纠正先前关单：对同一支付完成归属、金额/币种及资金结果关联核验后，可信查询得到 S 可以覆盖此前 N，递增支付 revision 并记录脱敏异常；不得以“终态不可覆盖”丢弃成功资金结果。SDK 回调、本地超时或无资金结果证据的响应不能触发该覆盖，旧 N 也不得回退已确认的 S。该规则不允许 N 状态再次启动或提交支付。关单竞态自动全额退款按本轮转述源码调研登记为已知缺口：一次性支付视图暂无退款表达，不能将 S 宣称为最终净收款，也不能仅凭竞态推断已退款；本批不扩展退款模型或退款操作。
+可信状态合并允许纠正先前关单：对同一支付完成归属、金额/币种及资金结果关联核验后，可信查询得到 S 可以覆盖此前 N，递增支付 revision 并记录脱敏异常；不得以“终态不可覆盖”丢弃成功资金结果。SDK 回调、本地超时或无资金结果证据的响应不能触发该覆盖，旧 N 也不得回退已确认的 S。该规则不允许 N 状态再次启动或提交支付。关单竞态自动全额退款按 2026-10-26 转述源码调研登记为已知缺口：一次性支付视图暂无退款表达，不能将 S 宣称为最终净收款，也不能仅凭竞态推断已退款；本批不扩展退款模型或退款操作。
 
 PaymentView 顶层新增 merchantTxnId，服务端在首次认领支付时生成并冻结，用于回跳匹配；它是公开引用，不是访问凭据。订阅初始支付及每次手动续费各自持有自己的引用。
 
@@ -612,11 +624,11 @@ PaymentView 顶层新增 merchantTxnId，服务端在首次认领支付时生成
 
 动作集合：CONTINUE_SDK、OPEN_CHECKOUT、QUERY、CAPTURE、VOID、VIEW_SUBSCRIPTION。按钮 disabled 必须有稳定 reasonCode；UI 翻译文案，不依赖后端自然语言判断。新测试是创建入口，不伪装成旧支付的 RETRY。checkout-session 执行时重新查询必要状态；revision 只能避免旧显示，不能授权资金动作。Provider 暂时不可查询时不凭旧动作自动 launch。
 
-checkout-session 的 sdk 只提供 present 启动数据 merchantNo/paymentId/environment/configRevision，不返回 resume_return 指令。首次领取时 App 在原 (origin,environment,sessionRef) 分区保存公开配置快照及支付关联，不含完整 URL、凭据或报文。原生回跳时，有匹配快照可按平台接口配置 SDK 并尝试 resumeFromReturn；本地快照缺失或不匹配时**只 refresh**，不从支付详情重新拼配置、不调用 present。删除 O1 新增的 provider.environment/configRevision；/connection 与 checkout-session.sdk 既有配置字段保留，不能用当前配置冒充历史快照。iOS 依实际 SDK 接口适配；默认 SDK baseUrl 按官方环境选择，不接受任意远端地址。
+checkout-session 的 sdk 只提供 present 启动数据 merchantNo/paymentId/environment/configRevision，不返回 resume_return 指令。首次领取时 App 在原 (origin,environment,sessionRef) 分区保存公开配置快照及支付关联，不含完整 URL、凭据或报文。原生回跳时，有匹配快照可按平台接口配置 SDK 并尝试 resumeFromReturn；本地快照缺失或不匹配时**只 refresh**，不从支付详情重新拼配置、不调用 present。支付详情不提供 provider.environment/configRevision；/connection 与 checkout-session.sdk 既有配置字段保留，不能用当前配置冒充历史快照。iOS 依实际 SDK 接口适配；默认 SDK baseUrl 按官方环境选择，不接受任意远端地址。
 
-按 F3 当前设计，原生 App 收到实际回跳后读取唯一 merchantTxnId，在原会话本地映射中找到 Demo payment.id；本地未命中可用现有支付列表的 merchantTxnId 精确过滤恢复本会话引用，再 refresh 并显示 App 自己的结果页。来源地址/路径须匹配已配置的回跳入口，引用只用于定位；后端仍校验凭证/所有权，不能凭 URL 显示成功或访问其他会话。会话过期走 401、不在新会话认领；未知引用无匹配时保持未找到/可从记录页查询，不新建支付。App 没有收到自定义商户地址的回跳时，仍可从记录页刷新。
+原生 App 收到实际回跳后读取唯一 merchantTxnId，在原会话本地映射中找到 Demo payment.id；本地未命中可用现有支付列表的 merchantTxnId 精确过滤恢复本会话引用，再 refresh 并显示 App 自己的结果页。来源地址/路径须匹配已配置的回跳入口，引用只用于定位；后端仍校验凭证/所有权，不能凭 URL 显示成功或访问其他会话。会话过期走 401、不在新会话认领；未知引用无匹配时保持未找到/可从记录页查询，不新建支付。App 没有收到自定义商户地址的回跳时，仍可从记录页刷新。
 
-SDK resumeFromReturn 是可选的原界面接回，不是 App 结果页依赖：Android 0.1.5 解析器只认名为 paymentId 的参数，当前按 Provider 不附加该参数设计，返回 false 时走上述 merchantTxnId 查单。不要把 merchantTxnId 改名或塞进 paymentId，也不由 App 合成一个 paymentId 回跳 URL。Android SDK 源码 CheckoutActivity.kt:366–368（完整判断见 :358–383）显示：仅在已发起外跳、确实离开收银台且该回跳尚未处理时，收银台回到前台才会自行查单，并非每次前台恢复都查询；宿主读取/刷新兜底必须保留。此为 Android 0.1.5 源码事实，不能自动扩展为 iOS 内部触发条件。若 SDK 团队以后确认会附加 paymentId，可启用 SDK 接回原界面，后端接口不变；true 只表示 URL 被接纳，不能作为付款成功。此链路尚无本轮真实 Sandbox 验收。
+SDK resumeFromReturn 是可选的原界面接回，不是 App 结果页依赖：Android 0.1.5 解析器只认名为 paymentId 的参数，当前按 Provider 不附加该参数设计，返回 false 时走上述 merchantTxnId 查单。不要把 merchantTxnId 改名或塞进 paymentId，也不由 App 合成一个 paymentId 回跳 URL。Android SDK 源码 CheckoutActivity.kt:366–368（完整判断见 :358–383）显示：仅在已发起外跳、确实离开收银台且该回跳尚未处理时，收银台回到前台才会自行查单，并非每次前台恢复都查询；宿主读取/刷新兜底必须保留。此为 Android 0.1.5 源码事实，不能自动扩展为 iOS 内部触发条件。若 SDK 团队以后确认会附加 paymentId，可启用 SDK 接回原界面，后端接口不变；true 只表示 URL 被接纳，不能作为付款成功。此链路尚无对应真实 Sandbox 验收。
 
 **原生再次 present 动作规则（用户/Onerway 侧确认）**：
 
@@ -630,7 +642,7 @@ SDK resumeFromReturn 是可选的原界面接回，不是 App 结果页依赖：
 
 选择 PAYMENT_AUTHORIZED 而非 PAYMENT_TERMINAL，避免与 AUTH A 的 normalized=processing、isTerminal=false 混淆。CAPTURE/VOID 仍须关联授权成功证据、无并发资金操作且通过实时核验，A 本身不直接授予操作权限。U/O 不再以 CAPABILITY_UNVERIFIED 拦截“同 ID 再 present”本身；APP×AUTH/SUBSCRIBE 支持性已获用户确认；未知/失效状态、具体配置及部署门禁仍独立处理。S/N 不允许继续，使用 PAYMENT_TERMINAL；I/未知状态没有新增复用承诺，保持查询。动作规则的证据等级 user_confirmed，不等同 Sandbox 通过；同 paymentId 最多成功扣款一次另由用户确认，不要求 Provider 内部机制审计。
 
-并发启动采纳“可接替 + 可释放”草案，三端一致：按 Payment 原子领取租约。同 operationId 在有效租约内回读；不同 operationId 遇活跃租约返回 409 CHECKOUT_IN_USE，含本会话 leaseExpiresAt/checkoutSessionId，不泄漏其他会话。supersedes 如提供，须属于当前支付/会话；不存在或不属于该支付的引用按统一归属策略拒绝，不能借 M1 绕过权限。租约冲突的 409 仅在有有效租约且 supersedes 未指向它时返回；指向当前有效租约则原子接替。若 supersedes 指向已结束的本会话租约且当前无有效租约，按普通领取处理；未传 supersedes 且当前无有效租约也正常领取。检查有效期、判断当前租约与领取/接替必须原子执行，避免两个请求同时认为无租约。其他状态/能力/幂等冲突仍可返回各自的 409，不受此租约冲突规则替代。App 新进程从原分区恢复该 ID 后可申请接替，Web 先提示用户确认；每次仍重新校验 Provider 状态/能力，租约不能越过 P/R/A 的已确认提交限制。可先用当前 checkout-session 操作的 GET /operations 回读丢失的 ID。释放旧租约不能释放新租约；同旧操作在已释放/过期/被接替后返回 409 CHECKOUT_SESSION_ENDED，提示重新核验获取启动信息，不返回可用旧票据。TTL 建议 2 分钟、不自动续用，属于 Demo 草案并发参数，绝非 3DS/Provider 有效期。SDK 回跳恢复不要求租约仍有效，后台查询也不受租约阻挡。已发出的 SDK 标识无法被 Demo 租约撤销，Provider 同 paymentId 最多成功扣款一次的保证来自用户确认，Demo 租约仅承担并发启动控制。
+并发启动使用可接替、可释放的租约，三端一致：按 Payment 原子领取租约。同 operationId 在有效租约内回读；不同 operationId 遇活跃租约返回 409 CHECKOUT_IN_USE，含本会话 leaseExpiresAt/checkoutSessionId，不泄漏其他会话。supersedes 如提供，须属于当前支付/会话；不存在或不属于该支付的引用按统一归属策略拒绝，不能绕过权限。租约冲突的 409 仅在有有效租约且 supersedes 未指向它时返回；指向当前有效租约则原子接替。若 supersedes 指向已结束的本会话租约且当前无有效租约，按普通领取处理；未传 supersedes 且当前无有效租约也正常领取。检查有效期、判断当前租约与领取/接替必须原子执行，避免两个请求同时认为无租约。其他状态/能力/幂等冲突仍可返回各自的 409，不受此租约冲突规则替代。App 新进程从原分区恢复该 ID 后可申请接替，Web 先提示用户确认；每次仍重新校验 Provider 状态/能力，租约不能越过 P/R/A 的已确认提交限制。可先用当前 checkout-session 操作的 GET /operations 回读丢失的 ID。释放旧租约不能释放新租约；同旧操作在已释放/过期/被接替后返回 409 CHECKOUT_SESSION_ENDED，提示重新核验获取启动信息，不返回可用旧票据。TTL 建议 2 分钟、不自动续用，属于 Demo 草案并发参数，绝非 3DS/Provider 有效期。SDK 回跳恢复不要求租约仍有效，后台查询也不受租约阻挡。已发出的 SDK 标识无法被 Demo 租约撤销，Provider 同 paymentId 最多成功扣款一次的保证来自用户确认，Demo 租约仅承担并发启动控制。
 
 动作 reasonCode 闭集见 OpenAPI。未知 reasonCode 用通用提示；未知动作隐藏；未知状态安全提示刷新，绝不据此允许扣款。颜色/文案由 App 映射，不增加后端 UI 字段。
 
@@ -652,13 +664,13 @@ terms 建议字段：productRef/label、billingMode=`managed|self_managed`、ini
 
 后端映射 selfExecute/mode/requestType，不让 App 直接拼 Provider payload。首版不因字段存在而自动扩张到 trial/优惠/退款等未约定场景。升级/降级不能只凭金额大小推断即时差价；交互显示将修改哪些条款、何时生效、是否触发即时扣款。降级退款仍是独立动作，不在此范围默默自动执行。
 
-合约视图至少包括 normalized/raw dataStatus/raw subscriptionStatus、statusSource、observedAt、cancelRequestedAt、cancelEffectiveAt（Provider 侧实际取消时间，未知为 null）、localCancelEffectiveAt、cancellationSource=demo|provider|null、providerCancelConfirmedAt（Demo 通过查询核验取消的观察时间，非 Provider 实际生效时间）、cancelExecution、originalTerms/effectiveTerms、revision、retention 信息。预约取消受理不能提前显示 canceled。A1 归一状态为 pending/active/needs_attention/cancel_scheduled/canceled/ended/unknown；cancel_scheduled 必须有可信预约受理依据：托管为 Provider 预约受理，自管理为 Demo 已提交的完整预约记录（cancellationSource=demo）；不能只看 cancelRequestedAt，也不能把 Demo 记录伪装成 Provider 预约。终止态仍须查询核验。initialPayment={id,state:available|expired,summary}，expired 时 id=null，summary 仅金额/时间等安全摘要。条款列表与扣款列表分页，不把大量报文内嵌。
+合约视图至少包括 normalized/raw dataStatus/raw subscriptionStatus、statusSource、observedAt、cancelRequestedAt、cancelEffectiveAt（Provider 侧实际取消时间，未知为 null）、localCancelEffectiveAt、cancellationSource=demo|provider|null、providerCancelConfirmedAt（Demo 通过查询核验取消的观察时间，非 Provider 实际生效时间）、cancelExecution、originalTerms/effectiveTerms、revision、retention 信息。预约取消受理不能提前显示 canceled。订阅归一状态为 pending/active/needs_attention/cancel_scheduled/canceled/ended/unknown；cancel_scheduled 必须有可信预约受理依据：托管为 Provider 预约受理，自管理为 Demo 已提交的完整预约记录（cancellationSource=demo）；不能只看 cancelRequestedAt，也不能把 Demo 记录伪装成 Provider 预约。终止态仍须查询核验。initialPayment={id,state:available|expired,summary}，expired 时 id=null，summary 仅金额/时间等安全摘要。条款列表与扣款列表分页，不把大量报文内嵌。
 
-订阅归一投影优先级：可信 subscriptionStatus=canceled/ended → 对应终态；其余非终态中，pastdue 或 paused、dataStatus=2、或已识别字段组合互相矛盾 → needs_attention。正常 active+dataStatus=1 → active；paymentdue+dataStatus=0 或本地未核验占位 → pending；trialing 暂以 pending 展示原始值，不因此开放新建试用能力。有可信预约记录且 Provider 取消尚未核验时（包括自管理已过 localCancelEffectiveAt 但补调未确认），非异常 active/pending 投影为 cancel_scheduled；若同时欠款/暂停，needs_attention 优先，预约信息仍独立保留。单独 dataStatus=3 不证明取消完成，且无可信预约证据时继续核验，不推断 canceled；已知 active+3 却无预约依据归 needs_attention。未知枚举无可信旧投影则 unknown；普通网络查询失败只令 refresh.failed，保留旧状态，不单独变 needs_attention；自管理预约取消执行的连续多轮失败按下述 U2 阈值进入 needs_attention，预约和禁止续费事实继续保留。以上是 Demo 展示规则，依据 [Query subscription details](https://developers.onerway.com/payments/api-reference/endpoints/query-subscription-details)，不照搬旧实现 dataStatus=3 就 terminal 的行为。
+订阅归一投影优先级：可信 subscriptionStatus=canceled/ended → 对应终态；其余非终态中，pastdue 或 paused、dataStatus=2、或已识别字段组合互相矛盾 → needs_attention。正常 active+dataStatus=1 → active；paymentdue+dataStatus=0 或本地未核验占位 → pending；trialing 暂以 pending 展示原始值，不因此开放新建试用能力。有可信预约记录且 Provider 取消尚未核验时（包括自管理已过 localCancelEffectiveAt 但补调未确认），非异常 active/pending 投影为 cancel_scheduled；若同时欠款/暂停，needs_attention 优先，预约信息仍独立保留。单独 dataStatus=3 不证明取消完成，且无可信预约证据时继续核验，不推断 canceled；已知 active+3 却无预约依据归 needs_attention。未知枚举无可信旧投影则 unknown；普通网络查询失败只令 refresh.failed，保留旧状态，不单独变 needs_attention；自管理预约取消执行的连续多轮失败按下述取消失败阈值进入 needs_attention，预约和禁止续费事实继续保留。以上是 Demo 展示规则，依据 [Query subscription details](https://developers.onerway.com/payments/api-reference/endpoints/query-subscription-details)，不照搬旧实现 dataStatus=3 就 terminal 的行为。
 
-订阅 allowedActions 闭集 REFRESH/OPEN_MANAGEMENT/CHANGE_PLAN/CANCEL_IMMEDIATE/CANCEL_AT_PERIOD_END/RENEW_MANUAL；共用通用 reasonCode，增加 BILLING_MODE_NOT_SUPPORTED/PRODUCT_DECISION_PENDING/CANCEL_ALREADY_SCHEDULED/MANAGE_URL_MISSING/MANAGE_URL_KNOWN_EXPIRED/OPERATION_PENDING/CYCLE_ANCHOR_UNAVAILABLE。GET /operations/{id} 区分 execution=accepted|unknown|completed 与 outcome=null|scheduled|effective|rejected；completed+scheduled 是预约操作已受理，不是合约已经取消。手动续费返回 Operation（type=subscription_renewal、resource.kind=payment、resource.id 为本次新建 Demo 支付引用）及该 payment 视图；不再把本地引用命名为 paymentId。该 payment 详情带 subscriptionId 关联原合约；accepted/unknown 时 outcome=null，只有本次续费结果经核验才 completed/effective 或 completed/rejected。仅创建好续费记录不算扣款已成功；若需 3DS 等客户动作，继续原记录查询并显示待处理，恢复链未核实前 conditional/unverified，不显示伪成功或默认重扣，也不把“仅显示状态”当成该旅程完成。
+订阅 allowedActions 闭集 REFRESH/OPEN_MANAGEMENT/CHANGE_PLAN/CANCEL_IMMEDIATE/CANCEL_AT_PERIOD_END/RENEW_MANUAL；共用通用 reasonCode，增加 BILLING_MODE_NOT_SUPPORTED/PRODUCT_DECISION_PENDING/CANCEL_ALREADY_SCHEDULED/MANAGE_URL_MISSING/MANAGE_URL_KNOWN_EXPIRED/OPERATION_PENDING/CYCLE_ANCHOR_UNAVAILABLE。GET /operations/{id} 区分 execution=accepted|unknown|completed 与 outcome=null|scheduled|effective|rejected；completed+scheduled 是预约操作已受理，不是合约已经取消。手动续费返回 Operation（type=subscription_renewal、resource.kind=payment、resource.id 为本次新建 Demo 支付引用）及该 payment 视图；不再把本地引用命名为 paymentId。该 payment 详情带 subscriptionId 关联原合约；accepted/unknown 时 outcome=null，只有本次续费结果经核验才 completed/effective 或 completed/rejected。仅创建好续费记录不算扣款已成功；若需 3DS 等客户动作，继续原记录查询并显示待处理，对应批次完成协议适配与验证前 conditional/unverified，不显示伪成功或默认重扣，也不把“仅显示状态”当成该旅程完成。
 
-**U2 已确认：自管理周期末取消采用本地预约 + 每日补调，托管不变。**
+**自管理周期末取消采用本地预约 + 每日补调，托管不变。**
 
 - 托管 timing=period_end 仍用 Provider expireMode=2；自管理不向 Provider 冒发预约参数，而是在 POST /subscriptions/{id}/cancellations 的幂等事务中保存完整本地预约。记录 cancelRequestedAt、cancellationSource=demo、localCancelEffectiveAt，返回 Operation completed/scheduled。首版无撤销预约接口。
 - localCancelEffectiveAt = 最近一次已核验成功扣款（首期或手动续费）的成功时间 + frequency.days × 86400 秒，按 UTC 计算、App 本地时区展示。预约保存锚点及当时条款版本，不随重放重新计算。若计算值已过去，立即成为每日扫描的到期任务；不能人为顺延一周期。仅授权尚无成功扣款、或成功时间尚未取得时没有合法锚点，CANCEL_AT_PERIOD_END 暂禁用，reasonCode=CYCLE_ANCHOR_UNAVAILABLE，允许查询核验或立即取消，不擅用创建时间替代。
@@ -706,43 +718,43 @@ GET `/payments/{id}/timeline?cursor=…&limit=20`：条目字段 id、occurredAt
 
 returnTarget 为 `{kind:"preset",id}` 或 `{kind:"custom",url}`。首批固定 preset：`app_android` 对应 `/mobile/return/android`（仅 ANDROID），`app_ios` 对应 `/mobile/return/ios`（仅 IOS）；服务端校验与会话平台一致。实际 canonical HTTPS origin 来自服务端配置，由服务端解析 preset，客户端不拼接 origin；/connection 不返回 canonical origin。Web 沿用受控结果入口。预设路径冻结不表示关联文件或 App Link 已部署验证。验证 HTTPS、无 userinfo、无 fragment、长度上限；自定义 query 可为商户自有订单参数，但不含 Demo 凭证，不进入诊断正文。服务端不访问/探测用户 URL，不能制造 SSRF；地址合法不代表已完成 Provider 白名单或 App Link 验证。
 
-F3 已确认由商户在创建请求传 returnUrl；Demo 后端在支付首次认领时取得 merchantTxnId，以 URL 编码后的 query 参数追加到默认/自定义 returnTarget，并将最终 returnUrl 放入创建意图解析快照，重放不重新生成。merchantTxnId 是 Demo 保留参数：用户自定义 URL 若已携带同名参数，返回字段校验错误，避免覆盖商户值或形成重复参数；其余允许的自定义参数保留。完整 URL 继续不入时间线。Onerway 是否另加 paymentId 尚待 SDK 团队确认，本稿不依赖它；App 的 merchantTxnId 匹配/查单见 §12.3。
+商户在创建请求传 returnUrl；Demo 后端在支付首次认领时取得 merchantTxnId，以 URL 编码后的 query 参数追加到默认/自定义 returnTarget，并将最终 returnUrl 放入创建意图解析快照，重放不重新生成。merchantTxnId 是 Demo 保留参数：用户自定义 URL 若已携带同名参数，返回字段校验错误，避免覆盖商户值或形成重复参数；其余允许的自定义参数保留。完整 URL 继续不入时间线。Onerway 是否另加 paymentId 尚待 SDK 团队确认，Demo 不依赖它；App 的 merchantTxnId 匹配/查单见 §12.3。
 
 回跳提示页不解释、不反射附加参数，不凭参数形成状态；no-store、Referrer-Policy=no-referrer，不加载第三方分析。App 的 SDK return handler 仍需按平台协议处理其收到的 URL，这与网页不解释参数不矛盾。提示页之外的后端查询不依赖回跳。
 
 Codex 后续可在 Showcase `public/.well-known/assetlinks.json` 与 `public/.well-known/apple-app-site-association` 提供静态 JSON，HTTPS 直接 200、正确 Content-Type、无登录/重定向；不修改 Apple Pay 关联文件。按平台限制 path，不把整个网站路径关联给 App。
 
-Android 当前源码包名需阶段 C 对最终 applicationId 复核；用户已提供的本机调试指纹见[阶段方案 §3.1](demo-expansion-discussion.md#31-部署协作与范围)，尚未与 APK 证书核验。Claude 交接 applicationId、实际 SHA-256、允许路径、构建用途；iOS 交接 Team ID、Bundle ID、Associated Domains。专用 Demo 分发签名另登记，不把调试签名自动用于分发。两端用真机验证冷/热启动和域名实际关联后才标通过。
+Android 最终 applicationId 在阶段 C 与实际构建复核。用户于 2026-10-25 提供的本机调试签名 SHA-256 为 `A9:86:DC:F9:C0:52:53:92:BC:64:F9:11:D2:17:2A:B1:AF:03:AC:E2:2E:B1:81:94:2A:5A:BD:44:FA:DE:05:F7`；此值仅登记用户提供事实，尚未与 APK 证书核验，关联文件未据此发布。不得作为分发签名，也不自动删除仍在使用的调试关联。Claude 交接 applicationId、实际 SHA-256、允许路径、构建用途；iOS 交接 Team ID、Bundle ID、Associated Domains。专用 Demo 分发签名另登记，不把调试签名自动用于分发。两端用真机验证冷/热启动和域名实际关联后才标通过。
 
 ## 13. 三端 Demo v1 生命周期与可靠任务
 
 ### 13.1 三个期限独立
 
-**2026-10-26 用户确认范围**：Demo（Web、Android、iOS）只使用 Sandbox，不涉及 beta/uat。生产字典值只作调研背景，不作为 Demo 依据。后续 AUTH、订阅、Checkout、Direct 的 Onerway 侧参数与协议以 Onerway 开发者文档为准；各批次按 A1 已确认语义与文档参数补齐 v1 OpenAPI 和共享示例，不再单独列为调研缺口。文档未覆盖的订阅管理 URL 有效期、自管理 expireDate 上限仍留阶段 C，按“期限未知”兜底（管理链接使用 MANAGE_URL_EXPIRY_UNKNOWN 等既定规则），不写成已确认。
+**2026-10-26 用户确认范围**：Demo（Web、Android、iOS）只使用 Sandbox，不涉及 beta/uat。生产字典值只作调研背景，不作为 Demo 依据。后续 AUTH、订阅、Checkout、Direct 的 Onerway 侧参数与协议以 Onerway 开发者文档为准；各批次按 已确认语义与文档参数补齐 v1 OpenAPI 和共享示例，不再单独列为调研缺口。文档未覆盖的订阅管理 URL 有效期、自管理 expireDate 上限仍留阶段 C，按“期限未知”兜底（管理链接使用 MANAGE_URL_EXPIRY_UNKNOWN 等既定规则），不写成已确认。
 
 - **会话访问期限（已确认）**：任何已认证请求（读或写）都以服务端活动时间自动滑动续期至最后一次活动后 30 天，不轮换 token、不设绝对最长寿命、不新建客户。先校验会话尚未过期再原子更新，已过期不能通过请求复活；并发更新时间单调不回退。业务校验失败但凭证有效的请求同样计入活动；Webhook、Cron、无认证连接探测不代表用户活动。POST /session/renew 保留为无额外业务副作用的兼容入口，等同一次认证活动。过期后不能续期、不凭旧订单找回；不能把访问过期显示为合约取消，也不自动取消活跃托管合约。
-- **会话期限响应（方案 b，已确认）**：每个已认证响应通过 X-Demo-Session-Expires-At 返回持久化后的准确会话期限（UTC ISO 8601）；会话签发成功响应也带此 Header。JSON 不包含统一 session 字段或会话 expiresAt；成功直接返回资源，错误保持 {error}，204 无 body。跨域显式 expose 该 Header。有效凭证产生的 400/403/409/429 等业务响应也包含期限；未认证响应不伪造期限，401 不续期。若会话读写失败，返回基础设施错误，不能伪造续期成功。App 读取响应头，不自行加 30 天；并发响应以较晚的服务端期限为准。该协议只属于 Demo 会话，不改变 Onerway 响应或业务资源 recordExpiresAt，也不让后台任务保活会话。
+- **会话期限响应**：每个已认证响应通过 X-Demo-Session-Expires-At 返回持久化后的准确会话期限（UTC ISO 8601）；会话签发成功响应也带此 Header。JSON 不包含统一 session 字段或会话 expiresAt；成功直接返回资源，错误保持 {error}，204 无 body。跨域显式 expose 该 Header。有效凭证产生的 400/403/409/429 等业务响应也包含期限；未认证响应不伪造期限，401 不续期。若会话读写失败，返回基础设施错误，不能伪造续期成功。App 读取响应头，不自行加 30 天；并发响应以较晚的服务端期限为准。该协议只属于 Demo 会话，不改变 Onerway 响应或业务资源 recordExpiresAt，也不让后台任务保活会话。
 - **支付记录期限**：沿用创建后 30 天，返回 recordExpiresAt；查询不能延长 Provider 支付有效期。对仍在处理的支付到期清理必须留最小关联/幂等记录，不因 UI 明细清理而重建。幂等认领摘要与支付明细独立保留；全局键已用过的事实不能随旧会话失效就删除，否则新会话可重用。
 - **订阅期限**：非终态合约独立保留，终态密钥清理与审计保留沿既有契约；不受初始 Payment 30 天级联删除。详情保留初始支付安全摘要和“支付明细已过期”，不能引用消失记录导致整个页面失败。
-- **Provider paymentId/管理 URL 期限**：paymentId 有效期 30 分钟已由用户确认。本轮用户转交 Claude/糖糖针对 `rhcn-acquiring@f3cd2a75` 的本地源码调研：有效期取全局字典 `CHECKOUT_MIMUTES`（原拼写），从交易流水 createTime 起算；报告中的生产/Sandbox 值均为 30，SDK 与收银台同规则、不分商户/产品。报告称 `orderCancellExecuteJob` 按 30 分钟宽切片扫描，实际关单晚于到期；SDK 流水不走交易级关单，仅支付置 N，不发 Webhook；P/R/A 不被关单；SDK confirm 未校验有效期，受 60 分钟缓存限制，缓存失效返回 50018，商户查单在关单后返回 N。这是用户转交的源码调研证据，本端未独立回读源码或运行环境；不将生产/Sandbox 字典值写成仓库已证明的部署事实。实际关单 cron 频率仍未核实，但不影响 Demo；N 后仍可支付与竞态自动退款留阶段 D Sandbox 实测。Onerway 回跳是否追加 paymentId 待 SDK 团队确认；Web Cookie/CSRF 在 Web 批次前冻结。管理 URL 有效期、自管理 expireDate 上限仍为阶段 C 的期限未知项。
+- **Provider paymentId/管理 URL 期限**：paymentId 有效期 30 分钟已由用户确认。2026-10-26 用户转交 Claude/糖糖针对 `rhcn-acquiring@f3cd2a75` 的本地源码调研：有效期取全局字典 `CHECKOUT_MIMUTES`（原拼写），从交易流水 createTime 起算；报告中的生产/Sandbox 值均为 30，SDK 与收银台同规则、不分商户/产品。报告称 `orderCancellExecuteJob` 按 30 分钟宽切片扫描，实际关单晚于到期；SDK 流水不走交易级关单，仅支付置 N，不发 Webhook；P/R/A 不被关单；SDK confirm 未校验有效期，受 60 分钟缓存限制，缓存失效返回 50018，商户查单在关单后返回 N。这是用户转交的源码调研证据，本端未独立回读源码或运行环境；不将生产/Sandbox 字典值写成仓库已证明的部署事实。实际关单 cron 频率仍未核实，但不影响 Demo；N 后仍可支付与竞态自动退款留阶段 D Sandbox 实测。Onerway 回跳是否追加 paymentId 待 SDK 团队确认；Web Cookie/CSRF 在 Web 批次前冻结。管理 URL 有效期、自管理 expireDate 上限仍为阶段 C 的期限未知项。
 - **Demo 保守继续窗口**：服务端持久化首次向 Provider 发出创建请求的时间及本次有效期配置快照，窗口截止为该时间 + 有效期；初值 30 分钟，对应 `CHECKOUT_MIMUTES`，不得写死在客户端。按调研中的起算顺序，该截止早于 Provider createTime + TTL，仅作为 Demo 保守门禁，不保证 Provider 可受理。到达截止时 CONTINUE_SDK disabled、reasonCode=PAYMENT_EXPIRED、attention=null；即使 30–60 分钟之间查询仍为 U 或 SDK 仍可打开，也不允许重新启动。服务端签发/回读启动租约时同样检查期限，已打开的 Provider UI 不由 Demo 本地关单或再次提交控制。缺少可靠请求发送时间/配置时不放行继续，先查询核实。窗口不写入 providerExpiresAt；未取得可靠 Provider 时间时该字段仍为 null。不把保守窗口到期直接映射为 N 或支付失败；保留原可信状态、允许 QUERY，P/R/A 及已有资金事实不因本地窗口清除。
 - **过期收敛**：不能等待 SDK 过期 Webhook；首次创建时安排持久查询任务，到保守截止仍未收敛的支付由读取/刷新和既有每日扫描核验，方案 D 不变。本地窗口截止不删除待查任务；N 后迟到资金结果仍按 §12.3 合并，在既有任务截止/保留边界内核验，不扩展为永久轮询。
 
-**M5 已确认：全局幂等认领摘要永久保留，不做删除机制。** 只保留 keyHash、ownerScopeHash、intentHash、操作类型/过期等必要标记，不保留明文幂等键、资源 ID、报文、URL、凭据或客户信息。完整操作/支付记录按各自保留策略清理后，本会话旧键命中摘要返回 410，其他会话命中返回 409 IDEMPOTENCY_KEY_UNAVAILABLE，不恢复已删除视图。摘要必须有足够的所有者/类型标记支持此判断，但不能反查用户明文数据。客户端 24 小时原键重 POST 窗口保持，不删除服务端永久认领以换取有限保留。
+**全局幂等认领摘要永久保留，不做删除机制。** 只保留 keyHash、ownerScopeHash、intentHash、操作类型/过期等必要标记，不保留明文幂等键、资源 ID、报文、URL、凭据或客户信息。完整操作/支付记录按各自保留策略清理后，本会话旧键命中摘要返回 410，其他会话命中返回 409 IDEMPOTENCY_KEY_UNAVAILABLE，不恢复已删除视图。摘要必须有足够的所有者/类型标记支持此判断，但不能反查用户明文数据。客户端 24 小时原键重 POST 窗口保持，不删除服务端永久认领以换取有限保留。
 
 永久保留仅限幂等哈希与标记，不扩大支付明细 30 天、订阅独立保留或待查任务最小投影的期限；尚未到服务端的旧请求仍靠客户端原分区规则防止跨会话重放。会话过期后新会话不得认领旧合约；托管订阅可能继续扣款，匿名访问失效按现有提示边界处理，不能自动取消或向新会话转移合约。
 
 ### 13.2 可靠查询任务
 
-**U3 已确认采用方案 D**：复用现有 Neon 和单一 Showcase 部署，保留持久 outbox；不增加每分钟 Cron、队列或外部触发。用户转述 2026-10-25 只读查询：团队 Abel's projects 为 Hobby，本轮不将其伪装成重新查询团队结果。[Vercel Cron 规则](https://vercel.com/docs/cron-jobs/usage-and-pricing)确认 Hobby 单个 Cron 最短一天一次、按小时精度（表述 ±59 分钟，示例为计划小时内触发）。使用现有每日 Cron，不通过新建多个任务绕过所选方案。
+**可靠查询采用方案 D**：复用现有 Neon 和单一 Showcase 部署，保留持久 outbox；不增加每分钟 Cron、队列或外部触发。用户转述 2026-10-25 只读查询：团队 Abel's projects 为 Hobby，该记录不是实时团队状态。[Vercel Cron 规则](https://vercel.com/docs/cron-jobs/usage-and-pricing)确认 Hobby 单个 Cron 最短一天一次、按小时精度（表述 ±59 分钟，示例为计划小时内触发）。使用现有每日 Cron，不通过新建多个任务绕过所选方案。
 
-三种查询收敛入口共用任务领取逻辑，均不重新下单、不自动续费；阶段 C 在同一个每日 Cron 增加 U2 明确授权的到期立即取消任务，只有该任务和用户显式取消入口可以调用对应取消写接口，客户端读取不能暗中触发取消：
+三种查询收敛入口共用任务领取逻辑，均不重新下单、不自动续费；阶段 C 在同一个每日 Cron 增加 已约定的到期立即取消任务，只有该任务和用户显式取消入口可以调用对应取消写接口，客户端读取不能暗中触发取消：
 
 1. Webhook 验签并完成安全关联后，同事务记录白名单通知事实与待查任务，提交后 ACK；同一次函数调用通过平台支持的响应后执行机制尽力查单。必须绑定请求生命周期（例如可用的 waitUntil），不能仅启动无人等待的 Promise。该次查询成功则 App 已关闭也随即收敛；失败/函数中止保留待查任务，不影响已提交 ACK。对必须查单才可最终关联的订阅通知先保存受控 pending 事实，不提前投影 active；未知/冲突关联仍按失败策略处理。
 2. 已认证客户端读取/刷新某支付时，顺带有界处理该资源的待查任务；不是只读出旧视图后假装刷新完成。GET 可更新内部查询投影，但不调用 Provider 资金写接口，响应 no-store；超时返回已有视图和 refresh 状态。列表仅有界处理本页资源，不扫描整个会话，重复读共享去重/限流。订阅详情/刷新可用同样机制处理对应订阅任务。
 3. 现有每日 Cron 分批扫描到期 payment-query/subscription-query 任务，并在阶段 C 执行到期 subscription-cancel 任务，受函数时长和批量上限约束；按 dueAt 公平领取、租约和断点推进，剩余任务持久保留，不因一批未完成被标成功。cleanup 与待查处理协调，不先删掉待核验依据。
 
-job 保存资源、dueAt、leaseUntil、attempts、lastErrorCode、revision，合并新事件版本，完成前检查是否又有新通知，避免中途通知被去重吞掉；超时租约可恢复。查询任务失败保留有界退避、重试上限与 unresolved 状态，客户端仍可手动刷新；U2 到期取消失败按 §12.4 次日继续，达到提示阈值不终止补调。响应后执行也受函数同一超时上限约束，参考 [Vercel waitUntil](https://vercel.com/docs/functions/functions-api-reference/vercel-functions-package#waituntil)；实现时核对当前 Nuxt/Nitro 部署适配，不在本轮选装依赖或宣称已验证。
+job 保存资源、dueAt、leaseUntil、attempts、lastErrorCode、revision，合并新事件版本，完成前检查是否又有新通知，避免中途通知被去重吞掉；超时租约可恢复。查询任务失败保留有界退避、重试上限与 unresolved 状态，客户端仍可手动刷新；到期取消失败按 §12.4 次日继续，达到提示阈值不终止补调。响应后执行也受函数同一超时上限约束，参考 [Vercel waitUntil](https://vercel.com/docs/functions/functions-api-reference/vercel-functions-package#waituntil)；实现时核对当前 Nuxt/Nitro 部署适配，部署适配未验证。
 
 **阶段 B 验收边界已获用户同意**：Webhook 本次查询成功则 App 关闭也立即收敛；失败则下次打开 App 读取/刷新，或每日扫描再核验。正常调度、批次覆盖且上游查询成功时，每日兜底等待按最长约 25 小时设计，不再以“约 1 分钟”为目标。约 25 小时是下一次日扫描的正常等待口径，不是持续上游故障、平台漏执行或批次积压下的成功 SLA；这些情况下明确显示旧观察时间/待查/失败，不能伪报已收敛。阶段 B 验证三入口、失败任务留存、批次预算与恢复；不要求新增调度设施。客户端路径和 refresh 结构不变。
 
