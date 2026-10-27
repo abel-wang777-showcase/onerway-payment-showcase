@@ -1,0 +1,3623 @@
+{
+  "openapi": "3.1.0",
+  "jsonSchemaDialect": "https://json-schema.org/draft/2020-12/schema",
+  "info": {
+    "title": "Showcase Demo API v1 · B0 契约候选",
+    "version": "0.1.0-b0",
+    "description": "仅 Showcase /api/demo/v1 的首批一次性 Native SDK 契约文档，尚未实现或部署。业务语义见 ../showcase-contract.md，结构以此文件为唯一来源。遵循 A1 方案 b：成功直接返回资源、分页 {items,nextCursor}、错误 {error}；会话期限只在 X-Demo-Session-Expires-At。不存在统一 data/session 外层。本稿不改变 Onerway API、SDK 回调和 Webhook，不授权业务实现、部署或交易。"
+  },
+  "servers": [
+    {
+      "url": "/api/demo/v1",
+      "description": "目标相对前缀；不是可用服务声明。"
+    }
+  ],
+  "security": [
+    {
+      "DemoBearer": []
+    }
+  ],
+  "x-b0-status": "contract-candidate-unimplemented",
+  "x-b0-scope": {
+    "included": [
+      "会话与公开连接",
+      "客户与能力规则",
+      "一次性 Native SDK SALE 创建/恢复/读取",
+      "启动租约与只读操作恢复"
+    ],
+    "deferred": [
+      "Web SDK 启动与 Web 完整 Cookie/CSRF 线协议",
+      "Checkout/Direct API 请求与首次 action 结构",
+      "AUTH/CAPTURE/VOID 路由",
+      "订阅与时间线",
+      "客户端代码生成",
+      "业务实现及契约运行时检查"
+    ]
+  },
+  "x-b0-open-questions": [
+    {
+      "id": "PROVIDER_PAYMENT_EXPIRY_BEHAVIOR",
+      "affects": [
+        "PaymentView.providerExpiresAt",
+        "createCheckoutSession"
+      ],
+      "status": "source_reported_runtime_unverified",
+      "detail": "按用户转交 rhcn-acquiring@f3cd2a75 源码调研采用服务端30分钟保守继续窗口。Demo 仅用 Sandbox，生产字典值仅作背景；实际关单 cron 频率未核实但不影响 Demo，N 后仍可支付及竞态自动退款留阶段 D Sandbox 实测。providerExpiresAt 不使用本地窗口填充。"
+    },
+    {
+      "id": "WEB_COOKIE_CSRF",
+      "affects": [
+        "createSession",
+        "所有 WEB 认证写入"
+      ],
+      "status": "implementation_design_pending",
+      "detail": "Cookie 名称、SameSite 和 CSRF 线协议尚未冻结；OpenAPI 当前 security 只完整描述 Native Bearer。Web 使用受保护 host-only Cookie 并强制同源/CSRF，不应照 Bearer 直接生成 Web 客户端。"
+    },
+    {
+      "id": "INPUT_BOUNDS",
+      "affects": [
+        "ParameterRule"
+      ],
+      "status": "implementation_design_pending",
+      "detail": "label 1–40 Unicode码点、去首尾空白/拒绝Cc控制字符，cursor最长512、custom URL最长2048已冻结。规则各类型确切适用约束随对应场景补齐，不阻断首批结构。"
+    }
+  ],
+  "x-b0-structural-decisions": [
+    "Claude 已确认可接入的文档落地选择：SessionView 返回 sessionRef/currentCustomerId/capabilitiesRevision；renew 和 release 使用 204；设置当前客户返回 SessionView。",
+    "Customer 直接返回 id/label/createdAt，创建结果附 currentCustomerId；客户列表使用同一分页结构。",
+    "未完成的 customer/checkout-session POST 返回 202 Operation；未完成支付创建返回 202 PaymentView。有效租约资料只在 200/201 返回，GET operations 恢复租约引用后以原键 POST 回读有效启动资料。",
+    "Capabilities 以 combinations[] 承载 sceneId/integration/platform 的逐组合规则；scenes[] 仅目录，presets[] 仅快捷输入。单个 verification 是该组合当前最弱证据，独立 SDK 源码事实不升级整个组合。",
+    "capabilitiesRevision/configRevision 使用不透明非空字符串；apiVersion 使用 v1；最低 clientBuild 来自运行配置，不以样例值为最低版本决定。",
+    "Error 所列字段固定出现；缺失上下文为 null 或空 fieldErrors。该结构选择不增加 Provider 错误码或改变 A1 执行语义。",
+    "依 U1 补齐 PaymentView.currentCustomerId：所有支付详情响应返回当时实际当前客户引用，不把首次解析的 customerId 当作当前引用；列表仍用 A1 摘要，不重复当前客户。",
+    "本轮按 Claude 反馈补齐 conditional 放行、客户端前向兼容、固定 App 回跳 preset 与 currentCustomerId 排除 revision；修订后快照尚未经 Claude 再次回读，不代表实施授权。"
+  ],
+  "x-b0-web-auth": {
+    "transport": "Secure/HttpOnly/host-only Cookie",
+    "csrf": "所有变更接口必须通过同源/CSRF 校验",
+    "status": "cookie-name-and-wire-details-pending"
+  },
+  "paths": {
+    "/connection": {
+      "get": {
+        "operationId": "getConnection",
+        "summary": "读取公开连接与兼容摘要",
+        "description": "X-Demo-Client 是平台和构建号的权威；platform/clientBuild 查询参数必须与其一致，不一致返回 400。响应不提供 canonical origin。",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Client"
+          },
+          {
+            "name": "platform",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Platform"
+            }
+          },
+          {
+            "name": "clientBuild",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "连接信息；不续期。",
+            "headers": {
+              "Cache-Control": {
+                "description": "所有响应 no-store。",
+                "schema": {
+                  "const": "no-store",
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Connection"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "输入校验失败，无副作用。",
+            "headers": {
+              "Cache-Control": {
+                "description": "所有响应 no-store。",
+                "schema": {
+                  "const": "no-store",
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "应用限流仅用于未受理动作；已认领键先回读。",
+            "headers": {
+              "Cache-Control": {
+                "description": "所有响应 no-store。",
+                "schema": {
+                  "const": "no-store",
+                  "type": "string"
+                }
+              },
+              "Retry-After": {
+                "description": "与 error.retryAfter 相同的整数秒数。",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "存储或任务不可用；未持久化不报告 accepted。",
+            "headers": {
+              "Cache-Control": {
+                "description": "所有响应 no-store。",
+                "schema": {
+                  "const": "no-store",
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": []
+      }
+    },
+    "/sessions": {
+      "post": {
+        "operationId": "createSession",
+        "summary": "签发独立 Demo 会话",
+        "description": "",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Client"
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "会话已签发；Native 返回 token，WEB 只 Set-Cookie；期限在响应头。",
+            "headers": {
+              "Cache-Control": {
+                "description": "所有响应 no-store。",
+                "schema": {
+                  "const": "no-store",
+                  "type": "string"
+                }
+              },
+              "X-Demo-Session-Expires-At": {
+                "description": "仅成功签发或完成有效会话校验及续期持久化后返回；UTC 时间。包括有认证的业务错误。401、匿名连接和存储失败不伪造期限；跨域显式 expose。",
+                "schema": {
+                  "type": "string",
+                  "format": "date-time",
+                  "pattern": "Z$",
+                  "description": "UTC ISO 8601 时间。"
+                }
+              },
+              "Set-Cookie": {
+                "description": "仅 WEB 签发。Secure、HttpOnly、host-only；Cookie 名称及 SameSite/CSRF 线协议在实施前确定，Native 不使用此 Cookie。",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionIssued"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "输入校验失败，无副作用。",
+            "headers": {
+              "Cache-Control": {
+                "description": "所有响应 no-store。",
+                "schema": {
+                  "const": "no-store",
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "应用限流仅用于未受理动作；已认领键先回读。",
+            "headers": {
+              "Cache-Control": {
+                "description": "所有响应 no-store。",
+                "schema": {
+                  "const": "no-store",
+                  "type": "string"
+                }
+              },
+              "Retry-After": {
+                "description": "与 error.retryAfter 相同的整数秒数。",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "存储或任务不可用；未持久化不报告 accepted。",
+            "headers": {
+              "Cache-Control": {
+                "description": "所有响应 no-store。",
+                "schema": {
+                  "const": "no-store",
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SessionCreate"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/session": {
+      "get": {
+        "operationId": "getSession",
+        "summary": "读取会话当前客户与能力版本",
+        "description": "",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Client"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "会话视图。",
+            "headers": {
+              "Cache-Control": {
+                "description": "所有响应 no-store。",
+                "schema": {
+                  "const": "no-store",
+                  "type": "string"
+                }
+              },
+              "X-Demo-Session-Expires-At": {
+                "description": "仅成功签发或完成有效会话校验及续期持久化后返回；UTC 时间。包括有认证的业务错误。401、匿名连接和存储失败不伪造期限；跨域显式 expose。",
+                "schema": {
+                  "type": "string",
+                  "format": "date-time",
+                  "pattern": "Z$",
+                  "description": "UTC ISO 8601 时间。"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionView"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error400"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error429"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error503"
+          }
+        }
+      }
+    },
+    "/session/renew": {
+      "post": {
+        "operationId": "renewSession",
+        "summary": "兼容续期入口",
+        "description": "",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Client"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "无业务副作用、不轮换 token；实际期限仅响应头，无 body。",
+            "headers": {
+              "Cache-Control": {
+                "description": "所有响应 no-store。",
+                "schema": {
+                  "const": "no-store",
+                  "type": "string"
+                }
+              },
+              "X-Demo-Session-Expires-At": {
+                "description": "仅成功签发或完成有效会话校验及续期持久化后返回；UTC 时间。包括有认证的业务错误。401、匿名连接和存储失败不伪造期限；跨域显式 expose。",
+                "schema": {
+                  "type": "string",
+                  "format": "date-time",
+                  "pattern": "Z$",
+                  "description": "UTC ISO 8601 时间。"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error400"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error429"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error503"
+          }
+        }
+      }
+    },
+    "/session/current-customer": {
+      "put": {
+        "operationId": "setCurrentCustomer",
+        "summary": "设置本会话当前客户",
+        "description": "",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Client"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "返回实际当前会话引用。",
+            "headers": {
+              "Cache-Control": {
+                "description": "所有响应 no-store。",
+                "schema": {
+                  "const": "no-store",
+                  "type": "string"
+                }
+              },
+              "X-Demo-Session-Expires-At": {
+                "description": "仅成功签发或完成有效会话校验及续期持久化后返回；UTC 时间。包括有认证的业务错误。401、匿名连接和存储失败不伪造期限；跨域显式 expose。",
+                "schema": {
+                  "type": "string",
+                  "format": "date-time",
+                  "pattern": "Z$",
+                  "description": "UTC ISO 8601 时间。"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionView"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error400"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error429"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error503"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CurrentCustomerSet"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/capabilities": {
+      "get": {
+        "operationId": "getCapabilities",
+        "summary": "读取当前平台的场景、预设和组合规则",
+        "description": "B0 不提供改变会话 platform 的 query；筛选不授予额外权限。",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Client"
+          },
+          {
+            "name": "sceneId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/SceneId"
+            }
+          },
+          {
+            "name": "integration",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/Integration"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "按会话平台和版本评估。",
+            "headers": {
+              "Cache-Control": {
+                "description": "所有响应 no-store。",
+                "schema": {
+                  "const": "no-store",
+                  "type": "string"
+                }
+              },
+              "X-Demo-Session-Expires-At": {
+                "description": "仅成功签发或完成有效会话校验及续期持久化后返回；UTC 时间。包括有认证的业务错误。401、匿名连接和存储失败不伪造期限；跨域显式 expose。",
+                "schema": {
+                  "type": "string",
+                  "format": "date-time",
+                  "pattern": "Z$",
+                  "description": "UTC ISO 8601 时间。"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Capabilities"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error400"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error429"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error503"
+          }
+        }
+      }
+    },
+    "/customers": {
+      "get": {
+        "operationId": "listCustomers",
+        "summary": "读取本会话客户",
+        "description": "",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Client"
+          },
+          {
+            "$ref": "#/components/parameters/Cursor"
+          },
+          {
+            "$ref": "#/components/parameters/Limit"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "分页客户列表。",
+            "headers": {
+              "Cache-Control": {
+                "description": "所有响应 no-store。",
+                "schema": {
+                  "const": "no-store",
+                  "type": "string"
+                }
+              },
+              "X-Demo-Session-Expires-At": {
+                "description": "仅成功签发或完成有效会话校验及续期持久化后返回；UTC 时间。包括有认证的业务错误。401、匿名连接和存储失败不伪造期限；跨域显式 expose。",
+                "schema": {
+                  "type": "string",
+                  "format": "date-time",
+                  "pattern": "Z$",
+                  "description": "UTC ISO 8601 时间。"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CustomerPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error400"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error429"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error503"
+          }
+        }
+      },
+      "post": {
+        "operationId": "createCustomer",
+        "summary": "幂等创建本地测试客户",
+        "description": "",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Client"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "同键回读，不再次切换。",
+            "headers": {
+              "Cache-Control": {
+                "description": "所有响应 no-store。",
+                "schema": {
+                  "const": "no-store",
+                  "type": "string"
+                }
+              },
+              "X-Demo-Session-Expires-At": {
+                "description": "仅成功签发或完成有效会话校验及续期持久化后返回；UTC 时间。包括有认证的业务错误。401、匿名连接和存储失败不伪造期限；跨域显式 expose。",
+                "schema": {
+                  "type": "string",
+                  "format": "date-time",
+                  "pattern": "Z$",
+                  "description": "UTC ISO 8601 时间。"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CustomerCreated"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "首次成功；原子切换当前客户。",
+            "headers": {
+              "Cache-Control": {
+                "description": "所有响应 no-store。",
+                "schema": {
+                  "const": "no-store",
+                  "type": "string"
+                }
+              },
+              "X-Demo-Session-Expires-At": {
+                "description": "仅成功签发或完成有效会话校验及续期持久化后返回；UTC 时间。包括有认证的业务错误。401、匿名连接和存储失败不伪造期限；跨域显式 expose。",
+                "schema": {
+                  "type": "string",
+                  "format": "date-time",
+                  "pattern": "Z$",
+                  "description": "UTC ISO 8601 时间。"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CustomerCreated"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "已持久认领但尚未完成，按 operationId 恢复。",
+            "headers": {
+              "Cache-Control": {
+                "description": "所有响应 no-store。",
+                "schema": {
+                  "const": "no-store",
+                  "type": "string"
+                }
+              },
+              "X-Demo-Session-Expires-At": {
+                "description": "仅成功签发或完成有效会话校验及续期持久化后返回；UTC 时间。包括有认证的业务错误。401、匿名连接和存储失败不伪造期限；跨域显式 expose。",
+                "schema": {
+                  "type": "string",
+                  "format": "date-time",
+                  "pattern": "Z$",
+                  "description": "UTC ISO 8601 时间。"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Operation"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error400"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error409"
+          },
+          "410": {
+            "$ref": "#/components/responses/Error410"
+          },
+          "426": {
+            "$ref": "#/components/responses/Error426"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error429"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error503"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CustomerCreate"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/payments": {
+      "post": {
+        "operationId": "createPayment",
+        "summary": "创建或恢复一次性 SDK 支付",
+        "description": "相同键同意图认领同一资源；上游结果未知只查原交易。首笔 current 客户解析、支付认领和客户额度检查必须原子化；客户端不可通过新键自动补偿未知请求。 首批仅 ANDROID/IOS 会话；WEB 写入待后续结构补齐。 服务端对 available/conditional 组合放行；conditional/unverified 不单独阻断创建，仍校验权限、版本、参数及状态。",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Client"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "同键回读已准备资源。",
+            "headers": {
+              "Cache-Control": {
+                "description": "所有响应 no-store。",
+                "schema": {
+                  "const": "no-store",
+                  "type": "string"
+                }
+              },
+              "X-Demo-Session-Expires-At": {
+                "description": "仅成功签发或完成有效会话校验及续期持久化后返回；UTC 时间。包括有认证的业务错误。401、匿名连接和存储失败不伪造期限；跨域显式 expose。",
+                "schema": {
+                  "type": "string",
+                  "format": "date-time",
+                  "pattern": "Z$",
+                  "description": "UTC ISO 8601 时间。"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentView"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "首次准备完成；不是支付成功。",
+            "headers": {
+              "Cache-Control": {
+                "description": "所有响应 no-store。",
+                "schema": {
+                  "const": "no-store",
+                  "type": "string"
+                }
+              },
+              "X-Demo-Session-Expires-At": {
+                "description": "仅成功签发或完成有效会话校验及续期持久化后返回；UTC 时间。包括有认证的业务错误。401、匿名连接和存储失败不伪造期限；跨域显式 expose。",
+                "schema": {
+                  "type": "string",
+                  "format": "date-time",
+                  "pattern": "Z$",
+                  "description": "UTC ISO 8601 时间。"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentView"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "已持久受理；pending/unknown 占位保留本地 id 与 requestId。",
+            "headers": {
+              "Cache-Control": {
+                "description": "所有响应 no-store。",
+                "schema": {
+                  "const": "no-store",
+                  "type": "string"
+                }
+              },
+              "X-Demo-Session-Expires-At": {
+                "description": "仅成功签发或完成有效会话校验及续期持久化后返回；UTC 时间。包括有认证的业务错误。401、匿名连接和存储失败不伪造期限；跨域显式 expose。",
+                "schema": {
+                  "type": "string",
+                  "format": "date-time",
+                  "pattern": "Z$",
+                  "description": "UTC ISO 8601 时间。"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentView"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error400"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error409"
+          },
+          "410": {
+            "$ref": "#/components/responses/Error410"
+          },
+          "426": {
+            "$ref": "#/components/responses/Error426"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error429"
+          },
+          "502": {
+            "$ref": "#/components/responses/Error502"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error503"
+          },
+          "504": {
+            "$ref": "#/components/responses/Error504"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PaymentCreate"
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "operationId": "listPayments",
+        "summary": "读取记录或待继续支付",
+        "description": "merchantTxnId 精确过滤仍需会话认证；列表只处理本页有界待查任务。",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Client"
+          },
+          {
+            "$ref": "#/components/parameters/Cursor"
+          },
+          {
+            "$ref": "#/components/parameters/Limit"
+          },
+          {
+            "name": "filter",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "needs-attention"
+              ]
+            }
+          },
+          {
+            "name": "customerId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/Id"
+            }
+          },
+          {
+            "name": "merchantTxnId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "仅当前会话；createdAt 倒序、id 稳定排序。",
+            "headers": {
+              "Cache-Control": {
+                "description": "所有响应 no-store。",
+                "schema": {
+                  "const": "no-store",
+                  "type": "string"
+                }
+              },
+              "X-Demo-Session-Expires-At": {
+                "description": "仅成功签发或完成有效会话校验及续期持久化后返回；UTC 时间。包括有认证的业务错误。401、匿名连接和存储失败不伪造期限；跨域显式 expose。",
+                "schema": {
+                  "type": "string",
+                  "format": "date-time",
+                  "pattern": "Z$",
+                  "description": "UTC ISO 8601 时间。"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error400"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error429"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error503"
+          }
+        }
+      }
+    },
+    "/payment-requests/{requestId}": {
+      "get": {
+        "operationId": "recoverPaymentRequest",
+        "summary": "恢复原创建结果",
+        "description": " 全局认领键属于其他会话时统一 409 IDEMPOTENCY_KEY_UNAVAILABLE；不返回原资源、操作视图或原所有者信息。",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Client"
+          },
+          {
+            "$ref": "#/components/parameters/RequestId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "找到未过期的同一支付；pending/unknown 不重新创建。",
+            "headers": {
+              "Cache-Control": {
+                "description": "所有响应 no-store。",
+                "schema": {
+                  "const": "no-store",
+                  "type": "string"
+                }
+              },
+              "X-Demo-Session-Expires-At": {
+                "description": "仅成功签发或完成有效会话校验及续期持久化后返回；UTC 时间。包括有认证的业务错误。401、匿名连接和存储失败不伪造期限；跨域显式 expose。",
+                "schema": {
+                  "type": "string",
+                  "format": "date-time",
+                  "pattern": "Z$",
+                  "description": "UTC ISO 8601 时间。"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentView"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error400"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "410": {
+            "$ref": "#/components/responses/Error410"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error429"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error503"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error409"
+          }
+        }
+      }
+    },
+    "/payments/{id}": {
+      "get": {
+        "operationId": "getPayment",
+        "summary": "读取并有界核验原支付",
+        "description": "可顺带领取该支付的查询任务，绝不执行 Provider 资金写操作。",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Client"
+          },
+          {
+            "$ref": "#/components/parameters/PaymentId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "最新可用视图；查单失败保留旧证据与 refresh 状态。",
+            "headers": {
+              "Cache-Control": {
+                "description": "所有响应 no-store。",
+                "schema": {
+                  "const": "no-store",
+                  "type": "string"
+                }
+              },
+              "X-Demo-Session-Expires-At": {
+                "description": "仅成功签发或完成有效会话校验及续期持久化后返回；UTC 时间。包括有认证的业务错误。401、匿名连接和存储失败不伪造期限；跨域显式 expose。",
+                "schema": {
+                  "type": "string",
+                  "format": "date-time",
+                  "pattern": "Z$",
+                  "description": "UTC ISO 8601 时间。"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentView"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error400"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "410": {
+            "$ref": "#/components/responses/Error410"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error429"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error503"
+          }
+        }
+      }
+    },
+    "/payments/{id}/refresh": {
+      "post": {
+        "operationId": "refreshPayment",
+        "summary": "合并原支付的查单任务",
+        "description": "",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Client"
+          },
+          {
+            "$ref": "#/components/parameters/PaymentId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "当前视图与 refresh 进度；不保证此次已取得新证据。",
+            "headers": {
+              "Cache-Control": {
+                "description": "所有响应 no-store。",
+                "schema": {
+                  "const": "no-store",
+                  "type": "string"
+                }
+              },
+              "X-Demo-Session-Expires-At": {
+                "description": "仅成功签发或完成有效会话校验及续期持久化后返回；UTC 时间。包括有认证的业务错误。401、匿名连接和存储失败不伪造期限；跨域显式 expose。",
+                "schema": {
+                  "type": "string",
+                  "format": "date-time",
+                  "pattern": "Z$",
+                  "description": "UTC ISO 8601 时间。"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentView"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error400"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "410": {
+            "$ref": "#/components/responses/Error410"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error429"
+          },
+          "502": {
+            "$ref": "#/components/responses/Error502"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error503"
+          },
+          "504": {
+            "$ref": "#/components/responses/Error504"
+          }
+        }
+      }
+    },
+    "/payments/{id}/checkout-session": {
+      "post": {
+        "operationId": "createCheckoutSession",
+        "summary": "领取或接替同一支付启动租约",
+        "description": "实时核验状态、能力与归属；只允许符合规则的 U/O 再启动。P/R/A 禁止再次提交；租约不是 Provider 防重复承诺。 首批只覆盖原生 SDK 启动；WEB SDK 后批按实际生命周期补齐。",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Client"
+          },
+          {
+            "$ref": "#/components/parameters/PaymentId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "同操作且仍有效的租约回读。",
+            "headers": {
+              "Cache-Control": {
+                "description": "所有响应 no-store。",
+                "schema": {
+                  "const": "no-store",
+                  "type": "string"
+                }
+              },
+              "X-Demo-Session-Expires-At": {
+                "description": "仅成功签发或完成有效会话校验及续期持久化后返回；UTC 时间。包括有认证的业务错误。401、匿名连接和存储失败不伪造期限；跨域显式 expose。",
+                "schema": {
+                  "type": "string",
+                  "format": "date-time",
+                  "pattern": "Z$",
+                  "description": "UTC ISO 8601 时间。"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CheckoutSession"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "新有效租约。",
+            "headers": {
+              "Cache-Control": {
+                "description": "所有响应 no-store。",
+                "schema": {
+                  "const": "no-store",
+                  "type": "string"
+                }
+              },
+              "X-Demo-Session-Expires-At": {
+                "description": "仅成功签发或完成有效会话校验及续期持久化后返回；UTC 时间。包括有认证的业务错误。401、匿名连接和存储失败不伪造期限；跨域显式 expose。",
+                "schema": {
+                  "type": "string",
+                  "format": "date-time",
+                  "pattern": "Z$",
+                  "description": "UTC ISO 8601 时间。"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CheckoutSession"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "已持久认领尚未发放租约；按 operationId 查询，不可启动 SDK。",
+            "headers": {
+              "Cache-Control": {
+                "description": "所有响应 no-store。",
+                "schema": {
+                  "const": "no-store",
+                  "type": "string"
+                }
+              },
+              "X-Demo-Session-Expires-At": {
+                "description": "仅成功签发或完成有效会话校验及续期持久化后返回；UTC 时间。包括有认证的业务错误。401、匿名连接和存储失败不伪造期限；跨域显式 expose。",
+                "schema": {
+                  "type": "string",
+                  "format": "date-time",
+                  "pattern": "Z$",
+                  "description": "UTC ISO 8601 时间。"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Operation"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error400"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error409"
+          },
+          "410": {
+            "$ref": "#/components/responses/Error410"
+          },
+          "426": {
+            "$ref": "#/components/responses/Error426"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error429"
+          },
+          "502": {
+            "$ref": "#/components/responses/Error502"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error503"
+          },
+          "504": {
+            "$ref": "#/components/responses/Error504"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CheckoutSessionCreate"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/payments/{id}/checkout-sessions/{checkoutSessionId}": {
+      "delete": {
+        "operationId": "releaseCheckoutSession",
+        "summary": "幂等释放指定租约",
+        "description": "",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Client"
+          },
+          {
+            "$ref": "#/components/parameters/PaymentId"
+          },
+          {
+            "$ref": "#/components/parameters/CheckoutSessionId"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "无 body；不取消支付，不释放接替后的新租约。",
+            "headers": {
+              "Cache-Control": {
+                "description": "所有响应 no-store。",
+                "schema": {
+                  "const": "no-store",
+                  "type": "string"
+                }
+              },
+              "X-Demo-Session-Expires-At": {
+                "description": "仅成功签发或完成有效会话校验及续期持久化后返回；UTC 时间。包括有认证的业务错误。401、匿名连接和存储失败不伪造期限；跨域显式 expose。",
+                "schema": {
+                  "type": "string",
+                  "format": "date-time",
+                  "pattern": "Z$",
+                  "description": "UTC ISO 8601 时间。"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error400"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "410": {
+            "$ref": "#/components/responses/Error410"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error429"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error503"
+          }
+        }
+      }
+    },
+    "/operations/{operationId}": {
+      "get": {
+        "operationId": "getOperation",
+        "summary": "只读恢复原操作",
+        "description": "不执行原写操作、不续租。checkout_session 结束状态可读；旧键 POST 返回 CHECKOUT_SESSION_ENDED。 全局认领键属于其他会话时统一 409 IDEMPOTENCY_KEY_UNAVAILABLE；不返回原资源、操作视图或原所有者信息。",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Client"
+          },
+          {
+            "$ref": "#/components/parameters/OperationId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "已知未过期操作，无论是否完成都返回 200。",
+            "headers": {
+              "Cache-Control": {
+                "description": "所有响应 no-store。",
+                "schema": {
+                  "const": "no-store",
+                  "type": "string"
+                }
+              },
+              "X-Demo-Session-Expires-At": {
+                "description": "仅成功签发或完成有效会话校验及续期持久化后返回；UTC 时间。包括有认证的业务错误。401、匿名连接和存储失败不伪造期限；跨域显式 expose。",
+                "schema": {
+                  "type": "string",
+                  "format": "date-time",
+                  "pattern": "Z$",
+                  "description": "UTC ISO 8601 时间。"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Operation"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error400"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "410": {
+            "$ref": "#/components/responses/Error410"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error429"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error503"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error409"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "DemoBearer": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "仅 Native 匿名 Demo 会话凭证；不是商户 ApiKey 或 Provider secret。WEB Cookie 见 x-b0-web-auth。"
+      }
+    },
+    "parameters": {
+      "Client": {
+        "name": "X-Demo-Client",
+        "in": "header",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "pattern": "^(WEB|ANDROID|IOS)/[0-9]+$"
+        },
+        "description": "平台必须与会话一致。构建号非安全身份；最低值来自配置，不在文档虚构。"
+      },
+      "PaymentId": {
+        "name": "id",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "$ref": "#/components/schemas/Id"
+        }
+      },
+      "RequestId": {
+        "name": "requestId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
+        }
+      },
+      "OperationId": {
+        "name": "operationId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
+        }
+      },
+      "CheckoutSessionId": {
+        "name": "checkoutSessionId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "$ref": "#/components/schemas/Id"
+        }
+      },
+      "Limit": {
+        "name": "limit",
+        "in": "query",
+        "required": false,
+        "schema": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 50,
+          "default": 20
+        }
+      },
+      "Cursor": {
+        "name": "cursor",
+        "in": "query",
+        "required": false,
+        "schema": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        }
+      }
+    },
+    "headers": {
+      "SessionExpiresAt": {
+        "description": "仅成功签发或完成有效会话校验及续期持久化后返回；UTC 时间。包括有认证的业务错误。401、匿名连接和存储失败不伪造期限；跨域显式 expose。",
+        "schema": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "Z$",
+          "description": "UTC ISO 8601 时间。"
+        }
+      }
+    },
+    "responses": {
+      "Error400": {
+        "description": "输入校验失败，无副作用。",
+        "headers": {
+          "Cache-Control": {
+            "description": "所有响应 no-store。",
+            "schema": {
+              "const": "no-store",
+              "type": "string"
+            }
+          },
+          "X-Demo-Session-Expires-At": {
+            "description": "仅成功签发或完成有效会话校验及续期持久化后返回；UTC 时间。包括有认证的业务错误。401、匿名连接和存储失败不伪造期限；跨域显式 expose。",
+            "schema": {
+              "type": "string",
+              "format": "date-time",
+              "pattern": "Z$",
+              "description": "UTC ISO 8601 时间。"
+            }
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorEnvelope"
+            }
+          }
+        }
+      },
+      "Error401": {
+        "description": "会话凭证缺失、失效或撤销；不续期。",
+        "headers": {
+          "Cache-Control": {
+            "description": "所有响应 no-store。",
+            "schema": {
+              "const": "no-store",
+              "type": "string"
+            }
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorEnvelope"
+            }
+          }
+        }
+      },
+      "Error403": {
+        "description": "无权访问；不存在与非本会话资源采用同一响应。",
+        "headers": {
+          "Cache-Control": {
+            "description": "所有响应 no-store。",
+            "schema": {
+              "const": "no-store",
+              "type": "string"
+            }
+          },
+          "X-Demo-Session-Expires-At": {
+            "description": "仅成功签发或完成有效会话校验及续期持久化后返回；UTC 时间。包括有认证的业务错误。401、匿名连接和存储失败不伪造期限；跨域显式 expose。",
+            "schema": {
+              "type": "string",
+              "format": "date-time",
+              "pattern": "Z$",
+              "description": "UTC ISO 8601 时间。"
+            }
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorEnvelope"
+            }
+          }
+        }
+      },
+      "Error404": {
+        "description": "恢复查询当前未找到认领，不证明原写请求永远未到。",
+        "headers": {
+          "Cache-Control": {
+            "description": "所有响应 no-store。",
+            "schema": {
+              "const": "no-store",
+              "type": "string"
+            }
+          },
+          "X-Demo-Session-Expires-At": {
+            "description": "仅成功签发或完成有效会话校验及续期持久化后返回；UTC 时间。包括有认证的业务错误。401、匿名连接和存储失败不伪造期限；跨域显式 expose。",
+            "schema": {
+              "type": "string",
+              "format": "date-time",
+              "pattern": "Z$",
+              "description": "UTC ISO 8601 时间。"
+            }
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorEnvelope"
+            }
+          }
+        }
+      },
+      "Error409": {
+        "description": "幂等、归属后的状态或租约冲突。",
+        "headers": {
+          "Cache-Control": {
+            "description": "所有响应 no-store。",
+            "schema": {
+              "const": "no-store",
+              "type": "string"
+            }
+          },
+          "X-Demo-Session-Expires-At": {
+            "description": "仅成功签发或完成有效会话校验及续期持久化后返回；UTC 时间。包括有认证的业务错误。401、匿名连接和存储失败不伪造期限；跨域显式 expose。",
+            "schema": {
+              "type": "string",
+              "format": "date-time",
+              "pattern": "Z$",
+              "description": "UTC ISO 8601 时间。"
+            }
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorEnvelope"
+            }
+          }
+        }
+      },
+      "Error410": {
+        "description": "已知操作或资源过期；禁止旧键重建。",
+        "headers": {
+          "Cache-Control": {
+            "description": "所有响应 no-store。",
+            "schema": {
+              "const": "no-store",
+              "type": "string"
+            }
+          },
+          "X-Demo-Session-Expires-At": {
+            "description": "仅成功签发或完成有效会话校验及续期持久化后返回；UTC 时间。包括有认证的业务错误。401、匿名连接和存储失败不伪造期限；跨域显式 expose。",
+            "schema": {
+              "type": "string",
+              "format": "date-time",
+              "pattern": "Z$",
+              "description": "UTC ISO 8601 时间。"
+            }
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorEnvelope"
+            }
+          }
+        }
+      },
+      "Error426": {
+        "description": "客户端版本不兼容；仅新创建/启动等业务写入口使用。",
+        "headers": {
+          "Cache-Control": {
+            "description": "所有响应 no-store。",
+            "schema": {
+              "const": "no-store",
+              "type": "string"
+            }
+          },
+          "X-Demo-Session-Expires-At": {
+            "description": "仅成功签发或完成有效会话校验及续期持久化后返回；UTC 时间。包括有认证的业务错误。401、匿名连接和存储失败不伪造期限；跨域显式 expose。",
+            "schema": {
+              "type": "string",
+              "format": "date-time",
+              "pattern": "Z$",
+              "description": "UTC ISO 8601 时间。"
+            }
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorEnvelope"
+            }
+          }
+        }
+      },
+      "Error429": {
+        "description": "应用限流仅用于未受理动作；已认领键先回读。",
+        "headers": {
+          "Cache-Control": {
+            "description": "所有响应 no-store。",
+            "schema": {
+              "const": "no-store",
+              "type": "string"
+            }
+          },
+          "X-Demo-Session-Expires-At": {
+            "description": "仅成功签发或完成有效会话校验及续期持久化后返回；UTC 时间。包括有认证的业务错误。401、匿名连接和存储失败不伪造期限；跨域显式 expose。",
+            "schema": {
+              "type": "string",
+              "format": "date-time",
+              "pattern": "Z$",
+              "description": "UTC ISO 8601 时间。"
+            }
+          },
+          "Retry-After": {
+            "description": "与 error.retryAfter 相同的整数秒数。",
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorEnvelope"
+            }
+          }
+        }
+      },
+      "Error502": {
+        "description": "Provider 请求失败；是否执行以 error.execution 为准。",
+        "headers": {
+          "Cache-Control": {
+            "description": "所有响应 no-store。",
+            "schema": {
+              "const": "no-store",
+              "type": "string"
+            }
+          },
+          "X-Demo-Session-Expires-At": {
+            "description": "仅成功签发或完成有效会话校验及续期持久化后返回；UTC 时间。包括有认证的业务错误。401、匿名连接和存储失败不伪造期限；跨域显式 expose。",
+            "schema": {
+              "type": "string",
+              "format": "date-time",
+              "pattern": "Z$",
+              "description": "UTC ISO 8601 时间。"
+            }
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorEnvelope"
+            }
+          }
+        }
+      },
+      "Error503": {
+        "description": "存储或任务不可用；未持久化不报告 accepted。",
+        "headers": {
+          "Cache-Control": {
+            "description": "所有响应 no-store。",
+            "schema": {
+              "const": "no-store",
+              "type": "string"
+            }
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorEnvelope"
+            }
+          }
+        }
+      },
+      "Error504": {
+        "description": "Provider 超时；结果未知只恢复原操作。",
+        "headers": {
+          "Cache-Control": {
+            "description": "所有响应 no-store。",
+            "schema": {
+              "const": "no-store",
+              "type": "string"
+            }
+          },
+          "X-Demo-Session-Expires-At": {
+            "description": "仅成功签发或完成有效会话校验及续期持久化后返回；UTC 时间。包括有认证的业务错误。401、匿名连接和存储失败不伪造期限；跨域显式 expose。",
+            "schema": {
+              "type": "string",
+              "format": "date-time",
+              "pattern": "Z$",
+              "description": "UTC ISO 8601 时间。"
+            }
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorEnvelope"
+            }
+          }
+        }
+      }
+    },
+    "schemas": {
+      "Id": {
+        "type": "string",
+        "minLength": 1,
+        "description": "不可猜的 Demo 本地引用；不能代替会话凭证。"
+      },
+      "Platform": {
+        "type": "string",
+        "enum": [
+          "WEB",
+          "ANDROID",
+          "IOS"
+        ]
+      },
+      "Integration": {
+        "type": "string",
+        "enum": [
+          "native-sdk",
+          "web-sdk",
+          "checkout",
+          "direct-api"
+        ]
+      },
+      "SceneId": {
+        "type": "string",
+        "enum": [
+          "one_time",
+          "pre_auth",
+          "subscription_hosted",
+          "subscription_merchant"
+        ]
+      },
+      "Availability": {
+        "type": "string",
+        "enum": [
+          "available",
+          "conditional",
+          "planned",
+          "unavailable"
+        ],
+        "description": "available 可执行；conditional 可执行并提示 verification 与 reasonCode；planned/unavailable 隐藏或置灰并附原因；未知值不可执行。服务端创建支付同样放行 conditional，其他权限、参数及状态校验仍适用。"
+      },
+      "Verification": {
+        "type": "string",
+        "enum": [
+          "user_confirmed",
+          "documented",
+          "source_checked",
+          "sandbox_verified",
+          "unverified"
+        ]
+      },
+      "Amount": {
+        "type": "object",
+        "properties": {
+          "minor": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000000
+          },
+          "currency": {
+            "const": "USD",
+            "type": "string"
+          }
+        },
+        "required": [
+          "minor",
+          "currency"
+        ],
+        "additionalProperties": false,
+        "description": "B0 一次性 SDK 的 Demo USD 范围，非 Provider 统一限额；金额为整数 minor units。"
+      },
+      "SdkConfig": {
+        "type": "object",
+        "properties": {
+          "merchantNo": {
+            "type": "string",
+            "minLength": 1
+          },
+          "environment": {
+            "const": "sandbox",
+            "type": "string"
+          },
+          "configRevision": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "merchantNo",
+          "environment",
+          "configRevision"
+        ],
+        "additionalProperties": false,
+        "description": "公开 SDK 配置。不是商户 API 凭证，不允许客户端指定任意 SDK baseUrl。"
+      },
+      "Connection": {
+        "type": "object",
+        "properties": {
+          "environment": {
+            "const": "sandbox",
+            "type": "string"
+          },
+          "apiVersion": {
+            "const": "v1",
+            "type": "string"
+          },
+          "minimumClientBuild": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "compatible": {
+            "type": "boolean"
+          },
+          "capabilitiesRevision": {
+            "type": "string",
+            "minLength": 1
+          },
+          "sdk": {
+            "$ref": "#/components/schemas/SdkConfig"
+          }
+        },
+        "required": [
+          "environment",
+          "apiVersion",
+          "minimumClientBuild",
+          "compatible",
+          "capabilitiesRevision",
+          "sdk"
+        ],
+        "additionalProperties": false
+      },
+      "SessionCreate": {
+        "type": "object",
+        "properties": {
+          "platform": {
+            "$ref": "#/components/schemas/Platform"
+          },
+          "clientBuild": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "platform",
+          "clientBuild"
+        ],
+        "additionalProperties": false
+      },
+      "WebSessionIssued": {
+        "type": "object",
+        "properties": {
+          "sessionRef": {
+            "$ref": "#/components/schemas/Id"
+          }
+        },
+        "required": [
+          "sessionRef"
+        ],
+        "additionalProperties": false,
+        "description": "WEB 只通过 Set-Cookie 接收凭证，JSON 不含 token 或期限。"
+      },
+      "NativeSessionIssued": {
+        "type": "object",
+        "properties": {
+          "sessionRef": {
+            "$ref": "#/components/schemas/Id"
+          },
+          "sessionToken": {
+            "type": "string",
+            "minLength": 1,
+            "writeOnly": false,
+            "description": "仅 ANDROID/IOS 的签发响应；存入 Keystore/Keychain，不记录日志。示例只有无效占位值。"
+          }
+        },
+        "required": [
+          "sessionRef",
+          "sessionToken"
+        ],
+        "additionalProperties": false
+      },
+      "SessionIssued": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/WebSessionIssued"
+          },
+          {
+            "$ref": "#/components/schemas/NativeSessionIssued"
+          }
+        ],
+        "description": "按请求 platform 选择；WEB 禁止 sessionToken。"
+      },
+      "SessionView": {
+        "type": "object",
+        "properties": {
+          "sessionRef": {
+            "$ref": "#/components/schemas/Id"
+          },
+          "currentCustomerId": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Id"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "capabilitiesRevision": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "sessionRef",
+          "currentCustomerId",
+          "capabilitiesRevision"
+        ],
+        "additionalProperties": false,
+        "description": "当前客户可为空；会话期限仅在响应头。"
+      },
+      "Customer": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/Id"
+          },
+          "label": {
+            "type": "string",
+            "minLength": 1
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "Z$",
+            "description": "UTC ISO 8601 时间。"
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "createdAt"
+        ],
+        "additionalProperties": false,
+        "description": "Demo 本地客户；不暴露 merchantCustId 输入，不调用独立 Provider 客户创建接口。"
+      },
+      "CustomerCreated": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/Id"
+          },
+          "label": {
+            "type": "string",
+            "minLength": 1
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "Z$",
+            "description": "UTC ISO 8601 时间。"
+          },
+          "currentCustomerId": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Id"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "createdAt",
+          "currentCustomerId"
+        ],
+        "additionalProperties": false,
+        "description": "直接返回客户资源及响应时实际当前客户引用。重放不再次切换。"
+      },
+      "CustomerCreate": {
+        "type": "object",
+        "properties": {
+          "operationId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
+          },
+          "label": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 40,
+            "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$",
+            "description": "先拒绝 Unicode Cc 控制字符，再去首尾空白，规范化后按 Unicode 码点校验1–40并参与意图比较。maxLength表达规范化值边界。"
+          }
+        },
+        "required": [
+          "operationId",
+          "label"
+        ],
+        "additionalProperties": false
+      },
+      "CustomerChoice": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "const": "current"
+              }
+            },
+            "required": [
+              "kind"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "const": "existing"
+              },
+              "id": {
+                "$ref": "#/components/schemas/Id"
+              }
+            },
+            "required": [
+              "kind",
+              "id"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "const": "new"
+              },
+              "label": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 40,
+                "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$",
+                "description": "先拒绝 Unicode Cc 控制字符，再去首尾空白，规范化后按 Unicode 码点校验1–40并参与意图比较。maxLength表达规范化值边界。"
+              }
+            },
+            "required": [
+              "kind",
+              "label"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      },
+      "ReturnTarget": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "const": "preset"
+              },
+              "id": {
+                "type": "string",
+                "enum": [
+                  "app_android",
+                  "app_ios"
+                ]
+              }
+            },
+            "required": [
+              "kind",
+              "id"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "const": "custom"
+              },
+              "url": {
+                "type": "string",
+                "format": "uri",
+                "pattern": "^https://",
+                "description": "服务端校验无 userinfo、无 fragment、不含 Demo 凭证或保留 query merchantTxnId，并检查长度。服务端不访问此 URL；完整 URL 不进入诊断。",
+                "maxLength": 2048
+              }
+            },
+            "required": [
+              "kind",
+              "url"
+            ],
+            "additionalProperties": false
+          }
+        ],
+        "description": "固定 app_android=/mobile/return/android（ANDROID），app_ios=/mobile/return/ios（IOS），服务端校验会话平台并使用配置的 canonical HTTPS origin 解析；/connection 不返回该 origin。首次认领追加 merchantTxnId 并冻结最终 URL，重放不重新解析。预设或 custom 地址不保证已完成 App Link 部署或自动唤回。"
+      },
+      "PaymentCreate": {
+        "type": "object",
+        "properties": {
+          "requestId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
+          },
+          "sceneId": {
+            "const": "one_time"
+          },
+          "integration": {
+            "type": "string",
+            "const": "native-sdk"
+          },
+          "amount": {
+            "$ref": "#/components/schemas/Amount"
+          },
+          "customer": {
+            "$ref": "#/components/schemas/CustomerChoice"
+          },
+          "returnTarget": {
+            "$ref": "#/components/schemas/ReturnTarget"
+          }
+        },
+        "required": [
+          "requestId",
+          "sceneId",
+          "integration",
+          "amount",
+          "customer",
+          "returnTarget"
+        ],
+        "additionalProperties": false,
+        "description": "首批只定义 ANDROID/IOS 的 native-sdk 一次性 SALE；platform 从会话取得。WEB SDK、SUBSCRIBE/AUTH/Checkout/Direct API 写入契约后续补齐，不以本 schema 宣称可调用。"
+      },
+      "Refresh": {
+        "type": "object",
+        "properties": {
+          "state": {
+            "type": "string",
+            "enum": [
+              "idle",
+              "queued",
+              "running",
+              "failed"
+            ]
+          },
+          "lastAttemptAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "Z$",
+                "description": "UTC ISO 8601 时间。"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "lastErrorCode": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "pollAfterSeconds": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "state",
+          "lastAttemptAt",
+          "lastErrorCode",
+          "pollAfterSeconds"
+        ],
+        "additionalProperties": false
+      },
+      "StatusSummary": {
+        "type": "object",
+        "properties": {
+          "normalized": {
+            "type": "string",
+            "enum": [
+              "created",
+              "requires_action",
+              "processing",
+              "succeeded",
+              "failed",
+              "cancelled",
+              "unknown"
+            ]
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "server",
+              "query",
+              "webhook"
+            ]
+          },
+          "verified": {
+            "type": "boolean"
+          },
+          "observedAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "Z$",
+                "description": "UTC ISO 8601 时间。"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "isTerminal": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "normalized",
+          "source",
+          "verified",
+          "observedAt",
+          "isTerminal"
+        ],
+        "additionalProperties": false,
+        "description": "verified 是可信服务端证据，不代表付款成功；无 Provider 观察时 observedAt 可为空。"
+      },
+      "PaymentStatus": {
+        "type": "object",
+        "properties": {
+          "normalized": {
+            "type": "string",
+            "enum": [
+              "created",
+              "requires_action",
+              "processing",
+              "succeeded",
+              "failed",
+              "cancelled",
+              "unknown"
+            ]
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "server",
+              "query",
+              "webhook"
+            ]
+          },
+          "verified": {
+            "type": "boolean"
+          },
+          "observedAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "Z$",
+                "description": "UTC ISO 8601 时间。"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "isTerminal": {
+            "type": "boolean"
+          },
+          "rawPaymentStatus": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "I",
+                  "U",
+                  "P",
+                  "A",
+                  "O",
+                  "R",
+                  "N",
+                  "S"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "rawTransactionStatus": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "normalized",
+          "source",
+          "verified",
+          "observedAt",
+          "isTerminal",
+          "rawPaymentStatus",
+          "rawTransactionStatus"
+        ],
+        "additionalProperties": false,
+        "description": "原始值是安全投影。未知 Payment 枚举不能推进可信状态；Transaction F 不能直接变 Payment failed。客户端回调不能设置 verified。 同支付资金结果经核验的可信查询 S 可覆盖 N，递增 revision 并记录脱敏异常；旧 N 不回退 S。一次性退款表达为已知后续缺口，S 不保证最终净收款。"
+      },
+      "ActionReason": {
+        "type": "string",
+        "enum": [
+          "PAYMENT_PROCESSING",
+          "EXTERNAL_ACTION_IN_PROGRESS",
+          "PAYMENT_TERMINAL",
+          "PAYMENT_AUTHORIZED",
+          "PAYMENT_NOT_COMPLETED",
+          "CREATION_NOT_READY",
+          "CHECKOUT_IN_USE",
+          "CHECKOUT_SESSION_ENDED",
+          "PROVIDER_UNAVAILABLE",
+          "CAPABILITY_UNVERIFIED",
+          "CLIENT_UPGRADE_REQUIRED",
+          "FUNDS_OPERATION_PENDING",
+          "PAYMENT_EXPIRED"
+        ],
+        "description": "未知 reasonCode 使用通用提示。PAYMENT_EXPIRED 表示服务端保守继续窗口已到期，不证明 Provider 已关单。"
+      },
+      "PaymentAction": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "CONTINUE_SDK",
+                  "OPEN_CHECKOUT",
+                  "QUERY",
+                  "CAPTURE",
+                  "VOID",
+                  "VIEW_SUBSCRIPTION"
+                ]
+              },
+              "enabled": {
+                "const": true
+              },
+              "reasonCode": {
+                "type": "null"
+              }
+            },
+            "required": [
+              "type",
+              "enabled",
+              "reasonCode"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "CONTINUE_SDK",
+                  "OPEN_CHECKOUT",
+                  "QUERY",
+                  "CAPTURE",
+                  "VOID",
+                  "VIEW_SUBSCRIPTION"
+                ]
+              },
+              "enabled": {
+                "const": false
+              },
+              "reasonCode": {
+                "$ref": "#/components/schemas/ActionReason"
+              }
+            },
+            "required": [
+              "type",
+              "enabled",
+              "reasonCode"
+            ],
+            "additionalProperties": false
+          }
+        ],
+        "description": "集合承载 A1 已确认语义；出现枚举不表示首批交付该动作。客户端未知动作隐藏；未知原因通用提示。"
+      },
+      "Attention": {
+        "anyOf": [
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "creation_unknown",
+                  "continue_sdk",
+                  "continue_checkout"
+                ]
+              }
+            },
+            "required": [
+              "kind"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "description": "未知 kind 按无可执行操作处理并提示刷新，不启动 SDK 或资金动作。"
+      },
+      "PaymentSummary": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/Id"
+          },
+          "merchantTxnId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "sceneId": {
+            "$ref": "#/components/schemas/SceneId"
+          },
+          "integration": {
+            "$ref": "#/components/schemas/Integration"
+          },
+          "txnType": {
+            "type": "string",
+            "enum": [
+              "SALE",
+              "AUTH"
+            ]
+          },
+          "amount": {
+            "$ref": "#/components/schemas/Amount"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "Z$",
+            "description": "UTC ISO 8601 时间。"
+          },
+          "creationState": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "ready",
+              "unknown",
+              "rejected"
+            ]
+          },
+          "status": {
+            "$ref": "#/components/schemas/StatusSummary"
+          },
+          "attention": {
+            "$ref": "#/components/schemas/Attention"
+          },
+          "allowedActions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PaymentAction"
+            }
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "支付资源字段的单调版本；currentCustomerId 为会话信息，不参与 revision 比较。"
+          },
+          "recordExpiresAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "Z$",
+            "description": "UTC ISO 8601 时间。"
+          },
+          "refresh": {
+            "$ref": "#/components/schemas/Refresh"
+          }
+        },
+        "required": [
+          "id",
+          "merchantTxnId",
+          "sceneId",
+          "integration",
+          "txnType",
+          "amount",
+          "createdAt",
+          "creationState",
+          "status",
+          "attention",
+          "allowedActions",
+          "revision",
+          "recordExpiresAt",
+          "refresh"
+        ],
+        "additionalProperties": false
+      },
+      "PaymentView": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/Id"
+          },
+          "merchantTxnId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "sceneId": {
+            "$ref": "#/components/schemas/SceneId"
+          },
+          "integration": {
+            "$ref": "#/components/schemas/Integration"
+          },
+          "txnType": {
+            "type": "string",
+            "enum": [
+              "SALE",
+              "AUTH"
+            ]
+          },
+          "amount": {
+            "$ref": "#/components/schemas/Amount"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "Z$",
+            "description": "UTC ISO 8601 时间。"
+          },
+          "creationState": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "ready",
+              "unknown",
+              "rejected"
+            ],
+            "description": "客户端遇到未知值时禁止执行动作并提示刷新，仍可通过既定安全查询恢复。"
+          },
+          "status": {
+            "$ref": "#/components/schemas/PaymentStatus"
+          },
+          "attention": {
+            "$ref": "#/components/schemas/Attention"
+          },
+          "allowedActions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PaymentAction"
+            }
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "支付资源字段的单调版本；currentCustomerId 为会话信息，不参与 revision 比较。"
+          },
+          "recordExpiresAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "Z$",
+            "description": "UTC ISO 8601 时间。"
+          },
+          "refresh": {
+            "$ref": "#/components/schemas/Refresh"
+          },
+          "requestId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
+          },
+          "platform": {
+            "$ref": "#/components/schemas/Platform"
+          },
+          "customerId": {
+            "$ref": "#/components/schemas/Id"
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "merchantNo": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "paymentId": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "merchantNo",
+                  "paymentId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "fundsState": {
+            "type": "string",
+            "enum": [
+              "not_applicable",
+              "authorized",
+              "captured",
+              "voided",
+              "unknown"
+            ]
+          },
+          "providerExpiresAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "Z$",
+                "description": "UTC ISO 8601 时间。"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "currentCustomerId": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Id"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "响应时本会话实际当前客户；可与该支付冻结的 customerId 不同。幂等重放不再切换。 不参与支付 revision 比较；并发引用不明时 GET /session 核对，不以响应抵达顺序覆盖。"
+          }
+        },
+        "required": [
+          "id",
+          "merchantTxnId",
+          "sceneId",
+          "integration",
+          "txnType",
+          "amount",
+          "createdAt",
+          "creationState",
+          "status",
+          "attention",
+          "allowedActions",
+          "revision",
+          "recordExpiresAt",
+          "refresh",
+          "requestId",
+          "platform",
+          "customerId",
+          "provider",
+          "fundsState",
+          "providerExpiresAt",
+          "currentCustomerId"
+        ],
+        "additionalProperties": false,
+        "description": "Demo 支付视图。provider 尚未建立时为 null。paymentId 有效期30分钟已获用户确认；未取得可靠起算时间/到期时间时 providerExpiresAt 仍为 null，不能用 Demo createdAt、recordExpiresAt 或 SDK 本地缓存 TTL 填充。B0 请求仅 SALE，AUTH 输出保留 A1 结构；APP×AUTH 支持性已获用户确认，Demo AUTH 写入与真实验收按后续批次完成。"
+      },
+      "PaymentPage": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PaymentSummary"
+            }
+          },
+          "nextCursor": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "additionalProperties": false,
+        "description": "nextCursor 为不透明游标；末页为 null。"
+      },
+      "CustomerPage": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Customer"
+            }
+          },
+          "nextCursor": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "additionalProperties": false,
+        "description": "nextCursor 为不透明游标；末页为 null。"
+      },
+      "CheckoutSessionCreate": {
+        "type": "object",
+        "properties": {
+          "operationId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
+          },
+          "supersedes": {
+            "$ref": "#/components/schemas/Id"
+          }
+        },
+        "required": [
+          "operationId"
+        ],
+        "additionalProperties": false,
+        "description": "supersedes 仅限本会话同一支付租约；结束旧租约且无有效租约时按普通领取处理。"
+      },
+      "CheckoutSession": {
+        "type": "object",
+        "properties": {
+          "checkoutSessionId": {
+            "$ref": "#/components/schemas/Id"
+          },
+          "leaseExpiresAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "Z$",
+            "description": "UTC ISO 8601 时间。"
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "sdk": {
+            "type": "object",
+            "properties": {
+              "merchantNo": {
+                "type": "string",
+                "minLength": 1
+              },
+              "environment": {
+                "const": "sandbox",
+                "type": "string"
+              },
+              "configRevision": {
+                "type": "string",
+                "minLength": 1
+              },
+              "paymentId": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": [
+              "merchantNo",
+              "environment",
+              "configRevision",
+              "paymentId"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "checkoutSessionId",
+          "leaseExpiresAt",
+          "revision",
+          "sdk"
+        ],
+        "additionalProperties": false,
+        "description": "首批只返回 SDK 启动资料。不得据此创建新的 Payment 或自动 confirm。租约不能撤销已发出的 SDK 标识，Provider 同 paymentId 最多成功扣款一次已获用户确认；租约只处理 Demo 并发启动。"
+      },
+      "ErrorAction": {
+        "type": "string",
+        "enum": [
+          "NONE",
+          "RETRY_SAME_REQUEST",
+          "REFRESH",
+          "RECOVER_OPERATION",
+          "RENEW_SESSION",
+          "START_NEW_SESSION",
+          "UPGRADE_CLIENT"
+        ],
+        "description": "客户端遇到未知枚举按 NONE 处理；新增枚举值不算破坏性变更。"
+      },
+      "Error": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "minLength": 1
+          },
+          "retryable": {
+            "type": "boolean"
+          },
+          "action": {
+            "$ref": "#/components/schemas/ErrorAction"
+          },
+          "retryAfter": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "execution": {
+            "type": "string",
+            "enum": [
+              "not_started",
+              "accepted",
+              "unknown",
+              "completed",
+              "not_applicable"
+            ]
+          },
+          "fieldErrors": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "field": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "code": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "required": [
+                "field",
+                "code"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "currentView": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PaymentView"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "operationId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "checkoutSessionId": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Id"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "leaseExpiresAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "Z$",
+                "description": "UTC ISO 8601 时间。"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "code",
+          "retryable",
+          "action",
+          "retryAfter",
+          "execution",
+          "fieldErrors",
+          "currentView",
+          "operationId",
+          "checkoutSessionId",
+          "leaseExpiresAt"
+        ],
+        "additionalProperties": false,
+        "description": "稳定 code；仅返回已确认属于当前会话的资源。currentView 首批仅 PaymentView。未结构化响应按 unknown 恢复，不能按 HTTP 自动重扣。"
+      },
+      "ErrorEnvelope": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "$ref": "#/components/schemas/Error"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "additionalProperties": false
+      },
+      "Operation": {
+        "type": "object",
+        "properties": {
+          "operationId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "payment_create",
+              "subscription_create",
+              "checkout_session",
+              "capture",
+              "void",
+              "subscription_change",
+              "subscription_cancel",
+              "subscription_renewal",
+              "customer_create"
+            ]
+          },
+          "execution": {
+            "type": "string",
+            "enum": [
+              "accepted",
+              "unknown",
+              "completed"
+            ]
+          },
+          "outcome": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "scheduled",
+                  "effective",
+                  "rejected"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "resource": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "payment",
+                      "subscription",
+                      "checkout_session",
+                      "customer"
+                    ]
+                  },
+                  "id": {
+                    "$ref": "#/components/schemas/Id"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "id"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "leaseState": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "active",
+                  "released",
+                  "expired",
+                  "superseded"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Error"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "operationId",
+          "type",
+          "execution",
+          "outcome",
+          "resource",
+          "error"
+        ],
+        "additionalProperties": false,
+        "description": "创建 requestId 是本操作的 operationId，不额外生成键。outcome 不是支付成败。GET 返回 200；leaseState 只在 checkout_session 类型出现，结束租约不重写历史 outcome。",
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "type": {
+                  "const": "checkout_session"
+                }
+              }
+            },
+            "then": {
+              "required": [
+                "leaseState"
+              ]
+            },
+            "else": {
+              "not": {
+                "required": [
+                  "leaseState"
+                ]
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "execution": {
+                  "enum": [
+                    "accepted",
+                    "unknown"
+                  ]
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "outcome": {
+                  "type": "null"
+                }
+              }
+            },
+            "else": {
+              "properties": {
+                "outcome": {
+                  "type": "string",
+                  "enum": [
+                    "scheduled",
+                    "effective",
+                    "rejected"
+                  ]
+                }
+              }
+            }
+          }
+        ]
+      },
+      "RequiredWhen": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "field": {
+                "type": "string",
+                "minLength": 1
+              },
+              "equals": {
+                "type": [
+                  "string",
+                  "number",
+                  "boolean",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "field",
+              "equals"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "field": {
+                "type": "string",
+                "minLength": 1
+              },
+              "in": {
+                "type": "array",
+                "items": {
+                  "type": [
+                    "string",
+                    "number",
+                    "boolean",
+                    "null"
+                  ]
+                },
+                "minItems": 1
+              }
+            },
+            "required": [
+              "field",
+              "in"
+            ],
+            "additionalProperties": false
+          }
+        ],
+        "description": "仅单层条件；无递归与脚本表达式。"
+      },
+      "ParameterRule": {
+        "type": "object",
+        "properties": {
+          "field": {
+            "type": "string",
+            "minLength": 1
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "amount",
+              "enum",
+              "integer",
+              "date",
+              "text",
+              "httpsUrl"
+            ]
+          },
+          "min": {
+            "type": "number"
+          },
+          "max": {
+            "type": "number"
+          },
+          "precision": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "enum": {
+            "type": "array",
+            "items": {
+              "type": [
+                "string",
+                "number",
+                "boolean",
+                "null"
+              ]
+            }
+          },
+          "requiredWhen": {
+            "$ref": "#/components/schemas/RequiredWhen"
+          },
+          "errorCode": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "field",
+          "type",
+          "errorCode"
+        ],
+        "additionalProperties": false,
+        "description": "有限表单规则；min/max 等只在适用类型返回。requiredWhen 缺省时无附加条件，不代表可跳过 OpenAPI 必填校验。"
+      },
+      "CapabilityCombination": {
+        "type": "object",
+        "properties": {
+          "sceneId": {
+            "$ref": "#/components/schemas/SceneId"
+          },
+          "integration": {
+            "$ref": "#/components/schemas/Integration"
+          },
+          "platform": {
+            "$ref": "#/components/schemas/Platform"
+          },
+          "availability": {
+            "$ref": "#/components/schemas/Availability"
+          },
+          "verification": {
+            "$ref": "#/components/schemas/Verification"
+          },
+          "reasonCode": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "rules": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ParameterRule"
+            }
+          }
+        },
+        "required": [
+          "sceneId",
+          "integration",
+          "platform",
+          "availability",
+          "verification",
+          "reasonCode",
+          "rules"
+        ],
+        "additionalProperties": false,
+        "description": "组合级门禁：available/conditional 可执行，conditional 展示证据提示；planned/unavailable/未知值不可执行。sandbox_verified 与部署可用性分离，合成示例不证明部署或交易通过。"
+      },
+      "Scene": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/SceneId"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "additionalProperties": false
+      },
+      "Preset": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "enum": [
+              "usd_standard_5",
+              "usd_3ds_50"
+            ]
+          },
+          "sceneIds": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SceneId"
+            }
+          },
+          "integrations": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Integration"
+            }
+          },
+          "platforms": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Platform"
+            }
+          },
+          "defaults": {
+            "type": "object",
+            "properties": {
+              "amount": {
+                "$ref": "#/components/schemas/Amount"
+              }
+            },
+            "required": [],
+            "additionalProperties": false
+          },
+          "availability": {
+            "$ref": "#/components/schemas/Availability"
+          },
+          "verification": {
+            "$ref": "#/components/schemas/Verification"
+          },
+          "reasonCode": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "sceneIds",
+          "integrations",
+          "platforms",
+          "defaults",
+          "availability",
+          "verification",
+          "reasonCode"
+        ],
+        "additionalProperties": false,
+        "description": "usd_3ds_50 是预设金额/旅程，不保证发生 3DS。后续订阅 defaults 随阶段 C schema 扩展。"
+      },
+      "Capabilities": {
+        "type": "object",
+        "properties": {
+          "capabilitiesRevision": {
+            "type": "string",
+            "minLength": 1
+          },
+          "scenes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Scene"
+            }
+          },
+          "presets": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Preset"
+            }
+          },
+          "combinations": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CapabilityCombination"
+            }
+          },
+          "limits": {
+            "type": "object",
+            "properties": {
+              "customersPerSession": {
+                "type": "integer",
+                "minimum": 1
+              }
+            },
+            "required": [
+              "customersPerSession"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "capabilitiesRevision",
+          "scenes",
+          "presets",
+          "combinations",
+          "limits"
+        ],
+        "additionalProperties": false,
+        "description": "场景目录、快捷预设、组合与参数规则分离；combinations 容器已获 Claude 结构可接入确认。执行门禁取 availability，证据等级取 verification；conditional 可执行并提示证据等级。"
+      },
+      "CurrentCustomerSet": {
+        "type": "object",
+        "properties": {
+          "customerId": {
+            "$ref": "#/components/schemas/Id"
+          }
+        },
+        "required": [
+          "customerId"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "x-b0-confirmed-facts": [
+    {
+      "id": "PROVIDER_PAYMENT_TTL",
+      "verification": "user_confirmed",
+      "confirmedOn": "2026-10-26",
+      "validForSeconds": 1800,
+      "detail": "用户确认 paymentId 有效期为30分钟；不等同Demo记录保留期或SDK本地回跳上下文期限。不由此推定过期后的查询/在途交易行为。"
+    },
+    {
+      "id": "PROVIDER_DUPLICATE_CHARGE",
+      "verification": "user_confirmed",
+      "confirmedOn": "2026-10-26",
+      "detail": "同一个 paymentId 最多成功扣款一次。此上游保证不代替Demo归属、幂等和状态规则，也不改变AUTH后CAPTURE/VOID与订阅后续独立扣款的语义；不要求以Provider内部实现审计为开工门禁。"
+    },
+    {
+      "id": "APP_AUTH_SUBSCRIBE",
+      "verification": "user_confirmed",
+      "confirmedOn": "2026-10-26",
+      "platforms": [
+        "ANDROID",
+        "IOS"
+      ],
+      "detail": "Android/iOS APP模式均支持AUTH预授权及SUBSCRIBE首次订阅；公开SDK创建接口定义APP/osType与相应参数。AUTH+DIRECT与SALE+SUBSCRIBE为不同场景，不表示AUTH+SUBSCRIBE可用。Demo首批结构仍只覆盖SALE，后批补齐对应接口；未完成真实Sandbox验收。",
+      "sources": [
+        "https://developers.onerway.com/payments/api-reference/endpoints/sdk-create-transaction"
+      ]
+    },
+    {
+      "id": "WEB_SDK_SCENARIOS",
+      "verification": "documented",
+      "checkedOn": "2026-10-26",
+      "detail": "Web SDK支持一次性支付（SALE+DIRECT）、首次订阅（SALE+SUBSCRIBE）和预授权（AUTH+DIRECT）。后续请款/撤销及订阅续费由服务端适用API处理；具体支付方式与商户配置仍适用。",
+      "sources": [
+        "https://developers.onerway.com/payments/online-payments/sdk",
+        "https://developers.onerway.com/payments/online-payments/scenarios/pre-authorization",
+        "https://developers.onerway.com/payments/online-payments/scenarios/subscriptions"
+      ]
+    }
+  ],
+  "x-client-response-compatibility": {
+    "unknownFields": "ignore",
+    "unknownErrorAction": "NONE",
+    "unknownAttentionOrCreationState": "禁止执行动作并提示刷新；允许既定安全查询恢复",
+    "unknownAvailabilityOrAction": "不可执行",
+    "additiveResponseChanges": "新增响应字段或枚举值不算破坏性变更；严格 schema 校验服务端输出和示例，不用于客户端拒绝未知字段。请求校验不放宽。",
+    "unknownReasonCode": "通用原因提示",
+    "unknownAction": "隐藏",
+    "unknownState": "rawPaymentStatus/Refresh.state/Operation.execution 未知时不推断成功或完成，不放行资金动作，提示刷新",
+    "minimumClientBuild": "新增响应字段或枚举值不提高最低构建号"
+  },
+  "x-demo-continuation-window": {
+    "source": "用户转述 Claude/糖糖 rhcn-acquiring@f3cd2a75 源码调研，本端未独立回读或实测",
+    "ttlMinutesDefault": 30,
+    "providerDictionary": "CHECKOUT_MIMUTES",
+    "deadline": "首次 Provider 创建请求发送时间 + 本次服务端 TTL 配置快照",
+    "expired": "CONTINUE_SDK disabled / PAYMENT_EXPIRED，attention=null；仍可 QUERY，不将本地到期当 Provider N",
+    "providerExpiresAt": "不使用保守窗口填充，可靠 Provider 时间未知时 null"
+  },
+  "x-error-code-catalog": {
+    "frozen": [
+      "RATE_LIMITED",
+      "RECORD_EXPIRED",
+      "SESSION_EXPIRED",
+      "REQUEST_NOT_FOUND",
+      "SESSION_MISSING",
+      "SESSION_INVALID"
+    ],
+    "authentication401": {
+      "SESSION_MISSING": "无凭证",
+      "SESSION_EXPIRED": "凭证已过期",
+      "SESSION_INVALID": "无效凭证"
+    },
+    "note": "既有已确认错误码保留；401不续期。未知错误码按通用提示与安全 action 兜底。"
+  }
+}
