@@ -1,0 +1,2454 @@
+{
+  "version": "0.1.0-b0",
+  "openapi": "./demo-v1.openapi.json",
+  "description": "合成脱敏共享样例，供首批 schema 校验和客户端解析；无实测交易、真实凭证或可用服务声明。schema 字段指向 OpenAPI components.schemas。request.parameters 含路径/query 值；认证凭证一律不记录。样例非顺序运行脚本，不调用上游。",
+  "x-b0-example-conventions": [
+    "所有非公开请求由测试夹具注入有效会话，示例不携带 Authorization/Cookie。",
+    "WEB Set-Cookie 线协议未冻结，session-web 仅校验 body 与会话期限 header；不得声称 Web 完整接入就绪。",
+    "RATE_LIMITED、RECORD_EXPIRED、SESSION_EXPIRED、REQUEST_NOT_FOUND 是 A1 未命名错误的 B0 候选码，待与实现/Claude 确认；已确认码保持原值。",
+    "Web/Native SDK 真实生命周期、Provider TTL 与防重复扣款不能由这些 fixtures 证明。"
+  ],
+  "examples": [
+    {
+      "name": "connection",
+      "description": "build=1 仅是合成数据，不决定实际最低版本。",
+      "method": "GET",
+      "path": "/connection",
+      "request": {
+        "headers": {
+          "X-Demo-Client": "ANDROID/1"
+        },
+        "parameters": {
+          "platform": "ANDROID",
+          "clientBuild": 1
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Cache-Control": "no-store"
+        },
+        "body": {
+          "environment": "sandbox",
+          "apiVersion": "v1",
+          "minimumClientBuild": 1,
+          "compatible": true,
+          "capabilitiesRevision": "example-capabilities-1",
+          "sdk": {
+            "merchantNo": "merchant_public_example",
+            "environment": "sandbox",
+            "configRevision": "example-config-1"
+          }
+        },
+        "schema": "Connection"
+      }
+    },
+    {
+      "name": "session-native",
+      "description": "token 为无效合成占位值；真实 token 不应出现在共享样例或日志。",
+      "method": "POST",
+      "path": "/sessions",
+      "request": {
+        "headers": {
+          "X-Demo-Client": "ANDROID/1"
+        },
+        "body": {
+          "platform": "ANDROID",
+          "clientBuild": 1
+        },
+        "schema": "SessionCreate"
+      },
+      "response": {
+        "status": 201,
+        "headers": {
+          "Cache-Control": "no-store",
+          "X-Demo-Session-Expires-At": "2026-11-24T00:00:00Z"
+        },
+        "body": {
+          "sessionRef": "ses_example",
+          "sessionToken": "synthetic-invalid-session-token"
+        },
+        "schema": "NativeSessionIssued"
+      }
+    },
+    {
+      "name": "session-web",
+      "description": "Web body 无 token；Set-Cookie 名称未定，未伪造完整可用 Cookie 头。",
+      "method": "POST",
+      "path": "/sessions",
+      "request": {
+        "headers": {
+          "X-Demo-Client": "WEB/1"
+        },
+        "body": {
+          "platform": "WEB",
+          "clientBuild": 1
+        },
+        "schema": "SessionCreate"
+      },
+      "response": {
+        "status": 201,
+        "headers": {
+          "Cache-Control": "no-store",
+          "X-Demo-Session-Expires-At": "2026-11-24T00:00:00Z"
+        },
+        "body": {
+          "sessionRef": "ses_web_example"
+        },
+        "schema": "WebSessionIssued"
+      }
+    },
+    {
+      "name": "session-empty",
+      "description": "",
+      "method": "GET",
+      "path": "/session",
+      "request": {
+        "headers": {
+          "X-Demo-Client": "ANDROID/1"
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Cache-Control": "no-store",
+          "X-Demo-Session-Expires-At": "2026-11-24T00:00:00Z"
+        },
+        "body": {
+          "sessionRef": "ses_example",
+          "currentCustomerId": null,
+          "capabilitiesRevision": "example-capabilities-1"
+        },
+        "schema": "SessionView"
+      }
+    },
+    {
+      "name": "session-renew",
+      "description": "无 JSON body，不轮换 token。",
+      "method": "POST",
+      "path": "/session/renew",
+      "request": {
+        "headers": {
+          "X-Demo-Client": "ANDROID/1"
+        }
+      },
+      "response": {
+        "status": 204,
+        "headers": {
+          "Cache-Control": "no-store",
+          "X-Demo-Session-Expires-At": "2026-11-24T00:00:00Z"
+        }
+      }
+    },
+    {
+      "name": "capabilities-gated",
+      "description": "仅验证未部署/未验收门禁结构；与下面条件性支付响应各自是独立 mock 场景，不构成连线交易证据。",
+      "method": "GET",
+      "path": "/capabilities",
+      "request": {
+        "headers": {
+          "X-Demo-Client": "ANDROID/1"
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Cache-Control": "no-store",
+          "X-Demo-Session-Expires-At": "2026-11-24T00:00:00Z"
+        },
+        "body": {
+          "capabilitiesRevision": "example-capabilities-1",
+          "scenes": [
+            {
+              "id": "one_time"
+            }
+          ],
+          "presets": [
+            {
+              "id": "usd_standard_5",
+              "sceneIds": [
+                "one_time"
+              ],
+              "integrations": [
+                "native-sdk"
+              ],
+              "platforms": [
+                "ANDROID",
+                "IOS"
+              ],
+              "defaults": {
+                "amount": {
+                  "minor": 500,
+                  "currency": "USD"
+                }
+              },
+              "availability": "planned",
+              "verification": "unverified",
+              "reasonCode": "CAPABILITY_UNVERIFIED"
+            }
+          ],
+          "combinations": [
+            {
+              "sceneId": "one_time",
+              "integration": "native-sdk",
+              "platform": "ANDROID",
+              "availability": "conditional",
+              "verification": "unverified",
+              "reasonCode": "CAPABILITY_UNVERIFIED",
+              "rules": [
+                {
+                  "field": "amount.minor",
+                  "type": "amount",
+                  "min": 1,
+                  "max": 1000000,
+                  "precision": 0,
+                  "errorCode": "INVALID_AMOUNT"
+                }
+              ]
+            }
+          ],
+          "limits": {
+            "customersPerSession": 20
+          }
+        },
+        "schema": "Capabilities"
+      }
+    },
+    {
+      "name": "customer-create",
+      "description": "",
+      "method": "POST",
+      "path": "/customers",
+      "request": {
+        "headers": {
+          "X-Demo-Client": "ANDROID/1"
+        },
+        "body": {
+          "operationId": "33333333-3333-4333-8333-333333333333",
+          "label": "测试客户 A"
+        },
+        "schema": "CustomerCreate"
+      },
+      "response": {
+        "status": 201,
+        "headers": {
+          "Cache-Control": "no-store",
+          "X-Demo-Session-Expires-At": "2026-11-24T00:00:00Z"
+        },
+        "body": {
+          "id": "cus_example",
+          "label": "测试客户 A",
+          "createdAt": "2026-10-25T00:00:00Z",
+          "currentCustomerId": "cus_example"
+        },
+        "schema": "CustomerCreated"
+      }
+    },
+    {
+      "name": "customers-page",
+      "description": "",
+      "method": "GET",
+      "path": "/customers",
+      "request": {
+        "headers": {
+          "X-Demo-Client": "ANDROID/1"
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Cache-Control": "no-store",
+          "X-Demo-Session-Expires-At": "2026-11-24T00:00:00Z"
+        },
+        "body": {
+          "items": [
+            {
+              "id": "cus_example",
+              "label": "测试客户 A",
+              "createdAt": "2026-10-25T00:00:00Z"
+            }
+          ],
+          "nextCursor": null
+        },
+        "schema": "CustomerPage"
+      }
+    },
+    {
+      "name": "current-customer",
+      "description": "",
+      "method": "PUT",
+      "path": "/session/current-customer",
+      "request": {
+        "headers": {
+          "X-Demo-Client": "ANDROID/1"
+        },
+        "body": {
+          "customerId": "cus_example"
+        },
+        "schema": "CurrentCustomerSet"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Cache-Control": "no-store",
+          "X-Demo-Session-Expires-At": "2026-11-24T00:00:00Z"
+        },
+        "body": {
+          "sessionRef": "ses_example",
+          "currentCustomerId": "cus_example",
+          "capabilitiesRevision": "example-capabilities-1"
+        },
+        "schema": "SessionView"
+      }
+    },
+    {
+      "name": "payment-ready",
+      "description": "conditional/unverified 组合允许执行并提示证据等级；app_android 由服务端解析。合成 SDK SALE 示例不代表已部署或真实交易。",
+      "method": "POST",
+      "path": "/payments",
+      "request": {
+        "headers": {
+          "X-Demo-Client": "ANDROID/1"
+        },
+        "body": {
+          "requestId": "11111111-1111-4111-8111-111111111111",
+          "sceneId": "one_time",
+          "integration": "native-sdk",
+          "amount": {
+            "minor": 500,
+            "currency": "USD"
+          },
+          "customer": {
+            "kind": "current"
+          },
+          "returnTarget": {
+            "kind": "preset",
+            "id": "app_android"
+          }
+        },
+        "schema": "PaymentCreate"
+      },
+      "response": {
+        "status": 201,
+        "headers": {
+          "Cache-Control": "no-store",
+          "X-Demo-Session-Expires-At": "2026-11-24T00:00:00Z"
+        },
+        "body": {
+          "id": "pay_example",
+          "requestId": "11111111-1111-4111-8111-111111111111",
+          "merchantTxnId": "demo_txn_example",
+          "sceneId": "one_time",
+          "revision": 1,
+          "platform": "ANDROID",
+          "integration": "native-sdk",
+          "txnType": "SALE",
+          "customerId": "cus_example",
+          "amount": {
+            "minor": 500,
+            "currency": "USD"
+          },
+          "createdAt": "2026-10-25T00:00:00Z",
+          "creationState": "ready",
+          "provider": {
+            "merchantNo": "merchant_public_example",
+            "paymentId": "provider_payment_example"
+          },
+          "status": {
+            "normalized": "processing",
+            "rawPaymentStatus": "U",
+            "rawTransactionStatus": null,
+            "source": "query",
+            "verified": true,
+            "observedAt": "2026-10-25T00:00:00Z",
+            "isTerminal": false
+          },
+          "fundsState": "not_applicable",
+          "attention": {
+            "kind": "continue_sdk"
+          },
+          "recordExpiresAt": "2026-11-24T00:00:00Z",
+          "providerExpiresAt": null,
+          "refresh": {
+            "state": "idle",
+            "lastAttemptAt": "2026-10-25T00:00:00Z",
+            "lastErrorCode": null,
+            "pollAfterSeconds": null
+          },
+          "allowedActions": [
+            {
+              "type": "QUERY",
+              "enabled": true,
+              "reasonCode": null
+            },
+            {
+              "type": "CONTINUE_SDK",
+              "enabled": true,
+              "reasonCode": null
+            }
+          ],
+          "currentCustomerId": "cus_example"
+        },
+        "schema": "PaymentView"
+      }
+    },
+    {
+      "name": "payment-replayed",
+      "description": "原键原参数返回同一 Demo id/merchantTxnId/Provider paymentId。",
+      "method": "POST",
+      "path": "/payments",
+      "request": {
+        "headers": {
+          "X-Demo-Client": "ANDROID/1"
+        },
+        "body": {
+          "requestId": "11111111-1111-4111-8111-111111111111",
+          "sceneId": "one_time",
+          "integration": "native-sdk",
+          "amount": {
+            "minor": 500,
+            "currency": "USD"
+          },
+          "customer": {
+            "kind": "current"
+          },
+          "returnTarget": {
+            "kind": "preset",
+            "id": "app_android"
+          }
+        },
+        "schema": "PaymentCreate"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Cache-Control": "no-store",
+          "X-Demo-Session-Expires-At": "2026-11-24T00:00:00Z"
+        },
+        "body": {
+          "id": "pay_example",
+          "requestId": "11111111-1111-4111-8111-111111111111",
+          "merchantTxnId": "demo_txn_example",
+          "sceneId": "one_time",
+          "revision": 1,
+          "platform": "ANDROID",
+          "integration": "native-sdk",
+          "txnType": "SALE",
+          "customerId": "cus_example",
+          "amount": {
+            "minor": 500,
+            "currency": "USD"
+          },
+          "createdAt": "2026-10-25T00:00:00Z",
+          "creationState": "ready",
+          "provider": {
+            "merchantNo": "merchant_public_example",
+            "paymentId": "provider_payment_example"
+          },
+          "status": {
+            "normalized": "processing",
+            "rawPaymentStatus": "U",
+            "rawTransactionStatus": null,
+            "source": "query",
+            "verified": true,
+            "observedAt": "2026-10-25T00:00:00Z",
+            "isTerminal": false
+          },
+          "fundsState": "not_applicable",
+          "attention": {
+            "kind": "continue_sdk"
+          },
+          "recordExpiresAt": "2026-11-24T00:00:00Z",
+          "providerExpiresAt": null,
+          "refresh": {
+            "state": "idle",
+            "lastAttemptAt": "2026-10-25T00:00:00Z",
+            "lastErrorCode": null,
+            "pollAfterSeconds": null
+          },
+          "allowedActions": [
+            {
+              "type": "QUERY",
+              "enabled": true,
+              "reasonCode": null
+            },
+            {
+              "type": "CONTINUE_SDK",
+              "enabled": true,
+              "reasonCode": null
+            }
+          ],
+          "currentCustomerId": "cus_example"
+        },
+        "schema": "PaymentView"
+      }
+    },
+    {
+      "name": "payment-creation-unknown",
+      "description": "保留本地引用；只恢复原请求，不换键或重发上游创建。",
+      "method": "POST",
+      "path": "/payments",
+      "request": {
+        "headers": {
+          "X-Demo-Client": "ANDROID/1"
+        },
+        "body": {
+          "requestId": "11111111-1111-4111-8111-111111111111",
+          "sceneId": "one_time",
+          "integration": "native-sdk",
+          "amount": {
+            "minor": 500,
+            "currency": "USD"
+          },
+          "customer": {
+            "kind": "current"
+          },
+          "returnTarget": {
+            "kind": "preset",
+            "id": "app_android"
+          }
+        },
+        "schema": "PaymentCreate"
+      },
+      "response": {
+        "status": 202,
+        "headers": {
+          "Cache-Control": "no-store",
+          "X-Demo-Session-Expires-At": "2026-11-24T00:00:00Z"
+        },
+        "body": {
+          "id": "pay_example",
+          "requestId": "11111111-1111-4111-8111-111111111111",
+          "merchantTxnId": "demo_txn_example",
+          "sceneId": "one_time",
+          "revision": 1,
+          "platform": "ANDROID",
+          "integration": "native-sdk",
+          "txnType": "SALE",
+          "customerId": "cus_example",
+          "amount": {
+            "minor": 500,
+            "currency": "USD"
+          },
+          "createdAt": "2026-10-25T00:00:00Z",
+          "creationState": "unknown",
+          "provider": null,
+          "status": {
+            "normalized": "unknown",
+            "rawPaymentStatus": null,
+            "rawTransactionStatus": null,
+            "source": "server",
+            "verified": false,
+            "observedAt": null,
+            "isTerminal": false
+          },
+          "fundsState": "not_applicable",
+          "attention": {
+            "kind": "creation_unknown"
+          },
+          "recordExpiresAt": "2026-11-24T00:00:00Z",
+          "providerExpiresAt": null,
+          "refresh": {
+            "state": "queued",
+            "lastAttemptAt": null,
+            "lastErrorCode": null,
+            "pollAfterSeconds": 3
+          },
+          "allowedActions": [
+            {
+              "type": "QUERY",
+              "enabled": true,
+              "reasonCode": null
+            },
+            {
+              "type": "CONTINUE_SDK",
+              "enabled": false,
+              "reasonCode": "CREATION_NOT_READY"
+            }
+          ],
+          "currentCustomerId": "cus_example"
+        },
+        "schema": "PaymentView"
+      }
+    },
+    {
+      "name": "payment-concurrent-pending",
+      "description": "",
+      "method": "POST",
+      "path": "/payments",
+      "request": {
+        "headers": {
+          "X-Demo-Client": "ANDROID/1"
+        },
+        "body": {
+          "requestId": "11111111-1111-4111-8111-111111111111",
+          "sceneId": "one_time",
+          "integration": "native-sdk",
+          "amount": {
+            "minor": 500,
+            "currency": "USD"
+          },
+          "customer": {
+            "kind": "current"
+          },
+          "returnTarget": {
+            "kind": "preset",
+            "id": "app_android"
+          }
+        },
+        "schema": "PaymentCreate"
+      },
+      "response": {
+        "status": 202,
+        "headers": {
+          "Cache-Control": "no-store",
+          "X-Demo-Session-Expires-At": "2026-11-24T00:00:00Z"
+        },
+        "body": {
+          "id": "pay_example",
+          "requestId": "11111111-1111-4111-8111-111111111111",
+          "merchantTxnId": "demo_txn_example",
+          "sceneId": "one_time",
+          "revision": 1,
+          "platform": "ANDROID",
+          "integration": "native-sdk",
+          "txnType": "SALE",
+          "customerId": "cus_example",
+          "amount": {
+            "minor": 500,
+            "currency": "USD"
+          },
+          "createdAt": "2026-10-25T00:00:00Z",
+          "creationState": "pending",
+          "provider": null,
+          "status": {
+            "normalized": "created",
+            "rawPaymentStatus": null,
+            "rawTransactionStatus": null,
+            "source": "server",
+            "verified": false,
+            "observedAt": null,
+            "isTerminal": false
+          },
+          "fundsState": "not_applicable",
+          "attention": null,
+          "recordExpiresAt": "2026-11-24T00:00:00Z",
+          "providerExpiresAt": null,
+          "refresh": {
+            "state": "queued",
+            "lastAttemptAt": null,
+            "lastErrorCode": null,
+            "pollAfterSeconds": 3
+          },
+          "allowedActions": [
+            {
+              "type": "QUERY",
+              "enabled": true,
+              "reasonCode": null
+            },
+            {
+              "type": "CONTINUE_SDK",
+              "enabled": false,
+              "reasonCode": "CREATION_NOT_READY"
+            }
+          ],
+          "currentCustomerId": "cus_example"
+        },
+        "schema": "PaymentView"
+      }
+    },
+    {
+      "name": "payment-recover",
+      "description": "GET 找到 unknown 仍是 200；不是重新执行创建。",
+      "method": "GET",
+      "path": "/payment-requests/{requestId}",
+      "request": {
+        "headers": {
+          "X-Demo-Client": "ANDROID/1"
+        },
+        "parameters": {
+          "requestId": "11111111-1111-4111-8111-111111111111"
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Cache-Control": "no-store",
+          "X-Demo-Session-Expires-At": "2026-11-24T00:00:00Z"
+        },
+        "body": {
+          "id": "pay_example",
+          "requestId": "11111111-1111-4111-8111-111111111111",
+          "merchantTxnId": "demo_txn_example",
+          "sceneId": "one_time",
+          "revision": 1,
+          "platform": "ANDROID",
+          "integration": "native-sdk",
+          "txnType": "SALE",
+          "customerId": "cus_example",
+          "amount": {
+            "minor": 500,
+            "currency": "USD"
+          },
+          "createdAt": "2026-10-25T00:00:00Z",
+          "creationState": "unknown",
+          "provider": null,
+          "status": {
+            "normalized": "unknown",
+            "rawPaymentStatus": null,
+            "rawTransactionStatus": null,
+            "source": "server",
+            "verified": false,
+            "observedAt": null,
+            "isTerminal": false
+          },
+          "fundsState": "not_applicable",
+          "attention": {
+            "kind": "creation_unknown"
+          },
+          "recordExpiresAt": "2026-11-24T00:00:00Z",
+          "providerExpiresAt": null,
+          "refresh": {
+            "state": "queued",
+            "lastAttemptAt": null,
+            "lastErrorCode": null,
+            "pollAfterSeconds": 3
+          },
+          "allowedActions": [
+            {
+              "type": "QUERY",
+              "enabled": true,
+              "reasonCode": null
+            },
+            {
+              "type": "CONTINUE_SDK",
+              "enabled": false,
+              "reasonCode": "CREATION_NOT_READY"
+            }
+          ],
+          "currentCustomerId": "cus_example"
+        },
+        "schema": "PaymentView"
+      }
+    },
+    {
+      "name": "payment-detail",
+      "description": "",
+      "method": "GET",
+      "path": "/payments/{id}",
+      "request": {
+        "headers": {
+          "X-Demo-Client": "ANDROID/1"
+        },
+        "parameters": {
+          "id": "pay_example"
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Cache-Control": "no-store",
+          "X-Demo-Session-Expires-At": "2026-11-24T00:00:00Z"
+        },
+        "body": {
+          "id": "pay_example",
+          "requestId": "11111111-1111-4111-8111-111111111111",
+          "merchantTxnId": "demo_txn_example",
+          "sceneId": "one_time",
+          "revision": 1,
+          "platform": "ANDROID",
+          "integration": "native-sdk",
+          "txnType": "SALE",
+          "customerId": "cus_example",
+          "amount": {
+            "minor": 500,
+            "currency": "USD"
+          },
+          "createdAt": "2026-10-25T00:00:00Z",
+          "creationState": "ready",
+          "provider": {
+            "merchantNo": "merchant_public_example",
+            "paymentId": "provider_payment_example"
+          },
+          "status": {
+            "normalized": "processing",
+            "rawPaymentStatus": "U",
+            "rawTransactionStatus": null,
+            "source": "query",
+            "verified": true,
+            "observedAt": "2026-10-25T00:00:00Z",
+            "isTerminal": false
+          },
+          "fundsState": "not_applicable",
+          "attention": {
+            "kind": "continue_sdk"
+          },
+          "recordExpiresAt": "2026-11-24T00:00:00Z",
+          "providerExpiresAt": null,
+          "refresh": {
+            "state": "idle",
+            "lastAttemptAt": "2026-10-25T00:00:00Z",
+            "lastErrorCode": null,
+            "pollAfterSeconds": null
+          },
+          "allowedActions": [
+            {
+              "type": "QUERY",
+              "enabled": true,
+              "reasonCode": null
+            },
+            {
+              "type": "CONTINUE_SDK",
+              "enabled": true,
+              "reasonCode": null
+            }
+          ],
+          "currentCustomerId": "cus_example"
+        },
+        "schema": "PaymentView"
+      }
+    },
+    {
+      "name": "payment-refresh-processing",
+      "description": "P 只查原支付，不允许再次启动。",
+      "method": "POST",
+      "path": "/payments/{id}/refresh",
+      "request": {
+        "headers": {
+          "X-Demo-Client": "ANDROID/1"
+        },
+        "parameters": {
+          "id": "pay_example"
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Cache-Control": "no-store",
+          "X-Demo-Session-Expires-At": "2026-11-24T00:00:00Z"
+        },
+        "body": {
+          "id": "pay_example",
+          "requestId": "11111111-1111-4111-8111-111111111111",
+          "merchantTxnId": "demo_txn_example",
+          "sceneId": "one_time",
+          "revision": 2,
+          "platform": "ANDROID",
+          "integration": "native-sdk",
+          "txnType": "SALE",
+          "customerId": "cus_example",
+          "amount": {
+            "minor": 500,
+            "currency": "USD"
+          },
+          "createdAt": "2026-10-25T00:00:00Z",
+          "creationState": "ready",
+          "provider": {
+            "merchantNo": "merchant_public_example",
+            "paymentId": "provider_payment_example"
+          },
+          "status": {
+            "normalized": "processing",
+            "rawPaymentStatus": "P",
+            "rawTransactionStatus": null,
+            "source": "query",
+            "verified": true,
+            "observedAt": "2026-10-25T00:00:00Z",
+            "isTerminal": false
+          },
+          "fundsState": "not_applicable",
+          "attention": null,
+          "recordExpiresAt": "2026-11-24T00:00:00Z",
+          "providerExpiresAt": null,
+          "refresh": {
+            "state": "queued",
+            "lastAttemptAt": "2026-10-25T00:00:00Z",
+            "lastErrorCode": null,
+            "pollAfterSeconds": 3
+          },
+          "allowedActions": [
+            {
+              "type": "QUERY",
+              "enabled": true,
+              "reasonCode": null
+            },
+            {
+              "type": "CONTINUE_SDK",
+              "enabled": false,
+              "reasonCode": "PAYMENT_PROCESSING"
+            }
+          ],
+          "currentCustomerId": "cus_example"
+        },
+        "schema": "PaymentView"
+      }
+    },
+    {
+      "name": "payment-stale-read",
+      "description": "查询失败保留旧 observedAt、状态和 verified，不冒充最新核验。",
+      "method": "GET",
+      "path": "/payments/{id}",
+      "request": {
+        "headers": {
+          "X-Demo-Client": "ANDROID/1"
+        },
+        "parameters": {
+          "id": "pay_example"
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Cache-Control": "no-store",
+          "X-Demo-Session-Expires-At": "2026-11-24T00:00:00Z"
+        },
+        "body": {
+          "id": "pay_example",
+          "requestId": "11111111-1111-4111-8111-111111111111",
+          "merchantTxnId": "demo_txn_example",
+          "sceneId": "one_time",
+          "revision": 2,
+          "platform": "ANDROID",
+          "integration": "native-sdk",
+          "txnType": "SALE",
+          "customerId": "cus_example",
+          "amount": {
+            "minor": 500,
+            "currency": "USD"
+          },
+          "createdAt": "2026-10-25T00:00:00Z",
+          "creationState": "ready",
+          "provider": {
+            "merchantNo": "merchant_public_example",
+            "paymentId": "provider_payment_example"
+          },
+          "status": {
+            "normalized": "processing",
+            "rawPaymentStatus": "P",
+            "rawTransactionStatus": null,
+            "source": "query",
+            "verified": true,
+            "observedAt": "2026-10-25T00:00:00Z",
+            "isTerminal": false
+          },
+          "fundsState": "not_applicable",
+          "attention": null,
+          "recordExpiresAt": "2026-11-24T00:00:00Z",
+          "providerExpiresAt": null,
+          "refresh": {
+            "state": "failed",
+            "lastAttemptAt": "2026-10-25T00:05:00Z",
+            "lastErrorCode": "PROVIDER_UNAVAILABLE",
+            "pollAfterSeconds": null
+          },
+          "allowedActions": [
+            {
+              "type": "QUERY",
+              "enabled": true,
+              "reasonCode": null
+            },
+            {
+              "type": "CONTINUE_SDK",
+              "enabled": false,
+              "reasonCode": "PAYMENT_PROCESSING"
+            }
+          ],
+          "currentCustomerId": "cus_example"
+        },
+        "schema": "PaymentView"
+      }
+    },
+    {
+      "name": "payment-list-return-lookup",
+      "description": "回跳只有 merchantTxnId 也能定位；仍须原会话，再 refresh 到 App 自有结果页。",
+      "method": "GET",
+      "path": "/payments",
+      "request": {
+        "headers": {
+          "X-Demo-Client": "ANDROID/1"
+        },
+        "parameters": {
+          "merchantTxnId": "demo_txn_example",
+          "limit": 20
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Cache-Control": "no-store",
+          "X-Demo-Session-Expires-At": "2026-11-24T00:00:00Z"
+        },
+        "body": {
+          "items": [
+            {
+              "id": "pay_example",
+              "merchantTxnId": "demo_txn_example",
+              "sceneId": "one_time",
+              "integration": "native-sdk",
+              "txnType": "SALE",
+              "amount": {
+                "minor": 500,
+                "currency": "USD"
+              },
+              "createdAt": "2026-10-25T00:00:00Z",
+              "creationState": "ready",
+              "status": {
+                "normalized": "processing",
+                "source": "query",
+                "verified": true,
+                "observedAt": "2026-10-25T00:00:00Z",
+                "isTerminal": false
+              },
+              "attention": {
+                "kind": "continue_sdk"
+              },
+              "allowedActions": [
+                {
+                  "type": "QUERY",
+                  "enabled": true,
+                  "reasonCode": null
+                },
+                {
+                  "type": "CONTINUE_SDK",
+                  "enabled": true,
+                  "reasonCode": null
+                }
+              ],
+              "revision": 1,
+              "recordExpiresAt": "2026-11-24T00:00:00Z",
+              "refresh": {
+                "state": "idle",
+                "lastAttemptAt": "2026-10-25T00:00:00Z",
+                "lastErrorCode": null,
+                "pollAfterSeconds": null
+              }
+            }
+          ],
+          "nextCursor": null
+        },
+        "schema": "PaymentPage"
+      }
+    },
+    {
+      "name": "checkout-session-created",
+      "description": "2 分钟仅合成 Demo 租约示例，非 Provider/3DS TTL；启动不等于自动 confirm。",
+      "method": "POST",
+      "path": "/payments/{id}/checkout-session",
+      "request": {
+        "headers": {
+          "X-Demo-Client": "ANDROID/1"
+        },
+        "parameters": {
+          "id": "pay_example"
+        },
+        "body": {
+          "operationId": "22222222-2222-4222-8222-222222222222"
+        },
+        "schema": "CheckoutSessionCreate"
+      },
+      "response": {
+        "status": 201,
+        "headers": {
+          "Cache-Control": "no-store",
+          "X-Demo-Session-Expires-At": "2026-11-24T00:00:00Z"
+        },
+        "body": {
+          "checkoutSessionId": "lease_example",
+          "leaseExpiresAt": "2026-10-25T00:02:00Z",
+          "revision": 1,
+          "sdk": {
+            "merchantNo": "merchant_public_example",
+            "environment": "sandbox",
+            "configRevision": "example-config-1",
+            "paymentId": "provider_payment_example"
+          }
+        },
+        "schema": "CheckoutSession"
+      }
+    },
+    {
+      "name": "checkout-session-pending",
+      "description": "",
+      "method": "POST",
+      "path": "/payments/{id}/checkout-session",
+      "request": {
+        "headers": {
+          "X-Demo-Client": "ANDROID/1"
+        },
+        "parameters": {
+          "id": "pay_example"
+        },
+        "body": {
+          "operationId": "22222222-2222-4222-8222-222222222222"
+        },
+        "schema": "CheckoutSessionCreate"
+      },
+      "response": {
+        "status": 202,
+        "headers": {
+          "Cache-Control": "no-store",
+          "X-Demo-Session-Expires-At": "2026-11-24T00:00:00Z"
+        },
+        "body": {
+          "operationId": "22222222-2222-4222-8222-222222222222",
+          "type": "checkout_session",
+          "execution": "accepted",
+          "outcome": null,
+          "resource": null,
+          "leaseState": null,
+          "error": null
+        },
+        "schema": "Operation"
+      }
+    },
+    {
+      "name": "operation-lease-active",
+      "description": "找到引用后原键 POST 回读仍有效启动资料；GET 不续租。",
+      "method": "GET",
+      "path": "/operations/{operationId}",
+      "request": {
+        "headers": {
+          "X-Demo-Client": "ANDROID/1"
+        },
+        "parameters": {
+          "operationId": "22222222-2222-4222-8222-222222222222"
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Cache-Control": "no-store",
+          "X-Demo-Session-Expires-At": "2026-11-24T00:00:00Z"
+        },
+        "body": {
+          "operationId": "22222222-2222-4222-8222-222222222222",
+          "type": "checkout_session",
+          "execution": "completed",
+          "outcome": "effective",
+          "resource": {
+            "kind": "checkout_session",
+            "id": "lease_example"
+          },
+          "leaseState": "active",
+          "error": null
+        },
+        "schema": "Operation"
+      }
+    },
+    {
+      "name": "checkout-session-replay",
+      "description": "",
+      "method": "POST",
+      "path": "/payments/{id}/checkout-session",
+      "request": {
+        "headers": {
+          "X-Demo-Client": "ANDROID/1"
+        },
+        "parameters": {
+          "id": "pay_example"
+        },
+        "body": {
+          "operationId": "22222222-2222-4222-8222-222222222222"
+        },
+        "schema": "CheckoutSessionCreate"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Cache-Control": "no-store",
+          "X-Demo-Session-Expires-At": "2026-11-24T00:00:00Z"
+        },
+        "body": {
+          "checkoutSessionId": "lease_example",
+          "leaseExpiresAt": "2026-10-25T00:02:00Z",
+          "revision": 1,
+          "sdk": {
+            "merchantNo": "merchant_public_example",
+            "environment": "sandbox",
+            "configRevision": "example-config-1",
+            "paymentId": "provider_payment_example"
+          }
+        },
+        "schema": "CheckoutSession"
+      }
+    },
+    {
+      "name": "checkout-session-release",
+      "description": "",
+      "method": "DELETE",
+      "path": "/payments/{id}/checkout-sessions/{checkoutSessionId}",
+      "request": {
+        "headers": {
+          "X-Demo-Client": "ANDROID/1"
+        },
+        "parameters": {
+          "id": "pay_example",
+          "checkoutSessionId": "lease_example"
+        }
+      },
+      "response": {
+        "status": 204,
+        "headers": {
+          "Cache-Control": "no-store",
+          "X-Demo-Session-Expires-At": "2026-11-24T00:00:00Z"
+        }
+      }
+    },
+    {
+      "name": "operation-lease-ended",
+      "description": "历史 outcome 仍 effective；不能当作有效启动许可。",
+      "method": "GET",
+      "path": "/operations/{operationId}",
+      "request": {
+        "headers": {
+          "X-Demo-Client": "ANDROID/1"
+        },
+        "parameters": {
+          "operationId": "22222222-2222-4222-8222-222222222222"
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Cache-Control": "no-store",
+          "X-Demo-Session-Expires-At": "2026-11-24T00:00:00Z"
+        },
+        "body": {
+          "operationId": "22222222-2222-4222-8222-222222222222",
+          "type": "checkout_session",
+          "execution": "completed",
+          "outcome": "effective",
+          "resource": {
+            "kind": "checkout_session",
+            "id": "lease_example"
+          },
+          "leaseState": "released",
+          "error": null
+        },
+        "schema": "Operation"
+      }
+    },
+    {
+      "name": "checkout-ended-post",
+      "description": "",
+      "method": "POST",
+      "path": "/payments/{id}/checkout-session",
+      "request": {
+        "headers": {
+          "X-Demo-Client": "ANDROID/1"
+        },
+        "parameters": {
+          "id": "pay_example"
+        },
+        "body": {
+          "operationId": "22222222-2222-4222-8222-222222222222"
+        },
+        "schema": "CheckoutSessionCreate"
+      },
+      "response": {
+        "status": 409,
+        "headers": {
+          "Cache-Control": "no-store",
+          "X-Demo-Session-Expires-At": "2026-11-24T00:00:00Z"
+        },
+        "body": {
+          "error": {
+            "code": "CHECKOUT_SESSION_ENDED",
+            "retryable": false,
+            "action": "REFRESH",
+            "retryAfter": null,
+            "execution": "not_started",
+            "fieldErrors": [],
+            "currentView": null,
+            "operationId": "22222222-2222-4222-8222-222222222222",
+            "checkoutSessionId": "lease_example",
+            "leaseExpiresAt": null
+          }
+        },
+        "schema": "ErrorEnvelope"
+      }
+    },
+    {
+      "name": "checkout-in-use",
+      "description": "租约引用只在已确认本会话归属时返回。",
+      "method": "POST",
+      "path": "/payments/{id}/checkout-session",
+      "request": {
+        "headers": {
+          "X-Demo-Client": "ANDROID/1"
+        },
+        "parameters": {
+          "id": "pay_example"
+        },
+        "body": {
+          "operationId": "44444444-4444-4444-8444-444444444444"
+        },
+        "schema": "CheckoutSessionCreate"
+      },
+      "response": {
+        "status": 409,
+        "headers": {
+          "Cache-Control": "no-store",
+          "X-Demo-Session-Expires-At": "2026-11-24T00:00:00Z"
+        },
+        "body": {
+          "error": {
+            "code": "CHECKOUT_IN_USE",
+            "retryable": false,
+            "action": "REFRESH",
+            "retryAfter": null,
+            "execution": "not_started",
+            "fieldErrors": [],
+            "currentView": null,
+            "operationId": null,
+            "checkoutSessionId": "lease_example",
+            "leaseExpiresAt": "2026-10-25T00:02:00Z"
+          }
+        },
+        "schema": "ErrorEnvelope"
+      }
+    },
+    {
+      "name": "idempotency-key-unavailable",
+      "description": "跨会话已用键，绝不返回其他会话资源或原操作引用。",
+      "method": "POST",
+      "path": "/payments",
+      "request": {
+        "headers": {
+          "X-Demo-Client": "ANDROID/1"
+        },
+        "body": {
+          "requestId": "11111111-1111-4111-8111-111111111111",
+          "sceneId": "one_time",
+          "integration": "native-sdk",
+          "amount": {
+            "minor": 500,
+            "currency": "USD"
+          },
+          "customer": {
+            "kind": "current"
+          },
+          "returnTarget": {
+            "kind": "preset",
+            "id": "app_android"
+          }
+        },
+        "schema": "PaymentCreate"
+      },
+      "response": {
+        "status": 409,
+        "headers": {
+          "Cache-Control": "no-store",
+          "X-Demo-Session-Expires-At": "2026-11-24T00:00:00Z"
+        },
+        "body": {
+          "error": {
+            "code": "IDEMPOTENCY_KEY_UNAVAILABLE",
+            "retryable": false,
+            "action": "NONE",
+            "retryAfter": null,
+            "execution": "not_started",
+            "fieldErrors": [],
+            "currentView": null,
+            "operationId": null,
+            "checkoutSessionId": null,
+            "leaseExpiresAt": null
+          }
+        },
+        "schema": "ErrorEnvelope"
+      }
+    },
+    {
+      "name": "customer-limit",
+      "description": "",
+      "method": "POST",
+      "path": "/customers",
+      "request": {
+        "headers": {
+          "X-Demo-Client": "ANDROID/1"
+        },
+        "body": {
+          "operationId": "33333333-3333-4333-8333-333333333333",
+          "label": "测试客户 A"
+        },
+        "schema": "CustomerCreate"
+      },
+      "response": {
+        "status": 409,
+        "headers": {
+          "Cache-Control": "no-store",
+          "X-Demo-Session-Expires-At": "2026-11-24T00:00:00Z"
+        },
+        "body": {
+          "error": {
+            "code": "CUSTOMER_LIMIT_REACHED",
+            "retryable": false,
+            "action": "NONE",
+            "retryAfter": null,
+            "execution": "not_started",
+            "fieldErrors": [],
+            "currentView": null,
+            "operationId": null,
+            "checkoutSessionId": null,
+            "leaseExpiresAt": null
+          }
+        },
+        "schema": "ErrorEnvelope"
+      }
+    },
+    {
+      "name": "client-upgrade",
+      "description": "",
+      "method": "POST",
+      "path": "/payments",
+      "request": {
+        "headers": {
+          "X-Demo-Client": "ANDROID/1"
+        },
+        "body": {
+          "requestId": "11111111-1111-4111-8111-111111111111",
+          "sceneId": "one_time",
+          "integration": "native-sdk",
+          "amount": {
+            "minor": 500,
+            "currency": "USD"
+          },
+          "customer": {
+            "kind": "current"
+          },
+          "returnTarget": {
+            "kind": "preset",
+            "id": "app_android"
+          }
+        },
+        "schema": "PaymentCreate"
+      },
+      "response": {
+        "status": 426,
+        "headers": {
+          "Cache-Control": "no-store",
+          "X-Demo-Session-Expires-At": "2026-11-24T00:00:00Z"
+        },
+        "body": {
+          "error": {
+            "code": "CLIENT_VERSION_UNSUPPORTED",
+            "retryable": false,
+            "action": "UPGRADE_CLIENT",
+            "retryAfter": null,
+            "execution": "not_started",
+            "fieldErrors": [],
+            "currentView": null,
+            "operationId": null,
+            "checkoutSessionId": null,
+            "leaseExpiresAt": null
+          }
+        },
+        "schema": "ErrorEnvelope"
+      }
+    },
+    {
+      "name": "application-rate-limit",
+      "description": "RATE_LIMITED 是本稿候选稳定码；应用已明确未受理。非 JSON 网关 429 不能套用此语义。",
+      "method": "POST",
+      "path": "/payments",
+      "request": {
+        "headers": {
+          "X-Demo-Client": "ANDROID/1"
+        },
+        "body": {
+          "requestId": "11111111-1111-4111-8111-111111111111",
+          "sceneId": "one_time",
+          "integration": "native-sdk",
+          "amount": {
+            "minor": 500,
+            "currency": "USD"
+          },
+          "customer": {
+            "kind": "current"
+          },
+          "returnTarget": {
+            "kind": "preset",
+            "id": "app_android"
+          }
+        },
+        "schema": "PaymentCreate"
+      },
+      "response": {
+        "status": 429,
+        "headers": {
+          "Cache-Control": "no-store",
+          "X-Demo-Session-Expires-At": "2026-11-24T00:00:00Z",
+          "Retry-After": 5
+        },
+        "body": {
+          "error": {
+            "code": "RATE_LIMITED",
+            "retryable": true,
+            "action": "RETRY_SAME_REQUEST",
+            "retryAfter": 5,
+            "execution": "not_started",
+            "fieldErrors": [],
+            "currentView": null,
+            "operationId": null,
+            "checkoutSessionId": null,
+            "leaseExpiresAt": null
+          }
+        },
+        "schema": "ErrorEnvelope"
+      }
+    },
+    {
+      "name": "request-expired",
+      "description": "RECORD_EXPIRED 是本稿候选码；旧键不得重建。",
+      "method": "GET",
+      "path": "/payment-requests/{requestId}",
+      "request": {
+        "headers": {
+          "X-Demo-Client": "ANDROID/1"
+        },
+        "parameters": {
+          "requestId": "11111111-1111-4111-8111-111111111111"
+        }
+      },
+      "response": {
+        "status": 410,
+        "headers": {
+          "Cache-Control": "no-store",
+          "X-Demo-Session-Expires-At": "2026-11-24T00:00:00Z"
+        },
+        "body": {
+          "error": {
+            "code": "RECORD_EXPIRED",
+            "retryable": false,
+            "action": "NONE",
+            "retryAfter": null,
+            "execution": "not_applicable",
+            "fieldErrors": [],
+            "currentView": null,
+            "operationId": null,
+            "checkoutSessionId": null,
+            "leaseExpiresAt": null
+          }
+        },
+        "schema": "ErrorEnvelope"
+      }
+    },
+    {
+      "name": "session-expired",
+      "description": "SESSION_EXPIRED 为区分失效的候选码；不续期，不在新会话重放旧队列。",
+      "method": "GET",
+      "path": "/session",
+      "request": {
+        "headers": {
+          "X-Demo-Client": "ANDROID/1"
+        }
+      },
+      "response": {
+        "status": 401,
+        "headers": {
+          "Cache-Control": "no-store"
+        },
+        "body": {
+          "error": {
+            "code": "SESSION_EXPIRED",
+            "retryable": false,
+            "action": "START_NEW_SESSION",
+            "retryAfter": null,
+            "execution": "not_applicable",
+            "fieldErrors": [],
+            "currentView": null,
+            "operationId": null,
+            "checkoutSessionId": null,
+            "leaseExpiresAt": null
+          }
+        },
+        "schema": "ErrorEnvelope"
+      }
+    },
+    {
+      "name": "payment-open-after-attempt",
+      "description": "O 可继续仍须实时能力/有效期/租约核验；不表示新建支付。",
+      "method": "GET",
+      "path": "/payments/{id}",
+      "request": {
+        "headers": {
+          "X-Demo-Client": "ANDROID/1"
+        },
+        "parameters": {
+          "id": "pay_example"
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Cache-Control": "no-store",
+          "X-Demo-Session-Expires-At": "2026-11-24T00:00:00Z"
+        },
+        "body": {
+          "id": "pay_example",
+          "requestId": "11111111-1111-4111-8111-111111111111",
+          "merchantTxnId": "demo_txn_example",
+          "sceneId": "one_time",
+          "revision": 3,
+          "platform": "ANDROID",
+          "integration": "native-sdk",
+          "txnType": "SALE",
+          "customerId": "cus_example",
+          "amount": {
+            "minor": 500,
+            "currency": "USD"
+          },
+          "createdAt": "2026-10-25T00:00:00Z",
+          "creationState": "ready",
+          "provider": {
+            "merchantNo": "merchant_public_example",
+            "paymentId": "provider_payment_example"
+          },
+          "status": {
+            "normalized": "processing",
+            "rawPaymentStatus": "O",
+            "rawTransactionStatus": null,
+            "source": "query",
+            "verified": true,
+            "observedAt": "2026-10-25T00:00:00Z",
+            "isTerminal": false
+          },
+          "fundsState": "not_applicable",
+          "attention": {
+            "kind": "continue_sdk"
+          },
+          "recordExpiresAt": "2026-11-24T00:00:00Z",
+          "providerExpiresAt": null,
+          "refresh": {
+            "state": "idle",
+            "lastAttemptAt": "2026-10-25T00:00:00Z",
+            "lastErrorCode": null,
+            "pollAfterSeconds": null
+          },
+          "allowedActions": [
+            {
+              "type": "QUERY",
+              "enabled": true,
+              "reasonCode": null
+            },
+            {
+              "type": "CONTINUE_SDK",
+              "enabled": true,
+              "reasonCode": null
+            }
+          ],
+          "currentCustomerId": "cus_example"
+        },
+        "schema": "PaymentView"
+      }
+    },
+    {
+      "name": "payment-requires-action",
+      "description": "R 禁再次提交，保留已发生回跳恢复与 QUERY；不以 handler 返回值判支付成功。",
+      "method": "GET",
+      "path": "/payments/{id}",
+      "request": {
+        "headers": {
+          "X-Demo-Client": "ANDROID/1"
+        },
+        "parameters": {
+          "id": "pay_example"
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Cache-Control": "no-store",
+          "X-Demo-Session-Expires-At": "2026-11-24T00:00:00Z"
+        },
+        "body": {
+          "id": "pay_example",
+          "requestId": "11111111-1111-4111-8111-111111111111",
+          "merchantTxnId": "demo_txn_example",
+          "sceneId": "one_time",
+          "revision": 3,
+          "platform": "ANDROID",
+          "integration": "native-sdk",
+          "txnType": "SALE",
+          "customerId": "cus_example",
+          "amount": {
+            "minor": 500,
+            "currency": "USD"
+          },
+          "createdAt": "2026-10-25T00:00:00Z",
+          "creationState": "ready",
+          "provider": {
+            "merchantNo": "merchant_public_example",
+            "paymentId": "provider_payment_example"
+          },
+          "status": {
+            "normalized": "requires_action",
+            "rawPaymentStatus": "R",
+            "rawTransactionStatus": null,
+            "source": "query",
+            "verified": true,
+            "observedAt": "2026-10-25T00:00:00Z",
+            "isTerminal": false
+          },
+          "fundsState": "not_applicable",
+          "attention": null,
+          "recordExpiresAt": "2026-11-24T00:00:00Z",
+          "providerExpiresAt": null,
+          "refresh": {
+            "state": "idle",
+            "lastAttemptAt": "2026-10-25T00:00:00Z",
+            "lastErrorCode": null,
+            "pollAfterSeconds": null
+          },
+          "allowedActions": [
+            {
+              "type": "QUERY",
+              "enabled": true,
+              "reasonCode": null
+            },
+            {
+              "type": "CONTINUE_SDK",
+              "enabled": false,
+              "reasonCode": "EXTERNAL_ACTION_IN_PROGRESS"
+            }
+          ],
+          "currentCustomerId": "cus_example"
+        },
+        "schema": "PaymentView"
+      }
+    },
+    {
+      "name": "payment-succeeded",
+      "description": "成功只能来自已关联可信服务端证据；保留查询，不再次启动。",
+      "method": "GET",
+      "path": "/payments/{id}",
+      "request": {
+        "headers": {
+          "X-Demo-Client": "ANDROID/1"
+        },
+        "parameters": {
+          "id": "pay_example"
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Cache-Control": "no-store",
+          "X-Demo-Session-Expires-At": "2026-11-24T00:00:00Z"
+        },
+        "body": {
+          "id": "pay_example",
+          "requestId": "11111111-1111-4111-8111-111111111111",
+          "merchantTxnId": "demo_txn_example",
+          "sceneId": "one_time",
+          "revision": 3,
+          "platform": "ANDROID",
+          "integration": "native-sdk",
+          "txnType": "SALE",
+          "customerId": "cus_example",
+          "amount": {
+            "minor": 500,
+            "currency": "USD"
+          },
+          "createdAt": "2026-10-25T00:00:00Z",
+          "creationState": "ready",
+          "provider": {
+            "merchantNo": "merchant_public_example",
+            "paymentId": "provider_payment_example"
+          },
+          "status": {
+            "normalized": "succeeded",
+            "rawPaymentStatus": "S",
+            "rawTransactionStatus": null,
+            "source": "query",
+            "verified": true,
+            "observedAt": "2026-10-25T00:00:00Z",
+            "isTerminal": true
+          },
+          "fundsState": "not_applicable",
+          "attention": null,
+          "recordExpiresAt": "2026-11-24T00:00:00Z",
+          "providerExpiresAt": null,
+          "refresh": {
+            "state": "idle",
+            "lastAttemptAt": "2026-10-25T00:00:00Z",
+            "lastErrorCode": null,
+            "pollAfterSeconds": null
+          },
+          "allowedActions": [
+            {
+              "type": "QUERY",
+              "enabled": true,
+              "reasonCode": null
+            },
+            {
+              "type": "CONTINUE_SDK",
+              "enabled": false,
+              "reasonCode": "PAYMENT_TERMINAL"
+            }
+          ],
+          "currentCustomerId": "cus_example"
+        },
+        "schema": "PaymentView"
+      }
+    },
+    {
+      "name": "checkout-session-supersede",
+      "description": "原子接替当前有效的本会话租约；旧租约释放不能释放此新租约。",
+      "method": "POST",
+      "path": "/payments/{id}/checkout-session",
+      "request": {
+        "headers": {
+          "X-Demo-Client": "ANDROID/1"
+        },
+        "parameters": {
+          "id": "pay_example"
+        },
+        "body": {
+          "operationId": "44444444-4444-4444-8444-444444444444",
+          "supersedes": "lease_example"
+        },
+        "schema": "CheckoutSessionCreate"
+      },
+      "response": {
+        "status": 201,
+        "headers": {
+          "Cache-Control": "no-store",
+          "X-Demo-Session-Expires-At": "2026-11-24T00:00:00Z"
+        },
+        "body": {
+          "checkoutSessionId": "lease_example_next",
+          "leaseExpiresAt": "2026-10-25T00:02:00Z",
+          "revision": 1,
+          "sdk": {
+            "merchantNo": "merchant_public_example",
+            "environment": "sandbox",
+            "configRevision": "example-config-1",
+            "paymentId": "provider_payment_example"
+          }
+        },
+        "schema": "CheckoutSession"
+      }
+    },
+    {
+      "name": "checkout-session-after-ended",
+      "description": "supersedes 指向已结束的本会话同支付租约且当前无有效租约时，按普通领取处理；仍核验能力和 Provider 状态。",
+      "method": "POST",
+      "path": "/payments/{id}/checkout-session",
+      "request": {
+        "headers": {
+          "X-Demo-Client": "ANDROID/1"
+        },
+        "parameters": {
+          "id": "pay_example"
+        },
+        "body": {
+          "operationId": "44444444-4444-4444-8444-444444444444",
+          "supersedes": "lease_example"
+        },
+        "schema": "CheckoutSessionCreate"
+      },
+      "response": {
+        "status": 201,
+        "headers": {
+          "Cache-Control": "no-store",
+          "X-Demo-Session-Expires-At": "2026-11-24T00:00:00Z"
+        },
+        "body": {
+          "checkoutSessionId": "lease_example_next",
+          "leaseExpiresAt": "2026-10-25T00:02:00Z",
+          "revision": 1,
+          "sdk": {
+            "merchantNo": "merchant_public_example",
+            "environment": "sandbox",
+            "configRevision": "example-config-1",
+            "paymentId": "provider_payment_example"
+          }
+        },
+        "schema": "CheckoutSession"
+      }
+    },
+    {
+      "name": "provider-create-unknown",
+      "description": "结构化 504 明确上游创建可能已执行，恢复原 operationId；不能换键或重新扣款。",
+      "method": "POST",
+      "path": "/payments",
+      "request": {
+        "headers": {
+          "X-Demo-Client": "ANDROID/1"
+        },
+        "body": {
+          "requestId": "11111111-1111-4111-8111-111111111111",
+          "sceneId": "one_time",
+          "integration": "native-sdk",
+          "amount": {
+            "minor": 500,
+            "currency": "USD"
+          },
+          "customer": {
+            "kind": "current"
+          },
+          "returnTarget": {
+            "kind": "preset",
+            "id": "app_android"
+          }
+        },
+        "schema": "PaymentCreate"
+      },
+      "response": {
+        "status": 504,
+        "headers": {
+          "Cache-Control": "no-store",
+          "X-Demo-Session-Expires-At": "2026-11-24T00:00:00Z"
+        },
+        "body": {
+          "error": {
+            "code": "PROVIDER_UNAVAILABLE",
+            "retryable": true,
+            "action": "RECOVER_OPERATION",
+            "retryAfter": null,
+            "execution": "unknown",
+            "fieldErrors": [],
+            "currentView": {
+              "id": "pay_example",
+              "requestId": "11111111-1111-4111-8111-111111111111",
+              "merchantTxnId": "demo_txn_example",
+              "sceneId": "one_time",
+              "revision": 1,
+              "platform": "ANDROID",
+              "integration": "native-sdk",
+              "txnType": "SALE",
+              "customerId": "cus_example",
+              "amount": {
+                "minor": 500,
+                "currency": "USD"
+              },
+              "createdAt": "2026-10-25T00:00:00Z",
+              "creationState": "unknown",
+              "provider": null,
+              "status": {
+                "normalized": "unknown",
+                "rawPaymentStatus": null,
+                "rawTransactionStatus": null,
+                "source": "server",
+                "verified": false,
+                "observedAt": null,
+                "isTerminal": false
+              },
+              "fundsState": "not_applicable",
+              "attention": {
+                "kind": "creation_unknown"
+              },
+              "recordExpiresAt": "2026-11-24T00:00:00Z",
+              "providerExpiresAt": null,
+              "refresh": {
+                "state": "queued",
+                "lastAttemptAt": null,
+                "lastErrorCode": null,
+                "pollAfterSeconds": 3
+              },
+              "allowedActions": [
+                {
+                  "type": "QUERY",
+                  "enabled": true,
+                  "reasonCode": null
+                },
+                {
+                  "type": "CONTINUE_SDK",
+                  "enabled": false,
+                  "reasonCode": "CREATION_NOT_READY"
+                }
+              ],
+              "currentCustomerId": "cus_example"
+            },
+            "operationId": "11111111-1111-4111-8111-111111111111",
+            "checkoutSessionId": null,
+            "leaseExpiresAt": null
+          }
+        },
+        "schema": "ErrorEnvelope"
+      }
+    },
+    {
+      "name": "request-not-yet-found",
+      "description": "仅当前读点未找到认领；只有原分区、原键原参数且客户端保存时间起24小时内才可重 POST。时间不可靠或过窗只 GET，不自动新建。",
+      "method": "GET",
+      "path": "/payment-requests/{requestId}",
+      "request": {
+        "headers": {
+          "X-Demo-Client": "ANDROID/1"
+        },
+        "parameters": {
+          "requestId": "11111111-1111-4111-8111-111111111111"
+        }
+      },
+      "response": {
+        "status": 404,
+        "headers": {
+          "Cache-Control": "no-store",
+          "X-Demo-Session-Expires-At": "2026-11-24T00:00:00Z"
+        },
+        "body": {
+          "error": {
+            "code": "REQUEST_NOT_FOUND",
+            "retryable": true,
+            "action": "RETRY_SAME_REQUEST",
+            "retryAfter": null,
+            "execution": "not_applicable",
+            "fieldErrors": [],
+            "currentView": null,
+            "operationId": null,
+            "checkoutSessionId": null,
+            "leaseExpiresAt": null
+          }
+        },
+        "schema": "ErrorEnvelope"
+      }
+    },
+    {
+      "name": "payment-new-customer",
+      "description": "新建客户与支付认领在本地事务中关联；成功后成为当前客户。",
+      "method": "POST",
+      "path": "/payments",
+      "request": {
+        "headers": {
+          "X-Demo-Client": "ANDROID/1"
+        },
+        "body": {
+          "requestId": "11111111-1111-4111-8111-111111111111",
+          "sceneId": "one_time",
+          "integration": "native-sdk",
+          "amount": {
+            "minor": 500,
+            "currency": "USD"
+          },
+          "customer": {
+            "kind": "new",
+            "label": "测试客户 B"
+          },
+          "returnTarget": {
+            "kind": "preset",
+            "id": "app_android"
+          }
+        },
+        "schema": "PaymentCreate"
+      },
+      "response": {
+        "status": 201,
+        "headers": {
+          "Cache-Control": "no-store",
+          "X-Demo-Session-Expires-At": "2026-11-24T00:00:00Z"
+        },
+        "body": {
+          "id": "pay_example",
+          "requestId": "11111111-1111-4111-8111-111111111111",
+          "merchantTxnId": "demo_txn_example",
+          "sceneId": "one_time",
+          "revision": 1,
+          "platform": "ANDROID",
+          "integration": "native-sdk",
+          "txnType": "SALE",
+          "customerId": "cus_example_b",
+          "amount": {
+            "minor": 500,
+            "currency": "USD"
+          },
+          "createdAt": "2026-10-25T00:00:00Z",
+          "creationState": "ready",
+          "provider": {
+            "merchantNo": "merchant_public_example",
+            "paymentId": "provider_payment_example"
+          },
+          "status": {
+            "normalized": "processing",
+            "rawPaymentStatus": "U",
+            "rawTransactionStatus": null,
+            "source": "query",
+            "verified": true,
+            "observedAt": "2026-10-25T00:00:00Z",
+            "isTerminal": false
+          },
+          "fundsState": "not_applicable",
+          "attention": {
+            "kind": "continue_sdk"
+          },
+          "recordExpiresAt": "2026-11-24T00:00:00Z",
+          "providerExpiresAt": null,
+          "refresh": {
+            "state": "idle",
+            "lastAttemptAt": "2026-10-25T00:00:00Z",
+            "lastErrorCode": null,
+            "pollAfterSeconds": null
+          },
+          "allowedActions": [
+            {
+              "type": "QUERY",
+              "enabled": true,
+              "reasonCode": null
+            },
+            {
+              "type": "CONTINUE_SDK",
+              "enabled": true,
+              "reasonCode": null
+            }
+          ],
+          "currentCustomerId": "cus_example_b"
+        },
+        "schema": "PaymentView"
+      }
+    },
+    {
+      "name": "payment-new-customer-replay-after-switch",
+      "description": "原键回读保留支付 customerId=cus_example_b；会话已切换到 C，响应反映实际 currentCustomerId，不再次切回 B。",
+      "method": "POST",
+      "path": "/payments",
+      "request": {
+        "headers": {
+          "X-Demo-Client": "ANDROID/1"
+        },
+        "body": {
+          "requestId": "11111111-1111-4111-8111-111111111111",
+          "sceneId": "one_time",
+          "integration": "native-sdk",
+          "amount": {
+            "minor": 500,
+            "currency": "USD"
+          },
+          "customer": {
+            "kind": "new",
+            "label": "测试客户 B"
+          },
+          "returnTarget": {
+            "kind": "preset",
+            "id": "app_android"
+          }
+        },
+        "schema": "PaymentCreate"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Cache-Control": "no-store",
+          "X-Demo-Session-Expires-At": "2026-11-24T00:00:00Z"
+        },
+        "body": {
+          "id": "pay_example",
+          "requestId": "11111111-1111-4111-8111-111111111111",
+          "merchantTxnId": "demo_txn_example",
+          "sceneId": "one_time",
+          "revision": 1,
+          "platform": "ANDROID",
+          "integration": "native-sdk",
+          "txnType": "SALE",
+          "customerId": "cus_example_b",
+          "amount": {
+            "minor": 500,
+            "currency": "USD"
+          },
+          "createdAt": "2026-10-25T00:00:00Z",
+          "creationState": "ready",
+          "provider": {
+            "merchantNo": "merchant_public_example",
+            "paymentId": "provider_payment_example"
+          },
+          "status": {
+            "normalized": "processing",
+            "rawPaymentStatus": "U",
+            "rawTransactionStatus": null,
+            "source": "query",
+            "verified": true,
+            "observedAt": "2026-10-25T00:00:00Z",
+            "isTerminal": false
+          },
+          "fundsState": "not_applicable",
+          "attention": {
+            "kind": "continue_sdk"
+          },
+          "recordExpiresAt": "2026-11-24T00:00:00Z",
+          "providerExpiresAt": null,
+          "refresh": {
+            "state": "idle",
+            "lastAttemptAt": "2026-10-25T00:00:00Z",
+            "lastErrorCode": null,
+            "pollAfterSeconds": null
+          },
+          "allowedActions": [
+            {
+              "type": "QUERY",
+              "enabled": true,
+              "reasonCode": null
+            },
+            {
+              "type": "CONTINUE_SDK",
+              "enabled": true,
+              "reasonCode": null
+            }
+          ],
+          "currentCustomerId": "cus_example_c"
+        },
+        "schema": "PaymentView"
+      }
+    },
+    {
+      "name": "recovery-key-owned-by-other-session",
+      "description": "恢复 GET 命中其他会话全局认领键返回同一 409；无视图、无原所有者信息。",
+      "method": "GET",
+      "path": "/payment-requests/{requestId}",
+      "request": {
+        "headers": {
+          "X-Demo-Client": "ANDROID/1"
+        },
+        "parameters": {
+          "requestId": "11111111-1111-4111-8111-111111111111"
+        }
+      },
+      "response": {
+        "status": 409,
+        "headers": {
+          "Cache-Control": "no-store",
+          "X-Demo-Session-Expires-At": "2026-11-24T00:00:00Z"
+        },
+        "body": {
+          "error": {
+            "code": "IDEMPOTENCY_KEY_UNAVAILABLE",
+            "retryable": false,
+            "action": "NONE",
+            "retryAfter": null,
+            "execution": "not_started",
+            "fieldErrors": [],
+            "currentView": null,
+            "operationId": null,
+            "checkoutSessionId": null,
+            "leaseExpiresAt": null
+          }
+        },
+        "schema": "ErrorEnvelope"
+      }
+    },
+    {
+      "name": "payment-conservative-window-expired",
+      "description": "保守窗口已过但查询仍为 U；禁止继续，允许 QUERY，providerExpiresAt仍null。合成示例，非过期实测。",
+      "method": "GET",
+      "path": "/payments/{id}",
+      "request": {
+        "headers": {
+          "X-Demo-Client": "ANDROID/1"
+        },
+        "parameters": {
+          "id": "pay_example"
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Cache-Control": "no-store",
+          "X-Demo-Session-Expires-At": "2026-11-24T00:00:00Z"
+        },
+        "body": {
+          "id": "pay_example",
+          "requestId": "11111111-1111-4111-8111-111111111111",
+          "merchantTxnId": "demo_txn_example",
+          "sceneId": "one_time",
+          "revision": 1,
+          "platform": "ANDROID",
+          "integration": "native-sdk",
+          "txnType": "SALE",
+          "customerId": "cus_example",
+          "amount": {
+            "minor": 500,
+            "currency": "USD"
+          },
+          "createdAt": "2026-10-25T00:00:00Z",
+          "creationState": "ready",
+          "provider": {
+            "merchantNo": "merchant_public_example",
+            "paymentId": "provider_payment_example"
+          },
+          "status": {
+            "normalized": "processing",
+            "rawPaymentStatus": "U",
+            "rawTransactionStatus": null,
+            "source": "query",
+            "verified": true,
+            "observedAt": "2026-10-25T00:00:00Z",
+            "isTerminal": false
+          },
+          "fundsState": "not_applicable",
+          "attention": null,
+          "recordExpiresAt": "2026-11-24T00:00:00Z",
+          "providerExpiresAt": null,
+          "refresh": {
+            "state": "idle",
+            "lastAttemptAt": "2026-10-25T00:00:00Z",
+            "lastErrorCode": null,
+            "pollAfterSeconds": null
+          },
+          "allowedActions": [
+            {
+              "type": "QUERY",
+              "enabled": true,
+              "reasonCode": null
+            },
+            {
+              "type": "CONTINUE_SDK",
+              "enabled": false,
+              "reasonCode": "PAYMENT_EXPIRED"
+            }
+          ],
+          "currentCustomerId": "cus_example"
+        },
+        "schema": "PaymentView"
+      }
+    },
+    {
+      "name": "payment-refresh-running",
+      "description": "查询任务运行中，客户端按服务端 pollAfterSeconds 有界等待。",
+      "method": "POST",
+      "path": "/payments/{id}/refresh",
+      "request": {
+        "headers": {
+          "X-Demo-Client": "ANDROID/1"
+        },
+        "parameters": {
+          "id": "pay_example"
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Cache-Control": "no-store",
+          "X-Demo-Session-Expires-At": "2026-11-24T00:00:00Z"
+        },
+        "body": {
+          "id": "pay_example",
+          "requestId": "11111111-1111-4111-8111-111111111111",
+          "merchantTxnId": "demo_txn_example",
+          "sceneId": "one_time",
+          "revision": 2,
+          "platform": "ANDROID",
+          "integration": "native-sdk",
+          "txnType": "SALE",
+          "customerId": "cus_example",
+          "amount": {
+            "minor": 500,
+            "currency": "USD"
+          },
+          "createdAt": "2026-10-25T00:00:00Z",
+          "creationState": "ready",
+          "provider": {
+            "merchantNo": "merchant_public_example",
+            "paymentId": "provider_payment_example"
+          },
+          "status": {
+            "normalized": "processing",
+            "rawPaymentStatus": "P",
+            "rawTransactionStatus": null,
+            "source": "query",
+            "verified": true,
+            "observedAt": "2026-10-25T00:00:00Z",
+            "isTerminal": false
+          },
+          "fundsState": "not_applicable",
+          "attention": null,
+          "recordExpiresAt": "2026-11-24T00:00:00Z",
+          "providerExpiresAt": null,
+          "refresh": {
+            "state": "running",
+            "lastAttemptAt": "2026-10-25T00:00:00Z",
+            "lastErrorCode": null,
+            "pollAfterSeconds": 3
+          },
+          "allowedActions": [
+            {
+              "type": "QUERY",
+              "enabled": true,
+              "reasonCode": null
+            },
+            {
+              "type": "CONTINUE_SDK",
+              "enabled": false,
+              "reasonCode": "PAYMENT_PROCESSING"
+            }
+          ],
+          "currentCustomerId": "cus_example"
+        },
+        "schema": "PaymentView"
+      }
+    },
+    {
+      "name": "payment-success-after-closed",
+      "description": "此前同支付 N/revision=1，可信查询及资金关联证据确认 S 后升为revision=2并记录异常。此处仅示例新视图，不证明实际竞态或退款。",
+      "method": "GET",
+      "path": "/payments/{id}",
+      "request": {
+        "headers": {
+          "X-Demo-Client": "ANDROID/1"
+        },
+        "parameters": {
+          "id": "pay_example"
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Cache-Control": "no-store",
+          "X-Demo-Session-Expires-At": "2026-11-24T00:00:00Z"
+        },
+        "body": {
+          "id": "pay_example",
+          "requestId": "11111111-1111-4111-8111-111111111111",
+          "merchantTxnId": "demo_txn_example",
+          "sceneId": "one_time",
+          "revision": 2,
+          "platform": "ANDROID",
+          "integration": "native-sdk",
+          "txnType": "SALE",
+          "customerId": "cus_example",
+          "amount": {
+            "minor": 500,
+            "currency": "USD"
+          },
+          "createdAt": "2026-10-25T00:00:00Z",
+          "creationState": "ready",
+          "provider": {
+            "merchantNo": "merchant_public_example",
+            "paymentId": "provider_payment_example"
+          },
+          "status": {
+            "normalized": "succeeded",
+            "rawPaymentStatus": "S",
+            "rawTransactionStatus": null,
+            "source": "query",
+            "verified": true,
+            "observedAt": "2026-10-25T00:00:00Z",
+            "isTerminal": true
+          },
+          "fundsState": "not_applicable",
+          "attention": null,
+          "recordExpiresAt": "2026-11-24T00:00:00Z",
+          "providerExpiresAt": null,
+          "refresh": {
+            "state": "idle",
+            "lastAttemptAt": "2026-10-25T00:00:00Z",
+            "lastErrorCode": null,
+            "pollAfterSeconds": null
+          },
+          "allowedActions": [
+            {
+              "type": "QUERY",
+              "enabled": true,
+              "reasonCode": null
+            },
+            {
+              "type": "CONTINUE_SDK",
+              "enabled": false,
+              "reasonCode": "PAYMENT_TERMINAL"
+            }
+          ],
+          "currentCustomerId": "cus_example"
+        },
+        "schema": "PaymentView"
+      }
+    }
+  ]
+}
