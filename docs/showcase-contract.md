@@ -585,7 +585,7 @@ operationId 提供同样 hash、claim、结果未知及查询规则。请款/撤
 
 创建请求本地首次保存时记录不可变 clientCreatedAt（客户端队列字段，不是新增 Provider 参数），重启/重试不重置。客户端重放限制：仅在此时间后 24 小时内、原分区原键原参数重 POST；超过窗口只 GET 恢复，不因 404 换键自动下单。时间丢失或时钟回退无法可靠确定窗口时仅 GET，并提示人工开始独立测试。此窗口不限制同一 paymentId 的继续体验，也不延长记录保留期；服务端记录的 createdAt 是首次认领时间，不拿客户端时间作信任依据。资金操作结果未知仍只恢复原操作，不应用该窗口自动重新扣款。
 
-“待继续”不是只有 UI 看过的记录：详情和列表统一返回 `attention:{kind:creation_unknown|continue_sdk|continue_checkout}|null`；包括尚无 paymentId 的已持久创建记录，以及 creationState=ready 但尚无可信状态的记录；后者以 continue_sdk 提醒等待核验，CONTINUE_SDK 仍禁用，不能据 attention 直接启动 SDK。列表读取会有界处理这些记录的待查任务。不把所有 P/A 都默认列为可继续；记录页仍能查看 query-only 支付。查询失败但旧视图可用时标 stale，不删除条目。首页 limit=1 不限制服务端保留数量，也不阻止新建独立测试。
+“待继续”不是只有 UI 看过的记录：详情和列表统一返回 `attention:{kind:creation_unknown|continue_sdk|continue_checkout}|null`；包括尚无 paymentId 的已持久创建记录，以及 creationState=ready、尚无可信状态且仍在保守继续窗口内的记录；后者以 continue_sdk 提醒等待核验，CONTINUE_SDK 仍禁用，不能据 attention 直接启动 SDK。列表读取会有界处理这些记录的待查任务。ready 但未核验的记录在窗口过期或缺失时退出“待继续”，仍可从普通记录列表和详情查询，不删除原记录或后台任务。不把所有 P/A 都默认列为可继续；记录页仍能查看 query-only 支付。查询失败但旧视图可用时标 stale，不删除条目。首页 limit=1 不限制服务端保留数量，也不阻止新建独立测试。
 
 ### 12.3 支付视图与动作
 
@@ -620,7 +620,7 @@ AUTH 的 A 选择 **processing + authorized**，保持现有资金生命周期�
 
 PaymentView 顶层新增 merchantTxnId，服务端在首次认领支付时生成并冻结，用于回跳匹配；它是公开引用，不是访问凭据。订阅初始支付及每次手动续费各自持有自己的引用。
 
-列表摘要与 refresh 结构见 OpenAPI。Provider 原始字段仅详情返回，尚无 paymentId 时 provider=null；轮询等待按服务端返回的秒数执行。持久任务 pending 且 due_at 已到期时才投影 refresh.state=queued；尚未到期时为 idle、pollAfterSeconds=null，不因后台仍有未来待查任务要求客户端持续轮询。running/failed 继续表达当前运行或查询失败；idle 不表示支付终态，也不删除后台任务。App 仅前台有界轮询 GET 视图，不反复 POST refresh，不引入推送/SSE；失败保留旧状态。尚无 Provider ID 的 QUERY 表示恢复/查询原创建操作，不是对空 paymentId 查单。
+列表摘要与 refresh 结构见 OpenAPI。Provider 原始字段仅详情返回，尚无 paymentId 时 provider=null；轮询等待按服务端返回的秒数执行。持久任务 pending 且 due_at 已到期时才投影 refresh.state=queued；尚未到期时为 idle、pollAfterSeconds=null，不因后台仍有未来待查任务要求客户端持续轮询。running/failed 继续表达当前运行或查询失败；failed 的 pollAfterSeconds=null，保留旧视图及后台任务，不要求客户端每 5 秒空轮询；idle 不表示支付终态，也不删除后台任务。App 仅前台有界轮询 GET 视图，不反复 POST refresh，不引入推送/SSE；失败保留旧状态。尚无 Provider ID 的 QUERY 表示恢复/查询原创建操作，不是对空 paymentId 查单。
 
 动作集合：CONTINUE_SDK、OPEN_CHECKOUT、QUERY、CAPTURE、VOID、VIEW_SUBSCRIPTION。按钮 disabled 必须有稳定 reasonCode；UI 翻译文案，不依赖后端自然语言判断。新测试是创建入口，不伪装成旧支付的 RETRY。checkout-session 执行时重新查询必要状态；revision 只能避免旧显示，不能授权资金动作。Provider 暂时不可查询时不凭旧动作自动 launch。
 

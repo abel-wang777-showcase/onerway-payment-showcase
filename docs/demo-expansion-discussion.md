@@ -159,7 +159,7 @@ mobile 已暂存：`.env.example`、README、契约、gateway/profile/store、at
 
 | 文件 | SHA-256 |
 | --- | --- |
-| `docs/showcase-contract.md` | `a8e05b123c3d8ad4ba7588f30d5fa51f7f022cdc90d61f605750653f3e987c91` |
+| `docs/showcase-contract.md` | `59419fbb538e3fd94420e5a7886b49ecff287c3c7d82e52a9568f2632f0d062f` |
 | `docs/api/demo-v1.openapi.json` | `30f06f818281d766ed26082c2e5a31bbd4790d4fde32e160ec2c211f9435a992` |
 | `docs/api/demo-v1.examples.json` | `40df1f8fbc0a8cc91fb39f69e4491b7567bcf184874ea0c159d0df60b3f917ad` |
 

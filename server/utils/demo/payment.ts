@@ -69,6 +69,7 @@ export async function paymentView(client: DemoDatabaseClient, row: PaymentRow): 
   else if (lease) reason = 'CHECKOUT_IN_USE'
   const due = job?.state === 'pending' && new Date(job.due_at).getTime() <= Date.now()
   const refreshState = job?.state === 'running' ? 'running' : job?.last_error_code ? 'failed' : due ? 'queued' : 'idle'
+  const withinWindow = row.continue_until !== null && new Date(row.continue_until).getTime() > Date.now()
   return {
     id: row.id, requestId: row.request_id, merchantTxnId: row.merchant_txn_id,
     sceneId: 'one_time', integration: 'native-sdk', txnType: 'SALE', platform: row.platform,
@@ -84,9 +85,9 @@ export async function paymentView(client: DemoDatabaseClient, row: PaymentRow): 
     allowedActions: [reason ? { type: 'CONTINUE_SDK', enabled: false, reasonCode: reason } : { type: 'CONTINUE_SDK', enabled: true, reasonCode: null },
       { type: 'QUERY', enabled: true, reasonCode: null }],
     attention: row.creation_state === 'unknown' || row.creation_state === 'pending' ? { kind: 'creation_unknown' }
-      : !reason || (row.creation_state === 'ready' && !row.verified) ? { kind: 'continue_sdk' } : null,
+      : !reason || (row.creation_state === 'ready' && !row.verified && withinWindow) ? { kind: 'continue_sdk' } : null,
     refresh: { state: refreshState, lastAttemptAt: job?.last_attempt_at ? iso(job.last_attempt_at) : null,
-      lastErrorCode: job?.last_error_code ?? null, pollAfterSeconds: refreshState === 'idle' ? null : 5 },
+      lastErrorCode: job?.last_error_code ?? null, pollAfterSeconds: refreshState === 'queued' || refreshState === 'running' ? 5 : null },
   }
 }
 
@@ -196,7 +197,7 @@ export async function listDemoPayments(sessionId: string, query: { limit?: numbe
   const rows = await demoTransaction(async client => (await client.query<PaymentRow>(`SELECT p.* FROM demo_payments p WHERE session_id=$1 AND expires_at>now()
     AND ($2::timestamptz IS NULL OR (created_at,id)<($2::timestamptz,$3::text))
     AND ($4::text IS NULL OR merchant_txn_id=$4) AND ($5::text IS NULL OR customer_id=$5)
-    AND ($6::boolean=false OR creation_state IN ('pending','unknown') OR (creation_state='ready' AND NOT verified) OR
+    AND ($6::boolean=false OR creation_state IN ('pending','unknown') OR (creation_state='ready' AND NOT verified AND continue_until>now()) OR
       (creation_state='ready' AND raw_payment_status IN ('U','O') AND verified AND continue_until>now()
        AND NOT EXISTS(SELECT 1 FROM demo_leases l WHERE l.payment_id=p.id AND l.state='active' AND l.expires_at>now())
        AND NOT EXISTS(SELECT 1 FROM demo_jobs j WHERE j.payment_id=p.id AND j.last_error_code IS NOT NULL)))
