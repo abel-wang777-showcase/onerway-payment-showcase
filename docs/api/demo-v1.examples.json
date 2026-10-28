@@ -1068,7 +1068,7 @@
     },
     {
       "name": "checkout-session-pending",
-      "description": "",
+      "description": "契约预留示例，首批实现不会返回此 202：当前租约操作同步完成或返回结构化错误，不持久受理 pending 租约操作。",
       "method": "POST",
       "path": "/payments/{id}/checkout-session",
       "request": {
@@ -1870,7 +1870,7 @@
     },
     {
       "name": "provider-create-unknown",
-      "description": "结构化 504 明确上游创建可能已执行，恢复原 operationId；不能换键或重新扣款。",
+      "description": "契约预留示例，首批实现不会返回此 504：当前创建结果未知时返回 202 PaymentView 并查询恢复。此结构化 504 表示上游创建可能已执行，须恢复原 operationId，不能换键或重新扣款。",
       "method": "POST",
       "path": "/payments",
       "request": {
@@ -2544,7 +2544,7 @@
     },
     {
       "name": "checkout-window-expired-replay",
-      "description": "原租约仍有效但保守继续窗口到期；原键回读同样不能绕过过期门禁。",
+      "description": "保守继续窗口到期时原租约也已到期（租约期限不晚于继续窗口）；原键回读优先返回 PAYMENT_EXPIRED，不能绕过过期门禁。",
       "method": "POST",
       "path": "/payments/{id}/checkout-session",
       "request": {

@@ -1,6 +1,6 @@
 # 三端 Demo 阶段计划与交接
 
-> 更新日期：2026-10-27（Asia/Shanghai）
+> 更新日期：2026-10-28（Asia/Shanghai）
 > 本文维护计划、分工、基线、剩余缺口与交接。进度和验收证据由关联 Issue / PR 维护，不在此记录逐轮审阅或执行流水。
 > 当前文档工作不授权业务实施、部署、真实交易或远程配置变更。实施阶段新开 Codex 会话；本会话完成文档收敛后停止。
 
@@ -85,10 +85,10 @@ mobile 已暂存：`.env.example`、README、契约、gateway/profile/store、at
 
 支持性与防重复规则见契约 §12 的 SDK 能力证据表；过期机制、保守窗口与源码调研边界见 §13.1。用户确认、发布文档、源码检查及真实 Sandbox 验收分别记录，不互相替代。后续参数按开发者文档补结构，不把旧调用图索引作为新的实施门禁。
 
-### 剩余缺口（2026-10-26 用户确认）：
+### 剩余缺口（2026-10-28 更新）：
 
 - 关单 cron 频率：未核实，不影响 Demo 的保守窗口和方案 D。
-- Onerway 回跳是否追加 paymentId：待 SDK 团队确认；merchantTxnId → refresh → App 自有结果页不依赖它，不新增 B0 阻断。
+- 创建拒绝分类：首批保持保守，不写入 creationState=rejected；是否依据特定 Provider 拒绝码确认未创建并标记 rejected，待用户决定。网络超时和结果不确定仍查询恢复原支付，不换键重建。
 - N 后仍可支付与竞态自动退款：阶段 D Sandbox 实测，当前保留源码调研与推断的证据边界。
 - Web Cookie/CSRF：Web 批次前冻结。
 - 订阅管理 URL 有效期：开发者文档未覆盖，阶段 C 按“期限未知”兜底（MANAGE_URL_EXPIRY_UNKNOWN），不写成已确认。
@@ -143,6 +143,7 @@ mobile 已暂存：`.env.example`、README、契约、gateway/profile/store、at
 | 撤回详情配置恢复（O1/F2） | 2026-10-25 | 原生恢复依赖本地上下文 | 缺快照只刷新，避免用当前配置冒充历史 | 详情 provider 配置重建 SDK 恢复 |
 | 保守过期窗口（B2） | 2026-10-26 | 用户转交源码调研，运行时未实测 | 服务端限制继续窗口且不伪造 Provider 到期时间 | 用 Demo 时间填 providerExpiresAt；放行30–60分钟窗口 |
 | 可信资金结果 N→S（B5） | 2026-10-26 | 用户转交竞态调研及资金证据规则 | 不丢弃迟到成功结果 | 绝对“终态不可覆盖”；由回调直接确认成功 |
+| Android 外跳恢复主路径 | 2026-10-28 | 用户转交的 Android 0.1.5 sources.jar 审查（source_checked）；SDK 开发说明经用户转述（user_confirmed） | CheckoutActivity.onResume 在已外跳、确实离开且尚未处理返回时自行查单，不依赖回跳带 paymentId；外跳期间进程被杀时 resumeFromReturn 返回 false，由 returnUrl 的 merchantTxnId 查单及“待继续”兜底，仅损失 SDK 界面连续性，不影响结果正确性；真实 Sandbox 未验证 | 等待确认回跳追加 paymentId 才能接入；将 SDK 界面恢复视为正确性前提 |
 | 新实施会话与文档单一归属 | 2026-10-27 | 用户明确决定 | 固定基线与职责，避免复制漂移 | 当前会话接续实施；native-sdk 复制契约 |
 
 ## 9. 交接读取入口与版本
@@ -158,8 +159,8 @@ mobile 已暂存：`.env.example`、README、契约、gateway/profile/store、at
 
 | 文件 | SHA-256 |
 | --- | --- |
-| `docs/showcase-contract.md` | `2333be913fc4c878bdd0eb074b2738539f3ae658f5909282f07b2464fdf23a20` |
+| `docs/showcase-contract.md` | `a8e05b123c3d8ad4ba7588f30d5fa51f7f022cdc90d61f605750653f3e987c91` |
 | `docs/api/demo-v1.openapi.json` | `30f06f818281d766ed26082c2e5a31bbd4790d4fde32e160ec2c211f9435a992` |
-| `docs/api/demo-v1.examples.json` | `db0ec174fcf1e57cfc13dfc9284bf5a5f16219b307d80efb4820fdd06a46416e` |
+| `docs/api/demo-v1.examples.json` | `40df1f8fbc0a8cc91fb39f69e4491b7567bcf184874ea0c159d0df60b3f917ad` |
 
 交回 Claude：只读本次 PR 的收敛前快照与最终提交，按 PR 决定对照表确认语义未变、无规则遗漏及证据升级；核对上述 SHA-256。只报告具体差异或确认语义未变，不实施、不部署、不交易。回读通过前不合并。历史审阅编号的完整落点表只保存在 PR 描述，不在本文重复维护。

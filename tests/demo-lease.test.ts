@@ -74,7 +74,9 @@ describe('persistent checkout leases', () => {
     await releaseDemoCheckout(session.id, payment.id, first.body.checkoutSessionId)
     expect(await getDemoOperation(session.id, competing.operationId)).toMatchObject({ leaseState: 'active' })
     expect(await getDemoOperation(session.id, original.operationId)).toMatchObject({ leaseState: 'superseded', outcome: 'effective' })
-    await expect(createDemoCheckout(session, payment.id, original, profile)).rejects.toMatchObject(code('CHECKOUT_SESSION_ENDED'))
+    await expect(createDemoCheckout(session, payment.id, original, profile)).rejects.toMatchObject({
+      statusCode: 409, body: { error: { code: 'CHECKOUT_SESSION_ENDED', operationId: original.operationId, checkoutSessionId: first.body.checkoutSessionId, currentView: { id: payment.id } } },
+    })
   })
 
   it('releases idempotently and never revives an ended operation', async () => {
@@ -84,7 +86,9 @@ describe('persistent checkout leases', () => {
     await releaseDemoCheckout(session.id, payment.id, first.body.checkoutSessionId)
     await releaseDemoCheckout(session.id, payment.id, first.body.checkoutSessionId)
     expect(await getDemoOperation(session.id, input.operationId)).toMatchObject({ leaseState: 'released', outcome: 'effective' })
-    await expect(createDemoCheckout(session, payment.id, input, profile)).rejects.toMatchObject(code('CHECKOUT_SESSION_ENDED'))
+    await expect(createDemoCheckout(session, payment.id, input, profile)).rejects.toMatchObject({
+      statusCode: 409, body: { error: { code: 'CHECKOUT_SESSION_ENDED', operationId: input.operationId, checkoutSessionId: first.body.checkoutSessionId, currentView: { id: payment.id } } },
+    })
     await expect(createDemoCheckout(session, payment.id, { operationId: randomUUID(), supersedes: first.body.checkoutSessionId }, profile)).resolves.toMatchObject({ status: 201 })
   })
 
@@ -108,9 +112,38 @@ describe('persistent checkout leases', () => {
     expect(Date.parse(first.body.leaseExpiresAt) - Date.now()).toBeLessThanOrEqual(20_000)
     await database.db.query("UPDATE demo_payments SET sent_at=now()-interval '31 minutes',continue_until=now()-interval '1 minute' WHERE id=$1", [payment.id])
     await expect(createDemoCheckout(session, payment.id, input, profile)).rejects.toMatchObject({
-      ...code('PAYMENT_EXPIRED'), body: { error: { code: 'PAYMENT_EXPIRED', currentView: { id: payment.id, attention: null } } },
+      ...code('PAYMENT_EXPIRED'), body: { error: { code: 'PAYMENT_EXPIRED', operationId: input.operationId, currentView: { id: payment.id, attention: null } } },
     })
-    await expect(createDemoCheckout(session, payment.id, { operationId: randomUUID() }, profile)).rejects.toMatchObject(code('PAYMENT_EXPIRED'))
+    const nextOperationId = randomUUID()
+    await expect(createDemoCheckout(session, payment.id, { operationId: nextOperationId }, profile)).rejects.toMatchObject({
+      statusCode: 409, body: { error: { code: 'PAYMENT_EXPIRED', operationId: nextOperationId, currentView: { id: payment.id } } },
+    })
+  })
+
+  it('echoes the operation when a verified U has no reliable continuation window', async () => {
+    const { session, payment } = await fixture()
+    const input = { operationId: randomUUID() }
+    await database.db.query('UPDATE demo_payments SET sent_at=NULL,continue_until=NULL WHERE id=$1', [payment.id])
+    await expect(createDemoCheckout(session, payment.id, input, profile)).rejects.toMatchObject({
+      statusCode: 409,
+      body: { error: { code: 'PAYMENT_EXPIRED', operationId: input.operationId, currentView: {
+        id: payment.id, status: { verified: true, rawPaymentStatus: 'U' },
+      } } },
+    })
+    expect((await database.db.query('SELECT * FROM demo_leases WHERE payment_id=$1', [payment.id])).rows).toHaveLength(0)
+  })
+
+  it('echoes the operation when the window expires during the launch query', async () => {
+    const { session, payment } = await fixture()
+    const input = { operationId: randomUUID() }
+    mocks.query.mockImplementationOnce(async (_profile, paymentId) => {
+      await database.db.query("UPDATE demo_payments SET sent_at=now()-interval '31 minutes',continue_until=now()-interval '1 second' WHERE id=$1", [payment.id])
+      return { paymentId, ...[...payments.values()].find(row => row.paymentId === paymentId), rawStatus: 'U', status: 'processing' }
+    })
+    await expect(createDemoCheckout(session, payment.id, input, profile)).rejects.toMatchObject({
+      statusCode: 409, body: { error: { code: 'PAYMENT_EXPIRED', operationId: input.operationId, currentView: { id: payment.id } } },
+    })
+    expect((await database.db.query('SELECT * FROM demo_leases WHERE payment_id=$1', [payment.id])).rows).toHaveLength(0)
   })
 
   it('projects lease expiry without rewriting its successful operation outcome', async () => {
@@ -119,7 +152,9 @@ describe('persistent checkout leases', () => {
     const first = await createDemoCheckout(session, payment.id, input, profile)
     await database.db.query("UPDATE demo_leases SET expires_at=now()-interval '1 second' WHERE id=$1", [first.body.checkoutSessionId])
     expect(await getDemoOperation(session.id, input.operationId)).toMatchObject({ leaseState: 'expired', outcome: 'effective' })
-    await expect(createDemoCheckout(session, payment.id, input, profile)).rejects.toMatchObject(code('CHECKOUT_SESSION_ENDED'))
+    await expect(createDemoCheckout(session, payment.id, input, profile)).rejects.toMatchObject({
+      statusCode: 409, body: { error: { code: 'CHECKOUT_SESSION_ENDED', operationId: input.operationId, checkoutSessionId: first.body.checkoutSessionId, currentView: { id: payment.id } } },
+    })
     await expect(createDemoCheckout(session, payment.id, { operationId: randomUUID() }, profile)).resolves.toMatchObject({ status: 201 })
   })
 

@@ -19,9 +19,9 @@ function leaseState(lease: LeaseRow, now = Date.now()): LeaseState {
   return lease.state === 'active' && new Date(lease.expires_at).getTime() <= now ? 'expired' : lease.state
 }
 
-async function requireWindow(client: DemoDatabaseClient, row: PaymentRow): Promise<void> {
+async function requireWindow(client: DemoDatabaseClient, row: PaymentRow, operationId: string): Promise<void> {
   if (row.continue_until && new Date(row.continue_until).getTime() <= Date.now()) {
-    throw new DemoError(409, 'PAYMENT_EXPIRED', { action: 'REFRESH', currentView: await paymentView(client, row) })
+    throw new DemoError(409, 'PAYMENT_EXPIRED', { action: 'REFRESH', operationId, currentView: await paymentView(client, row) })
   }
 }
 
@@ -41,7 +41,7 @@ function checkoutView(row: PaymentRow, lease: LeaseRow): CheckoutSession {
 async function ensureReplay(client: DemoDatabaseClient, row: PaymentRow, operation: OperationRow): Promise<LeaseRow> {
   const lease = await ownedLease(client, row.session_id, row.id, operation.resource_id!)
   if (leaseState(lease) !== 'active') {
-    throw new DemoError(409, 'CHECKOUT_SESSION_ENDED', { action: 'REFRESH', currentView: await paymentView(client, row) })
+    throw new DemoError(409, 'CHECKOUT_SESSION_ENDED', { action: 'REFRESH', operationId: operation.id, checkoutSessionId: lease.id, currentView: await paymentView(client, row) })
   }
   return lease
 }
@@ -53,7 +53,7 @@ export async function createDemoCheckout(session: DemoSession, paymentId: string
   // half-operation, and slow Provider queries do not hold a database row lock.
   await demoTransaction(async (client) => {
     const row = await ownedPayment(client, session.id, paymentId)
-    await requireWindow(client, row)
+    await requireWindow(client, row, operationId)
     if (input.supersedes) await ownedLease(client, session.id, paymentId, input.supersedes)
     let existing: OperationRow | null = null
     try { existing = await readDemoOperation(client, session.id, operationId) }
@@ -72,7 +72,7 @@ export async function createDemoCheckout(session: DemoSession, paymentId: string
   return demoTransaction(async (client) => {
     // All lease mutations use the payment lock, including release and takeover.
     const row = await ownedPayment(client, session.id, paymentId, true)
-    await requireWindow(client, row)
+    await requireWindow(client, row, operationId)
     if (input.supersedes) await ownedLease(client, session.id, paymentId, input.supersedes)
     const claim = await claimDemoOperation(client, { sessionId: session.id, id: operationId, type: 'checkout_session', intent })
     const replay = claim.existing ? await ensureReplay(client, row, claim.operation!) : null
@@ -94,7 +94,7 @@ export async function createDemoCheckout(session: DemoSession, paymentId: string
     }
     const action = view.allowedActions.find(value => value.type === 'CONTINUE_SDK')
     if (!action?.enabled && action?.reasonCode !== 'CHECKOUT_IN_USE') {
-      throw new DemoError(409, action?.reasonCode ?? 'CAPABILITY_UNVERIFIED', { action: 'REFRESH', currentView: view })
+      throw new DemoError(409, action?.reasonCode ?? 'CAPABILITY_UNVERIFIED', { action: 'REFRESH', operationId, currentView: view })
     }
     if (replay) return { status: 200, body: checkoutView(row, replay) }
     await consumeDemoLimit(client, `${session.id}:checkout_session`, 20, 60)
@@ -112,7 +112,7 @@ export async function createDemoCheckout(session: DemoSession, paymentId: string
       SELECT $1,$2,$3,$4,LEAST(clock_timestamp()+interval '2 minutes',$5::timestamptz),'active'
       WHERE $5::timestamptz > clock_timestamp() RETURNING *`,
     [id, paymentId, session.id, operationId, row.continue_until])).rows[0]
-    if (!lease) throw new DemoError(409, 'PAYMENT_EXPIRED', { action: 'REFRESH', currentView: await paymentView(client, row) })
+    if (!lease) throw new DemoError(409, 'PAYMENT_EXPIRED', { action: 'REFRESH', operationId, currentView: await paymentView(client, row) })
     const updated = (await client.query<PaymentRow>('UPDATE demo_payments SET revision=revision+1 WHERE id=$1 RETURNING *', [paymentId])).rows[0]!
     return { status: 201, body: checkoutView(updated, lease) }
   })

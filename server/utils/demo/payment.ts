@@ -59,15 +59,16 @@ export async function paymentView(client: DemoDatabaseClient, row: PaymentRow): 
   const lease = (await client.query("SELECT * FROM demo_leases WHERE payment_id=$1 AND state='active' AND expires_at > now()", [row.id])).rows[0]
   let reason: ActionReason | null = null
   if (row.creation_state !== 'ready') reason = 'CREATION_NOT_READY'
-  else if (!row.continue_until || new Date(row.continue_until).getTime() <= Date.now()) reason = 'PAYMENT_EXPIRED'
   else if (row.raw_payment_status === 'S' || row.raw_payment_status === 'N') reason = 'PAYMENT_TERMINAL'
   else if (row.raw_payment_status === 'P') reason = 'PAYMENT_PROCESSING'
   else if (row.raw_payment_status === 'R') reason = 'EXTERNAL_ACTION_IN_PROGRESS'
   else if (row.raw_payment_status === 'A') reason = 'PAYMENT_AUTHORIZED'
   else if (!row.verified || !['U', 'O'].includes(row.raw_payment_status ?? '')) reason = 'CAPABILITY_UNVERIFIED'
+  else if (!row.continue_until || new Date(row.continue_until).getTime() <= Date.now()) reason = 'PAYMENT_EXPIRED'
   else if (job?.last_error_code) reason = 'PROVIDER_UNAVAILABLE'
   else if (lease) reason = 'CHECKOUT_IN_USE'
-  const refreshState = job?.state === 'running' ? 'running' : job?.last_error_code ? 'failed' : job?.state === 'pending' ? 'queued' : 'idle'
+  const due = job?.state === 'pending' && new Date(job.due_at).getTime() <= Date.now()
+  const refreshState = job?.state === 'running' ? 'running' : job?.last_error_code ? 'failed' : due ? 'queued' : 'idle'
   return {
     id: row.id, requestId: row.request_id, merchantTxnId: row.merchant_txn_id,
     sceneId: 'one_time', integration: 'native-sdk', txnType: 'SALE', platform: row.platform,
@@ -82,7 +83,8 @@ export async function paymentView(client: DemoDatabaseClient, row: PaymentRow): 
       rawPaymentStatus: row.raw_payment_status, rawTransactionStatus: row.raw_transaction_status },
     allowedActions: [reason ? { type: 'CONTINUE_SDK', enabled: false, reasonCode: reason } : { type: 'CONTINUE_SDK', enabled: true, reasonCode: null },
       { type: 'QUERY', enabled: true, reasonCode: null }],
-    attention: row.creation_state === 'unknown' || row.creation_state === 'pending' ? { kind: 'creation_unknown' } : !reason ? { kind: 'continue_sdk' } : null,
+    attention: row.creation_state === 'unknown' || row.creation_state === 'pending' ? { kind: 'creation_unknown' }
+      : !reason || (row.creation_state === 'ready' && !row.verified) ? { kind: 'continue_sdk' } : null,
     refresh: { state: refreshState, lastAttemptAt: job?.last_attempt_at ? iso(job.last_attempt_at) : null,
       lastErrorCode: job?.last_error_code ?? null, pollAfterSeconds: refreshState === 'idle' ? null : 5 },
   }
@@ -135,11 +137,11 @@ export async function createDemoPayment(session: DemoSession, input: PaymentCrea
     await enqueuePayment(client, id)
     return { row, fresh: true }
   })
-  if (accepted.fresh) {
+  if (accepted.row.sent_at === null) {
     // Claim the send before network I/O. A crash in this gap is unknown, never a licence to resend.
     const sending = await demoTransaction(async (client) => {
       const row = (await client.query<PaymentRow>(`UPDATE demo_payments SET sent_at=now(),continue_until=now()+interval '30 minutes',creation_state='unknown',revision=revision+1 WHERE id=$1 AND sent_at IS NULL RETURNING *`, [accepted.row.id])).rows[0]
-      await client.query("UPDATE demo_operations SET execution='unknown' WHERE id=$1", [input.requestId])
+      if (row) await client.query("UPDATE demo_operations SET execution='unknown' WHERE id=$1", [input.requestId])
       return row
     })
     if (sending) {
@@ -162,7 +164,10 @@ export async function createDemoPayment(session: DemoSession, input: PaymentCrea
       }
     }
   }
-  const body = await getDemoPayment(session.id, accepted.row.id, profile, { process: false })
+  // A linked creation is not yet a verified payment state. Query once before
+  // returning a ready view; uncertain creation still recovers through its job.
+  const linked = await demoTransaction(client => ownedPayment(client, session.id, accepted.row.id))
+  const body = await getDemoPayment(session.id, linked.id, profile, { process: linked.creation_state === 'ready' })
   return { status: body.creationState !== 'ready' ? 202 : accepted.fresh ? 201 : 200, body }
 }
 
@@ -191,7 +196,7 @@ export async function listDemoPayments(sessionId: string, query: { limit?: numbe
   const rows = await demoTransaction(async client => (await client.query<PaymentRow>(`SELECT p.* FROM demo_payments p WHERE session_id=$1 AND expires_at>now()
     AND ($2::timestamptz IS NULL OR (created_at,id)<($2::timestamptz,$3::text))
     AND ($4::text IS NULL OR merchant_txn_id=$4) AND ($5::text IS NULL OR customer_id=$5)
-    AND ($6::boolean=false OR creation_state IN ('pending','unknown') OR
+    AND ($6::boolean=false OR creation_state IN ('pending','unknown') OR (creation_state='ready' AND NOT verified) OR
       (creation_state='ready' AND raw_payment_status IN ('U','O') AND verified AND continue_until>now()
        AND NOT EXISTS(SELECT 1 FROM demo_leases l WHERE l.payment_id=p.id AND l.state='active' AND l.expires_at>now())
        AND NOT EXISTS(SELECT 1 FROM demo_jobs j WHERE j.payment_id=p.id AND j.last_error_code IS NOT NULL)))

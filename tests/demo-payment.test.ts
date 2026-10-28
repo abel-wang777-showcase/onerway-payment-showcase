@@ -89,6 +89,97 @@ async function storedJob(id: string) { return (await database.db.query('SELECT *
 
 /** This suite exercises real local PostgreSQL SQL; all Provider I/O is controlled and cannot reach a network. */
 describe('Native SALE application persistence', () => {
+  it('returns verified ready views for initial creation and original-key replay', async () => {
+    const owner = await session()
+    const request = input()
+    const created = await createDemoPayment(owner, request, profile)
+    expect(created.status).toBe(201)
+    const replay = await createDemoPayment(owner, request, profile)
+    expect(replay.status).toBe(200)
+    for (const response of [created, replay]) {
+      expect(response.body).toMatchObject({
+        creationState: 'ready',
+        status: { normalized: 'processing', rawPaymentStatus: 'U', source: 'query', verified: true },
+        refresh: { state: 'idle', pollAfterSeconds: null },
+      })
+      expect(response.body.allowedActions).toContainEqual({ type: 'CONTINUE_SDK', enabled: true, reasonCode: null })
+      assertDemoSchema('PaymentView', response.body)
+    }
+    expect(replay.body.id).toBe(created.body.id)
+    expect(mocks.create).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps an unverified ready payment in needs-attention and recovers through its due list job', async () => {
+    const owner = await session()
+    mocks.recover.mockRejectedValueOnce(new Error('CONTROLLED_FIRST_QUERY_FAILURE'))
+    const created = await createDemoPayment(owner, input(), profile)
+    expect(created.status).toBe(201)
+    expect(created.body).toMatchObject({ creationState: 'ready', status: { verified: false }, refresh: { state: 'failed' } })
+    expect(created.body.allowedActions).toContainEqual({ type: 'CONTINUE_SDK', enabled: false, reasonCode: 'CAPABILITY_UNVERIFIED' })
+    const waiting = await listDemoPayments(owner.id, { filter: 'needs-attention' }, profile)
+    expect(waiting.items.map(item => item.id)).toEqual([created.body.id])
+    expect(waiting.items[0]!.status.verified).toBe(false)
+    await database.transaction(client => enqueuePayment(client, created.body.id))
+    const recovered = await listDemoPayments(owner.id, { filter: 'needs-attention' }, profile)
+    expect(recovered.items.map(item => item.id)).toEqual([created.body.id])
+    expect(recovered.items[0]!.status.verified).toBe(true)
+    expect(recovered.items[0]!.allowedActions).toContainEqual({ type: 'CONTINUE_SDK', enabled: true, reasonCode: null })
+    expect(mocks.create).toHaveBeenCalledTimes(1)
+  })
+
+  it.each(['U', 'O', 'R', 'N'])('exposes only due pending jobs as queued for %s', async (rawStatus) => {
+    const owner = await session()
+    const created = await createDemoPayment(owner, input(), profile)
+    const fixture = provider.get(created.body.merchantTxnId)!
+    fixture.paymentStatus = rawStatus
+    const refreshed = await getDemoPayment(owner.id, created.body.id, profile, { refresh: true })
+    expect(refreshed.status.rawPaymentStatus).toBe(rawStatus)
+    expect(refreshed.refresh).toMatchObject({ state: 'idle', pollAfterSeconds: null })
+    expect((await storedJob(created.body.id)).state).toBe('pending')
+    const queries = mocks.query.mock.calls.length
+    const read = await getDemoPayment(owner.id, created.body.id, profile)
+    expect(read.refresh).toMatchObject({ state: 'idle', pollAfterSeconds: null })
+    expect(mocks.query).toHaveBeenCalledTimes(queries)
+    await database.transaction(client => enqueuePayment(client, created.body.id))
+    const queued = await getDemoPayment(owner.id, created.body.id, profile, { process: false })
+    expect(queued.refresh).toMatchObject({ state: 'queued', pollAfterSeconds: 5 })
+  })
+
+  it.each([
+    ['S', 'PAYMENT_TERMINAL'], ['N', 'PAYMENT_TERMINAL'], ['P', 'PAYMENT_PROCESSING'],
+    ['R', 'EXTERNAL_ACTION_IN_PROGRESS'], ['A', 'PAYMENT_AUTHORIZED'],
+    ['U', 'PAYMENT_EXPIRED'], ['O', 'PAYMENT_EXPIRED'], ['I', 'CAPABILITY_UNVERIFIED'],
+  ])('preserves the %s action reason after the conservative window expires', async (rawStatus, reasonCode) => {
+    const owner = await session()
+    const created = await createDemoPayment(owner, input(), profile)
+    const fixture = provider.get(created.body.merchantTxnId)!
+    fixture.paymentStatus = rawStatus!
+    if (rawStatus === 'S') fixture.transactionStatus = 'S'
+    await database.db.query("UPDATE demo_payments SET sent_at=now()-interval '31 minutes',continue_until=now()-interval '1 second' WHERE id=$1", [created.body.id])
+    const refreshed = await getDemoPayment(owner.id, created.body.id, profile, { refresh: true })
+    expect(refreshed.allowedActions).toContainEqual({ type: 'CONTINUE_SDK', enabled: false, reasonCode })
+  })
+
+  it('resumes an accepted but unsent original request after a crash without duplicating the Provider send', async () => {
+    const owner = await session()
+    const request = input()
+    // The acceptance transaction commits, then the process fails before claiming a send.
+    mocks.transaction.mockImplementationOnce(database.transaction).mockRejectedValueOnce(new Error('CONTROLLED_BEFORE_SEND_CRASH'))
+    await expect(createDemoPayment(owner, request, profile)).rejects.toThrow('CONTROLLED_BEFORE_SEND_CRASH')
+    const before = (await database.db.query('SELECT id,sent_at,creation_state FROM demo_payments WHERE request_id=$1', [request.requestId])).rows[0]!
+    expect(before).toMatchObject({ sent_at: null, creation_state: 'pending' })
+    expect(mocks.create).not.toHaveBeenCalled()
+    const results = await Promise.all([createDemoPayment(owner, request, profile), createDemoPayment(owner, request, profile)])
+    expect(results.every(result => result.body.id === before.id)).toBe(true)
+    expect(mocks.create).toHaveBeenCalledTimes(1)
+    const replay = await createDemoPayment(owner, request, profile)
+    expect(replay.status).toBe(200)
+    expect(replay.body).toMatchObject({ id: before.id, creationState: 'ready', status: { rawPaymentStatus: 'U', verified: true } })
+    const operation = (await database.db.query('SELECT execution,outcome FROM demo_operations WHERE id=$1', [request.requestId])).rows[0]
+    expect(operation).toEqual({ execution: 'completed', outcome: 'effective' })
+    expect(mocks.create).toHaveBeenCalledTimes(1)
+  })
+
   it('claims concurrent identical requests once and preserves one order/attempt/provider creation', async () => {
     const owner = await session()
     const request = input()
@@ -203,13 +294,14 @@ describe('Native SALE application persistence', () => {
     const owner = await session()
     const created = await createDemoPayment(owner, input(), profile)
     mocks.recover.mockRejectedValueOnce(new Error('CONTROLLED_TIMEOUT'))
+    await database.transaction(client => enqueuePayment(client, created.body.id))
     await runPaymentJob(profile, created.body.id)
     const failed = await storedJob(created.body.id)
-    expect(failed).toMatchObject({ state: 'pending', last_error_code: 'PROVIDER_UNAVAILABLE', attempts: 1, lease_until: null })
+    expect(failed).toMatchObject({ state: 'pending', last_error_code: 'PROVIDER_UNAVAILABLE', attempts: 2, lease_until: null })
     await database.db.query("UPDATE demo_jobs SET state='running',lease_until=now()-interval '1 second',due_at=now()-interval '1 second' WHERE payment_id=$1", [created.body.id])
     expect(await runPaymentJob(profile, created.body.id)).toBe(true)
     const recovered = await storedJob(created.body.id)
-    expect(recovered).toMatchObject({ state: 'pending', last_error_code: null, attempts: 2, lease_until: null })
+    expect(recovered).toMatchObject({ state: 'pending', last_error_code: null, attempts: 3, lease_until: null })
     expect(mocks.create).toHaveBeenCalledTimes(1)
   })
 
@@ -228,6 +320,7 @@ describe('Native SALE application persistence', () => {
       await gate
       return { paymentId: fixture.paymentId, transactionId: fixture.transactionId, rawStatus: 'S', status: 'succeeded' }
     })
+    await database.transaction(client => enqueuePayment(client, created.body.id))
     const running = runPaymentJob(profile, created.body.id)
     await start
     const before = await storedJob(created.body.id)
@@ -254,6 +347,7 @@ describe('Native SALE application persistence', () => {
       await gate
       return { paymentId: fixture.paymentId, transactionId: fixture.transactionId, rawStatus: 'U', status: 'processing' }
     })
+    await database.transaction(client => enqueuePayment(client, created.body.id))
     const staleWorker = runPaymentJob(profile, created.body.id)
     await start
     await database.db.query("UPDATE demo_jobs SET lease_until=now()-interval '1 second',due_at=now()-interval '1 second' WHERE payment_id=$1", [created.body.id])
@@ -300,12 +394,13 @@ describe('Native SALE application persistence', () => {
       status: 'succeeded', occurredAt: new Date().toISOString(),
     }
     const before = await storedJob(created.body.id)
+    const queryCount = mocks.query.mock.calls.length
     expect(await recordDemoWebhook(fact)).toBe(created.body.id)
-    expect(mocks.query).not.toHaveBeenCalled()
+    expect(mocks.query).toHaveBeenCalledTimes(queryCount)
     const after = await storedJob(created.body.id)
     expect(Number(after.revision)).toBe(Number(before.revision) + 1)
     expect(after.state).toBe('pending')
-    expect((await getDemoPayment(owner.id, created.body.id, profile, { process: false })).status.verified).toBe(false)
+    expect((await getDemoPayment(owner.id, created.body.id, profile, { process: false })).status).toEqual(created.body.status)
     const events = await database.db.query("SELECT * FROM demo_events WHERE payment_id=$1 AND source='webhook'", [created.body.id])
     expect(events.rows).toHaveLength(1)
     expect(Object.keys(events.rows[0]!).sort()).toEqual(['id', 'kind', 'occurred_at', 'payment_id', 'raw_status', 'source'])
@@ -328,8 +423,8 @@ describe('Native SALE application persistence', () => {
       expect(view.id).toBe(created.body.id)
       expect(view.creationState).toBe('ready')
       expect(view.status.rawPaymentStatus).toBe('U')
-      if (index === 9) lastVerified = view
-      if (index >= 10) expect(view.status).toEqual(lastVerified.status)
+      if (index === 8) lastVerified = view
+      if (index >= 9) expect(view.status).toEqual(lastVerified.status)
     }
     expect(mocks.query).toHaveBeenCalledTimes(10)
     expect(mocks.recover).toHaveBeenCalledTimes(10)
@@ -359,6 +454,7 @@ describe('Native SALE application persistence', () => {
       const fixture = provider.get(created.body.merchantTxnId)!
       fixture.paymentStatus = 'S'
       fixture.transactionStatus = 'S'
+      await database.transaction(client => enqueuePayment(client, created.body.id))
     }
     expect(await runDemoMaintenance(profile, 0, 2)).toMatchObject({ processed: 0, deleted: 0 })
     expect(await runDemoMaintenance(profile, 60_000, 2)).toMatchObject({ processed: 2, deleted: 0 })
