@@ -61,6 +61,34 @@ pnpm dev
 
 默认开发地址为 `http://localhost:3000`。
 
+### Native SDK SALE 后端本地验收
+
+首批 v1 只提供 Android/iOS 的 Native SDK SALE 后端，旧 Web 支付入口仍保留。Web Cookie/CSRF、AUTH、订阅和其他集成按后续批次接入。
+
+无需商户凭据或远程数据库的受控验收，在仓库根目录运行：
+
+```bash
+pnpm install --frozen-lockfile
+pnpm exec nuxt prepare
+pnpm exec vitest run tests/demo-contract.test.ts tests/demo-identity.test.ts tests/demo-payment.test.ts tests/demo-lease.test.ts tests/demo-flow.test.ts
+```
+
+`demo-flow` 启动临时的 `http://127.0.0.1:<系统分配端口>/api/demo/v1` HTTP 服务，使用本地 PGlite PostgreSQL 和受控 Provider mock；测试结束即关闭，不向真实 Sandbox 发送请求。它验证以下入口与结果：
+
+| 入口 | 操作 | 预期结果 |
+| --- | --- | --- |
+| `/sessions` → `/customers` | 创建会话、客户并选择客户 | 期限在响应头；客户只属于本会话 |
+| `/payments` → `/payment-requests/{requestId}` | 创建及原键恢复 | 同一支付，Provider 创建最多一次；意图冲突 409 |
+| `/payments/{id}` → `/refresh` | 查询未知创建及支付结果 | 只查询原交易；失败保留原可信视图 |
+| `/checkout-session` → `/checkout-sessions/{id}` | 领取、接替、释放 | 并发互斥；释放旧租约不释放新租约；窗口到期 409 |
+| `/operations/{operationId}` | 恢复原操作 | 返回原资源及执行结果；租约结束不改写历史成功 |
+
+应用开发启动命令仍为 `pnpm dev`，地址 `http://localhost:3000`；实际 v1 需服务端 Sandbox profile、已迁移的隔离数据库和 `X-Demo-Client: ANDROID/<build>` 或 `IOS/<build>`。该启动命令不提供公开 mock 开关。真实支付、部署和远程数据库迁移另行授权。
+
+`DEMO_MIN_CLIENT_BUILD_ANDROID` / `DEMO_MIN_CLIENT_BUILD_IOS` 可设服务端最低整数构建号；缺省为 0（未设置版本下限）。不兼容客户端仍能查询和恢复已认领操作，不能新建支付或领取新启动租约。
+
+本地 PostgreSQL 测试覆盖 SQL 和受控交错，不能证明 Neon 多实例并发；隔离 Neon CI 的并发测试及真实 Sandbox 联调分别记录证据。
+
 ## 质量门
 
 提交前运行：

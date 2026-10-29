@@ -32,6 +32,8 @@
     "@nuxt/ui": "^4.9.0",
     "@speed-highlight/core": "1.2.17",
     "@vueuse/core": "^14.3.0",
+    "ajv": "^8",
+    "ajv-formats": "^3",
     "h3": "^1.15.11",
     "nuxt": "4.5.2",
     "reka-ui": "2.10.1",
@@ -40,6 +42,7 @@
     "vue-router": "^5.1.0"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.5.12",
     "@nuxt/eslint": "^1.16.0",
     "@nuxt/test-utils": "^4.1.0",
     "@playwright/test": "^1.62.1",

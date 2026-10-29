@@ -1068,7 +1068,7 @@
     },
     {
       "name": "checkout-session-pending",
-      "description": "",
+      "description": "契约预留示例，首批实现不会返回此 202：当前租约操作同步完成或返回结构化错误，不持久受理 pending 租约操作。",
       "method": "POST",
       "path": "/payments/{id}/checkout-session",
       "request": {
@@ -1870,7 +1870,7 @@
     },
     {
       "name": "provider-create-unknown",
-      "description": "结构化 504 明确上游创建可能已执行，恢复原 operationId；不能换键或重新扣款。",
+      "description": "契约预留示例，首批实现不会返回此 504：当前创建结果未知时返回 202 PaymentView 并查询恢复。此结构化 504 表示上游创建可能已执行，须恢复原 operationId，不能换键或重新扣款。",
       "method": "POST",
       "path": "/payments",
       "request": {
@@ -2448,6 +2448,190 @@
           "currentCustomerId": "cus_example"
         },
         "schema": "PaymentView"
+      }
+    },
+    {
+      "name": "checkout-window-expired",
+      "description": "保守继续窗口到期后的首次领取；只返回可查询视图，不能启动 SDK。",
+      "method": "POST",
+      "path": "/payments/{id}/checkout-session",
+      "request": {
+        "headers": {
+          "X-Demo-Client": "ANDROID/1"
+        },
+        "parameters": {
+          "id": "pay_example"
+        },
+        "body": {
+          "operationId": "44444444-4444-4444-8444-444444444444"
+        },
+        "schema": "CheckoutSessionCreate"
+      },
+      "response": {
+        "status": 409,
+        "headers": {
+          "Cache-Control": "no-store",
+          "X-Demo-Session-Expires-At": "2026-11-24T00:00:00Z"
+        },
+        "body": {
+          "error": {
+            "code": "PAYMENT_EXPIRED",
+            "retryable": false,
+            "action": "REFRESH",
+            "retryAfter": null,
+            "execution": "not_started",
+            "fieldErrors": [],
+            "currentView": {
+              "id": "pay_example",
+              "requestId": "11111111-1111-4111-8111-111111111111",
+              "merchantTxnId": "demo_txn_example",
+              "sceneId": "one_time",
+              "revision": 1,
+              "platform": "ANDROID",
+              "integration": "native-sdk",
+              "txnType": "SALE",
+              "customerId": "cus_example",
+              "amount": {
+                "minor": 500,
+                "currency": "USD"
+              },
+              "createdAt": "2026-10-25T00:00:00Z",
+              "creationState": "ready",
+              "provider": {
+                "merchantNo": "merchant_public_example",
+                "paymentId": "provider_payment_example"
+              },
+              "status": {
+                "normalized": "processing",
+                "rawPaymentStatus": "U",
+                "rawTransactionStatus": null,
+                "source": "query",
+                "verified": true,
+                "observedAt": "2026-10-25T00:00:00Z",
+                "isTerminal": false
+              },
+              "fundsState": "not_applicable",
+              "attention": null,
+              "recordExpiresAt": "2026-11-24T00:00:00Z",
+              "providerExpiresAt": null,
+              "refresh": {
+                "state": "idle",
+                "lastAttemptAt": "2026-10-25T00:00:00Z",
+                "lastErrorCode": null,
+                "pollAfterSeconds": null
+              },
+              "allowedActions": [
+                {
+                  "type": "QUERY",
+                  "enabled": true,
+                  "reasonCode": null
+                },
+                {
+                  "type": "CONTINUE_SDK",
+                  "enabled": false,
+                  "reasonCode": "PAYMENT_EXPIRED"
+                }
+              ],
+              "currentCustomerId": "cus_example"
+            },
+            "operationId": "44444444-4444-4444-8444-444444444444",
+            "checkoutSessionId": null,
+            "leaseExpiresAt": null
+          }
+        },
+        "schema": "ErrorEnvelope"
+      }
+    },
+    {
+      "name": "checkout-window-expired-replay",
+      "description": "保守继续窗口到期时原租约也已到期（租约期限不晚于继续窗口）；原键回读优先返回 PAYMENT_EXPIRED，不能绕过过期门禁。",
+      "method": "POST",
+      "path": "/payments/{id}/checkout-session",
+      "request": {
+        "headers": {
+          "X-Demo-Client": "ANDROID/1"
+        },
+        "parameters": {
+          "id": "pay_example"
+        },
+        "body": {
+          "operationId": "22222222-2222-4222-8222-222222222222"
+        },
+        "schema": "CheckoutSessionCreate"
+      },
+      "response": {
+        "status": 409,
+        "headers": {
+          "Cache-Control": "no-store",
+          "X-Demo-Session-Expires-At": "2026-11-24T00:00:00Z"
+        },
+        "body": {
+          "error": {
+            "code": "PAYMENT_EXPIRED",
+            "retryable": false,
+            "action": "REFRESH",
+            "retryAfter": null,
+            "execution": "not_started",
+            "fieldErrors": [],
+            "currentView": {
+              "id": "pay_example",
+              "requestId": "11111111-1111-4111-8111-111111111111",
+              "merchantTxnId": "demo_txn_example",
+              "sceneId": "one_time",
+              "revision": 1,
+              "platform": "ANDROID",
+              "integration": "native-sdk",
+              "txnType": "SALE",
+              "customerId": "cus_example",
+              "amount": {
+                "minor": 500,
+                "currency": "USD"
+              },
+              "createdAt": "2026-10-25T00:00:00Z",
+              "creationState": "ready",
+              "provider": {
+                "merchantNo": "merchant_public_example",
+                "paymentId": "provider_payment_example"
+              },
+              "status": {
+                "normalized": "processing",
+                "rawPaymentStatus": "U",
+                "rawTransactionStatus": null,
+                "source": "query",
+                "verified": true,
+                "observedAt": "2026-10-25T00:00:00Z",
+                "isTerminal": false
+              },
+              "fundsState": "not_applicable",
+              "attention": null,
+              "recordExpiresAt": "2026-11-24T00:00:00Z",
+              "providerExpiresAt": null,
+              "refresh": {
+                "state": "idle",
+                "lastAttemptAt": "2026-10-25T00:00:00Z",
+                "lastErrorCode": null,
+                "pollAfterSeconds": null
+              },
+              "allowedActions": [
+                {
+                  "type": "QUERY",
+                  "enabled": true,
+                  "reasonCode": null
+                },
+                {
+                  "type": "CONTINUE_SDK",
+                  "enabled": false,
+                  "reasonCode": "PAYMENT_EXPIRED"
+                }
+              ],
+              "currentCustomerId": "cus_example"
+            },
+            "operationId": "22222222-2222-4222-8222-222222222222",
+            "checkoutSessionId": null,
+            "leaseExpiresAt": null
+          }
+        },
+        "schema": "ErrorEnvelope"
       }
     }
   ]
