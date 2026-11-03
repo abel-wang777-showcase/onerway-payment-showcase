@@ -83,7 +83,7 @@ pnpm exec vitest run tests/demo-contract.test.ts tests/demo-identity.test.ts tes
 | `/checkout-session` → `/checkout-sessions/{id}` | 领取、接替、释放 | 并发互斥；释放旧租约不释放新租约；窗口到期 409 |
 | `/operations/{operationId}` | 恢复原操作 | 返回原资源及执行结果；租约结束不改写历史成功 |
 
-应用开发启动命令仍为 `pnpm dev`，地址 `http://localhost:3000`；实际 v1 需服务端 Sandbox profile、已迁移的隔离数据库和 `X-Demo-Client: ANDROID/<build>` 或 `IOS/<build>`。该启动命令不提供公开 mock 开关。真实支付、部署和远程数据库迁移另行授权。
+应用开发启动命令仍为 `pnpm dev`，地址 `http://localhost:3000`；实际 v1 需服务端 Sandbox profile、已迁移的隔离数据库和 `X-Demo-Client: ANDROID/<build>` 或 `IOS/<build>`。该启动命令不提供公开 mock 开关。真实支付按对应交易授权执行；合并、既有自动部署及迁移遵循 `AGENTS.md` 的「交付授权与项目门禁」，不从本地 mock 验收推定真实链路已通过。
 
 `DEMO_MIN_CLIENT_BUILD_ANDROID` / `DEMO_MIN_CLIENT_BUILD_IOS` 可设服务端最低整数构建号；缺省为 0（未设置版本下限）。不兼容客户端仍能查询和恢复已认领操作，不能新建支付或领取新启动租约。
 
@@ -91,7 +91,7 @@ pnpm exec vitest run tests/demo-contract.test.ts tests/demo-identity.test.ts tes
 
 ## 质量门
 
-提交前运行：
+代码变更提交前运行以下质量检查；纯文档变更检查 diff、引用及规则一致性，无需为此重复运行无关应用测试。远端两个 exact-SHA CI 门禁仍须成功：
 
 ```bash
 pnpm lint
@@ -106,7 +106,7 @@ GitHub Actions 将通用质量门与 `Neon integration` 分开运行。两者都
 
 ## 单人演示前检查
 
-按顺序完成以下检查；任一项不满足时停止真实 Sandbox 演示，不通过重复提交付款来探测故障：
+首次演示及涉及支付链路、SDK release / hash 或部署边界的变更，按下列清单确定本次必验项。常规交付核验第 1–6 项及受影响入口；第 7–8 项按本次改动和承诺执行，已有且仍适用的证据可以复用。SDK 更新仍须完成下文规定的两条真实黄金路径。真实交易和设备操作沿用各自授权，清单本身不新增授权。必验项未通过时停止受影响的真实 Sandbox 演示，不通过重复提交付款探测故障；无关历史待验项不自动阻断本次交付。
 
 1. `git fetch origin` 后记录 `git rev-parse origin/main` 的完整 40 位 SHA。
 2. 用 `gh run list --workflow ci.yml --branch main --commit <sha>` 与 `gh run list --workflow payment-db.yml --branch main --commit <sha>` 回读同一 SHA 的 `Quality (exact head)` 和 `Neon integration` 均成功。
